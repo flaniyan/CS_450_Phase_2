@@ -1,91 +1,104 @@
 from __future__ import annotations
 
 import argparse
-import json
-import logging
+import re
+import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parent
 SRC_DIR = ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from acmecli.cache import InMemoryCache
-from acmecli.cli import classify, process_url, setup_logging
-from acmecli.github_handler import GitHubHandler
-from acmecli.hf_handler import HFHandler
-
-SUPPORTED_SOURCES = {"MODEL_GITHUB", "MODEL_HF"}
 
 
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Score repositories listed in a URL file and emit NDJSON records.",
+        description="Utility entrypoint for installing dependencies, running tests, and scoring URL files.",
     )
-    parser.add_argument(
-        "-i",
-        "--input",
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("install", help="Install the project in editable mode using pip.")
+    subparsers.add_parser("test", help="Run the pytest suite with coverage enabled.")
+
+    score_parser = subparsers.add_parser(
+        "score",
+        help="Score repositories listed in the provided URL file and emit NDJSON to stdout.",
+    )
+    score_parser.add_argument(
+        "url_file",
+        nargs="?",
         default="urls.txt",
-        help="Path to a text file containing one URL per line (default: urls.txt).",
+        help="Path to a file containing one URL per line (defaults to urls.txt).",
     )
-    return parser.parse_args(list(argv) if argv is not None else None)
+
+    return parser.parse_args(argv)
 
 
-def iter_urls(path: Path) -> Iterable[str]:
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        url = raw_line.strip()
-        if url:
-            yield url
+def do_install() -> int:
+    cmd = [sys.executable, "-m", "pip", "install", "-e", str(ROOT)]
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as exc:
+        return exc.returncode
+    return 0
 
 
-def build_record(url: str, net_score: float, latency_ms: float, name: str) -> dict[str, object]:
-    return {
-        "model": name,
-        "urls": [url],
-        "NET_SCORE": round(net_score * 100.0, 1),
-        "LATENCY": round(float(latency_ms), 1),
-    }
+def do_test() -> int:
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests",
+        "--maxfail=1",
+        "--disable-warnings",
+        "--cov=acmecli",
+        "--cov-report=term-missing",
+    ]
+    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+    output = (proc.stdout or "") + (proc.stderr or "")
+    collected = re.search(r"collected\s+(\d+)", output)
+    passed = re.search(r"(\d+)\s+passed", output)
+    coverage = re.search(r"TOTAL\s+.*?(\d+)%", output)
+
+    total = int(collected.group(1)) if collected else 0
+    success = int(passed.group(1)) if passed else 0
+    cov_percent = int(coverage.group(1)) if coverage else 0
+
+    print(f"{success}/{total} test cases passed. {cov_percent}% line coverage achieved.")
+    if proc.returncode != 0 and output:
+        print(output)
+    return proc.returncode
 
 
-def main(argv: Iterable[str] | None = None) -> int:
-    args = parse_args(argv)
-    setup_logging()
-
-    urls_path = Path(args.input)
-    if not urls_path.exists():
-        print(f"URL file not found: {urls_path}", file=sys.stderr)
+def do_score(url_file: str) -> int:
+    url_path = Path(url_file)
+    if not url_path.exists():
+        print(f"URL file not found: {url_file}", file=sys.stderr)
         return 1
 
-    github_handler = GitHubHandler()
-    hf_handler = HFHandler()
-    cache = InMemoryCache()
+    if str(SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(SRC_DIR))
 
-    emitted = 0
-    for url in iter_urls(urls_path):
-        source_kind = classify(url)
-        if source_kind not in SUPPORTED_SOURCES:
-            logging.debug("Skipping unsupported URL: %s", url)
-            continue
+    from acmecli.cli import main as cli_main  # imported lazily to ensure src is on sys.path
 
-        try:
-            row = process_url(url, github_handler, hf_handler, cache)
-        except Exception as exc:  # pragma: no cover - defensive safety
-            logging.error("Failed to process %s: %s", url, exc)
-            continue
+    return cli_main(["run", str(url_path)])
 
-        if not row:
-            logging.warning("No data produced for %s", url)
-            continue
 
-        record = build_record(url, row.net_score, row.net_score_latency, row.name)
-        print(json.dumps(record, ensure_ascii=False))
-        emitted += 1
+def main(argv: Sequence[str] | None = None) -> int:
+    raw_args = list(argv) if argv is not None else sys.argv[1:]
+    if not raw_args:
+        return do_score("urls.txt")
 
-    if emitted == 0:
-        logging.warning("No NDJSON records were emitted.")
-    return 0
+    args = parse_args(raw_args)
+
+    if args.command == "install":
+        return do_install()
+    if args.command == "test":
+        return do_test()
+    if args.command == "score":
+        return do_score(args.url_file)
+
+    raise RuntimeError("Unhandled command")
 
 
 if __name__ == "__main__":
