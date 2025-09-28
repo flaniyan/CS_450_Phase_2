@@ -1,0 +1,10 @@
+https://github.com/pallets/flask
+https://github.com/tiangolo/fastapi
+https://github.com/huggingface/transformers
+https://github.com/psf/requests
+https://huggingface.co/gpt2
+https://huggingface.co/facebook/bart-large
+https://huggingface.co/google/vit-base-patch16-224
+https://github.com/numpy/numpy
+https://github.com/scikit-learn/scikit-learn
+https://github.com/pytorch/pytorch

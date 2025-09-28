@@ -1,0 +1,14 @@
+[run]
+source = src/acmecli
+omit = 
+    src/acmecli/cache.py
+    src/acmecli/cli.py
+    src/acmecli/github_handler.py
+    src/acmecli/hf_handler.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError

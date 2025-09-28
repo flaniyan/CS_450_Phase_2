@@ -1,0 +1,120 @@
+import sys
+from pathlib import Path
+import logging
+import os
+import json
+import concurrent.futures
+from .types import ReportRow
+from .reporter import write_ndjson
+from .metrics.base import REGISTRY
+from .github_handler import GitHubHandler
+from .hf_handler import HFHandler
+from .cache import InMemoryCache
+from .scoring import compute_net_score
+
+def setup_logging():
+    log_file = os.environ.get("LOG_FILE")
+    log_level = int(os.environ.get("LOG_LEVEL", "0"))
+    level = logging.ERROR if log_level == 0 else (logging.INFO if log_level == 1 else logging.DEBUG)
+    if log_file:
+        logging.basicConfig(filename=log_file, level=level, format="%(asctime)s %(levelname)s %(message)s")
+    else:
+        logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(message)s")
+
+def classify(url: str) -> str:
+    u = url.strip().lower()
+    if "huggingface.co/datasets/" in u:
+        return "DATASET"
+    if "github.com/" in u:
+        return "MODEL_GITHUB"
+    if "huggingface.co/" in u:
+        return "MODEL_HF"
+    return "CODE"
+
+def process_url(url: str, github_handler, hf_handler, cache):
+    if classify(url) == "MODEL_GITHUB":
+        repo_name = url.split("/")[-1]
+        meta = github_handler.fetch_meta(url)
+    elif classify(url) == "MODEL_HF":
+        repo_name = url.split("/")[-1]
+        meta = hf_handler.fetch_meta(url)
+    else:
+        return None
+
+    if not meta:
+        return None
+
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_metric = {
+            executor.submit(m.score, meta): m.name for m in REGISTRY
+        }
+        for future in concurrent.futures.as_completed(future_to_metric):
+            metric_name = future_to_metric[future]
+            try:
+                mv = future.result()
+                results[metric_name] = mv
+            except Exception as e:
+                logging.error(f"Error computing metric {metric_name}: {e}")
+                # Create a default MetricValue for failed metrics
+                from .types import MetricValue
+                results[metric_name] = MetricValue(metric_name, 0.0, 0)
+    
+    net_score, net_score_latency = compute_net_score(results)
+    
+    # Helper function to safely get metric values
+    def get_metric_value(name, default=0.0):
+        metric = results.get(name)
+        return metric.value if metric else default
+    
+    def get_metric_latency(name, default=0):
+        metric = results.get(name)
+        return metric.latency_ms if metric else default
+    
+    # Handle size_score specially since it returns a dict
+    size_result = results.get('size_score')
+    size_score_value = size_result.value if size_result else {
+        'raspberry_pi': 0.0, 'jetson_nano': 0.0, 'desktop_pc': 0.0, 'aws_server': 0.0
+    }
+    
+    return ReportRow(
+        name=repo_name,
+        category="MODEL",
+        net_score=net_score,
+        net_score_latency=net_score_latency,
+        ramp_up_time=get_metric_value('ramp_up_time'),
+        ramp_up_time_latency=get_metric_latency('ramp_up_time'),
+        bus_factor=get_metric_value('bus_factor'),
+        bus_factor_latency=get_metric_latency('bus_factor'),
+        performance_claims=get_metric_value('performance_claims'),
+        performance_claims_latency=get_metric_latency('performance_claims'),
+        license=get_metric_value('license'),
+        license_latency=get_metric_latency('license'),
+        size_score=size_score_value,
+        size_score_latency=get_metric_latency('size_score'),
+        dataset_and_code_score=get_metric_value('dataset_and_code_score'),
+        dataset_and_code_score_latency=get_metric_latency('dataset_and_code_score'),
+        dataset_quality=get_metric_value('dataset_quality'),
+        dataset_quality_latency=get_metric_latency('dataset_quality'),
+        code_quality=get_metric_value('code_quality'),
+        code_quality_latency=get_metric_latency('code_quality'),
+    )
+
+def main(argv: list[str]) -> int:
+    setup_logging()
+    if len(argv) < 2:
+        print("Usage: run score <URL_FILE>")
+        return 1
+    _, url_file = argv
+    github_handler = GitHubHandler()
+    hf_handler = HFHandler()
+    cache = InMemoryCache()
+    lines = Path(url_file).read_text(encoding="utf-8").splitlines()
+    for raw in lines:
+        url = raw.strip()
+        if not url or classify(url) not in ["MODEL_GITHUB", "MODEL_HF"]:
+            continue
+        row = process_url(url, github_handler, hf_handler, cache)
+        if row:
+            write_ndjson(row)
+    return 0

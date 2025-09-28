@@ -1,0 +1,12 @@
+﻿{
+  "repositoryName": "afwarsam/Dev-ACME",
+  "pipelineDirectory": "Dev-ACME",
+  "workspaceDirectory": "Dev-ACME\\Dev-ACME",
+  "repositories": {
+    "afwarsam/Dev-ACME": {
+      "repositoryPath": "Dev-ACME\\Dev-ACME",
+      "lastRunOn": "09/21/2025 14:19:12 -04:00"
+    }
+  },
+  "lastRunOn": "09/21/2025 14:19:12 -04:00"
+}
