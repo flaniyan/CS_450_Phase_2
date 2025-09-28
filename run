@@ -7,9 +7,9 @@ from pathlib import Path
 def main() -> None:
     root = Path(__file__).resolve().parent
     python = sys.executable
-    args = [python, str(root / "run.py"), *sys.argv[1:]]
+    args = [python, str(root / 'run.py'), *sys.argv[1:]]
     os.execv(python, args)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
