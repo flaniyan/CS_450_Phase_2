@@ -9,7 +9,7 @@ on:
 jobs:
   tests:
     name: build
-    runs-on: [self-hosted, Windows, X64] 
+    runs-on: [self-hosted, Windows, X64, Linux] 
 
 
     steps:
