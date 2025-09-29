@@ -89,14 +89,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not raw_args:
         return do_score("urls.txt")
 
-    args = parse_args(raw_args)
-
-    if args.command == "install":
-        return do_install()
-    if args.command == "test":
-        return do_test()
-    if args.command == "score":
-        return do_score(args.url_file)
+    cmd = raw_args[0]
+    if cmd in {"install", "test", "score"}:
+        args = parse_args(raw_args)
+        if args.command == "install":
+            return do_install()
+        if args.command == "test":
+            return do_test()
+        if args.command == "score":
+            return do_score(args.url_file)
+    else:
+        if len(raw_args) != 1:
+            print("Usage: run.py [install|test|score <URL_FILE>] or run.py <URL_FILE>", file=sys.stderr)
+            return 1
+        return do_score(cmd)
 
     raise RuntimeError("Unhandled command")
 
