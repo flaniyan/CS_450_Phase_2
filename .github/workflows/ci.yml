@@ -9,7 +9,7 @@ on:
 jobs:
   tests:
     name: build
-    runs-on: [self-hosted, Windows, X64, Linux]
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
       - uses: actions/checkout@v3
@@ -21,17 +21,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
 
       - name: Install project
-        run: python run.py install
+        run: python3 run.py install
 
       - name: Run tests
-        run: python run.py test
-
-      - name: Run tests with pytest
-        run: pytest --cov=.
+        run: python3 run.py test
 
       - name: Smoke score default URLs
-        run: python run.py
+        run: python3 run.py
