@@ -1,4 +1,3 @@
-requests
 pytest
 pytest-cov
 flake8
