@@ -35,7 +35,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def do_install() -> int:
-    cmd = [sys.executable, "-m", "pip", "install", "-e", str(ROOT)]
+    base_cmd = [sys.executable, "-m", "pip", "install"]
+    in_virtualenv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    cmd = base_cmd + (["-e", str(ROOT)] if in_virtualenv else ["--user", "-e", str(ROOT)])
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as exc:
