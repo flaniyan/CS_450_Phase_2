@@ -9,7 +9,7 @@ on:
 jobs:
   tests:
     name: build
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: [self-hosted, Windows, X64, Linux]
 
     steps:
       - uses: actions/checkout@v3
@@ -29,6 +29,9 @@ jobs:
 
       - name: Run tests
         run: python run.py test
+
+      - name: Run tests with pytest
+        run: pytest --cov=.
 
       - name: Smoke score default URLs
         run: python run.py
