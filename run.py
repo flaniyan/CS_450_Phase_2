@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import argparse
 import re
 import subprocess
@@ -9,6 +10,10 @@ from typing import Sequence
 
 ROOT = Path(__file__).resolve().parent
 SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from acmecli.cli import setup_logging
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -37,9 +42,21 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def do_install() -> int:
     base_cmd = [sys.executable, "-m", "pip", "install"]
     in_virtualenv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    cmd = base_cmd + (["-e", str(ROOT)] if in_virtualenv else ["--user", "-e", str(ROOT)])
+    user_flags: list[str] = [] if in_virtualenv else ["--user"]
+
+    requirements = ROOT / "requirements.txt"
+    if requirements.exists():
+        try:
+            command = base_cmd + user_flags + ["-r", str(requirements)]
+            logging.debug("Installing requirements via: %s", " ".join(command))
+            subprocess.check_call(command)
+        except subprocess.CalledProcessError as exc:
+            return exc.returncode
+
     try:
-        subprocess.check_call(cmd)
+        command = base_cmd + user_flags + ["-e", str(ROOT)]
+        logging.debug("Installing project via: %s", " ".join(command))
+        subprocess.check_call(command)
     except subprocess.CalledProcessError as exc:
         return exc.returncode
     return 0
@@ -56,6 +73,7 @@ def do_test() -> int:
         "--cov=acmecli",
         "--cov-report=term-missing",
     ]
+    logging.debug("Running pytest command: %s", " ".join(cmd))
     proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
     output = (proc.stdout or "") + (proc.stderr or "")
     collected = re.search(r"collected\s+(\d+)", output)
@@ -78,10 +96,7 @@ def do_score(url_file: str) -> int:
         print(f"URL file not found: {url_file}", file=sys.stderr)
         return 1
 
-    if str(SRC_DIR) not in sys.path:
-        sys.path.insert(0, str(SRC_DIR))
-
-    from acmecli.cli import main as cli_main  # imported lazily to ensure src is on sys.path
+    from acmecli.cli import main as cli_main
 
     return cli_main(["run", str(url_path)])
 
@@ -95,9 +110,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if cmd in {"install", "test", "score"}:
         args = parse_args(raw_args)
         if args.command == "install":
-            return do_install()
+            setup_logging()
+            logging.info("Starting install command")
+            code = do_install()
+            if code == 0:
+                logging.info("Install command completed successfully")
+            else:
+                logging.error("Install command failed with exit code %s", code)
+            return code
         if args.command == "test":
-            return do_test()
+            setup_logging()
+            logging.info("Starting test command")
+            code = do_test()
+            if code == 0:
+                logging.info("Test command completed successfully")
+            else:
+                logging.error("Test command failed with exit code %s", code)
+            return code
         if args.command == "score":
             return do_score(args.url_file)
     else:
