@@ -31,6 +31,13 @@ def classify(url: str) -> str:
         return "MODEL_HF"
     return "CODE"
 
+
+
+def extract_urls(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(',') if part.strip()]
+
 def process_url(url: str, github_handler, hf_handler, cache):
     if classify(url) == "MODEL_GITHUB":
         repo_name = url.split("/")[-1]
@@ -111,10 +118,10 @@ def main(argv: list[str]) -> int:
     cache = InMemoryCache()
     lines = Path(url_file).read_text(encoding="utf-8").splitlines()
     for raw in lines:
-        url = raw.strip()
-        if not url or classify(url) not in ["MODEL_GITHUB", "MODEL_HF"]:
-            continue
-        row = process_url(url, github_handler, hf_handler, cache)
-        if row:
-            write_ndjson(row)
+        for url in extract_urls(raw):
+            if classify(url) not in {"MODEL_GITHUB", "MODEL_HF"}:
+                continue
+            row = process_url(url, github_handler, hf_handler, cache)
+            if row:
+                write_ndjson(row)
     return 0
