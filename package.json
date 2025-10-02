@@ -2,7 +2,9 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:unit": "jest --runInBand --testPathPattern=unit",
+    "test:integration": "jest --runInBand --testPathPattern=integration"
   },
   "dependencies": {
     "express": "^5.1.0"
