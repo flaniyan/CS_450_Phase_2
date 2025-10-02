@@ -3,15 +3,15 @@ const routes = require("./routes");
 const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
-app.use("/api", routes);
+app.use(express.json());
 
-// simple health check
+// health check
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
-// mount API routes
+// mount your API routes (once)
 app.use("/api", routes);
 
-// central error handler
+// central error handler (keep last)
 app.use(errorHandler);
 
 // start only when run directly (not during tests)

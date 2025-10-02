@@ -1,9 +1,9 @@
-// src/routes/index.js
 const { Router } = require("express");
 const router = Router();
 
-router.get("/hello", (_req, res) => {
-  res.json({ message: "hello world" });
-});
+router.get("/hello", (_req, res) => res.json({ message: "hello world" }));
 
-module.exports = router; // <-- IMPORTANT: CommonJS export
+// ratings routes under /api/registry/models/:modelId/ratings...
+router.use("/", require("../services/rating"));
+
+module.exports = router;
