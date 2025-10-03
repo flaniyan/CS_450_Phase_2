@@ -1,0 +1,8 @@
+{
+  "jest.jestCommandLine": "npm test --",
+  "jest.disabledWorkspaceFolders": ["actions-runner"],
+  "search.exclude": {
+    "**/actions-runner/**": true,
+    "**/.dist/**": true
+  }
+}
