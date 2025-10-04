@@ -13,16 +13,16 @@ provider "aws" {
 }
 
 module "s3" {
-  source         = "../modules/s3"
+  source         = "../../modules/s3"
   artifacts_name = var.artifacts_bucket
 }
 
 module "ddb" {
-  source = "../modules/dynamodb"
+  source = "../../modules/dynamodb"
 }
 
 module "iam" {
-  source            = "../modules/iam"
+  source            = "../../modules/iam"
   artifacts_bucket  = module.s3.artifacts_bucket
   ddb_tables_arnmap = module.ddb.arn_map
 }
