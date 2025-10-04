@@ -38,3 +38,30 @@ Security:
 
 Team workflow:
 - Infra via Terraform with GitHub OIDC. On merge to main: plan/apply, deploy Lambdas, run smoke tests.
+
+## IAM (Group_106)
+- Attach the Terraform output policy `group106_project_policy` to your `Group_106`.
+- Permissions:
+  - S3: Put/Get/List/Multipart only within `packages/*` and `validators/*` in the artifacts bucket.
+  - DynamoDB: Put/Get/Update/Query on project tables (`users`, `tokens`, `packages`, `uploads`, `downloads`).
+
+## Team login and setup
+- Console access (no root):
+  - Visit https://<ACCOUNT_ID>.signin.aws.amazon.com/console and sign in with your IAM username/password.
+  - On first login, change your password and set up MFA (IAM > Users > Security credentials > Assign MFA). Use a virtual MFA app.
+- Programmatic (CLI) access:
+  - Install AWS CLI: `sudo apt update && sudo apt install -y awscli`
+  - Ask the account admin to create an Access key for your IAM user (one active key max). Store it in a password manager.
+  - Configure: `aws configure` (Access key, Secret key, Default region, Default output). Or use a named profile: `aws configure --profile team`
+  - Verify: `aws sts get-caller-identity` (should show your user, not root)
+- Using the app locally:
+  - Export env: `export AWS_REGION=us-east-1` and `export ARTIFACTS_BUCKET=pkg-artifacts`
+  - Start API: `npm start` → Health: `curl localhost:3000/health`
+- Using Terraform (dev env):
+  - `cd infra/envs/dev && terraform init`
+  - `terraform apply -var 'aws_region=us-east-1' -var 'artifacts_bucket=pkg-artifacts'` (uses your current AWS credentials/profile)
+  - Outputs include the artifacts bucket name to set in your `.env`/environment.
+
+Notes:
+- Never share or commit access keys. Rotate keys if leaked.
+- Prefer group-based permissions via `Group_106`; avoid attaching AdminAccess to users.
