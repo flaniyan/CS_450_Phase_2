@@ -27,6 +27,14 @@ module "iam" {
   ddb_tables_arnmap = module.ddb.arn_map
 }
 
+module "ecs" {
+  source            = "../../modules/ecs"
+  artifacts_bucket  = module.s3.artifacts_bucket
+  ddb_tables_arnmap = module.ddb.arn_map
+}
+
 output "artifacts_bucket" { value = module.s3.artifacts_bucket }
 output "group106_policy_arn" { value = module.iam.group106_policy_arn }
 output "ddb_tables" { value = module.ddb.arn_map }
+output "validator_service_url" { value = module.ecs.validator_service_url }
+output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }

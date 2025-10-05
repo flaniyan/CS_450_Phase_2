@@ -129,8 +129,13 @@ aws dynamodb describe-table --table-name users
 ### Security Notes
 - Policy uses least-privilege principle
 - Team members cannot create/delete AWS resources
-- Only you (admin) can manage infrastructure via Terraform
+- Only (admin) can manage infrastructure via Terraform
 - All actions are logged in CloudTrail
+
+## Architecture Documentation
+
+For detailed system architecture and flow diagrams, see:
+- [Validator Service Architecture](./validator-architecture.md) - Complete UML diagrams, data models, and security flows
 
 ## Team login and setup
 - Console access (no root):
