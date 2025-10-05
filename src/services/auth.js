@@ -49,25 +49,29 @@ async function createUser(username, password, roles = [], groups = []) {
 }
 
 async function authenticateUser(username, password) {
-  const result = await docClient.send(new GetCommand({
+  // Query by username instead of user_id
+  const { ScanCommand } = require("@aws-sdk/lib-dynamodb");
+  const result = await docClient.send(new ScanCommand({
     TableName: USERS_TABLE,
-    Key: { user_id: username } // Assuming username is the key for now
+    FilterExpression: "username = :username",
+    ExpressionAttributeValues: { ":username": username }
   }));
   
-  if (!result.Item) {
+  if (!result.Items || result.Items.length === 0) {
     throw new Error("User not found");
   }
   
-  const isValid = await verifyPassword(password, result.Item.password_hash);
+  const user = result.Items[0];
+  const isValid = await verifyPassword(password, user.password_hash);
   if (!isValid) {
     throw new Error("Invalid password");
   }
   
   return {
-    userId: result.Item.user_id,
-    username: result.Item.username,
-    roles: result.Item.roles || [],
-    groups: result.Item.groups || []
+    userId: user.user_id,
+    username: user.username,
+    roles: user.roles || [],
+    groups: user.groups || []
   };
 }
 
