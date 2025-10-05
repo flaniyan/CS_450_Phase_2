@@ -28,5 +28,5 @@ module "iam" {
 }
 
 output "artifacts_bucket" { value = module.s3.artifacts_bucket }
-
-
+output "group106_policy_arn" { value = module.iam.group106_policy_arn }
+output "ddb_tables" { value = module.ddb.arn_map }

@@ -86,11 +86,51 @@ export DDB_TABLE_TOKENS=tokens
 export JWT_SECRET=your-secret-key
 ```
 
-## IAM (Group_106)
-- Attach the Terraform output policy `group106_project_policy` to your `Group_106`.
-- Permissions:
-  - S3: Put/Get/List/Multipart only within `packages/*` and `validators/*` in the artifacts bucket.
-  - DynamoDB: Put/Get/Update/Query on project tables (`users`, `tokens`, `packages`, `uploads`, `downloads`).
+## Team Access Management
+
+### Policy ARN
+```
+arn:aws:iam::838693051036:policy/group106_project_policy
+```
+
+### Step 1: Attach Policy to Group_106 (Team Members)
+1. Go to AWS Console → IAM → Groups → Group_106
+2. Click "Attach policies"
+3. Search for "group106_project_policy"
+4. Select it and click "Attach policy"
+
+### Step 2: Keep Admin Access for Yourself
+**Option A: Keep AdminAccessManagedPolicy (Recommended)**
+- Your user stays in Group_106 with the project policy
+- Also attach `AdministratorAccess` policy directly to your user
+- This gives you full admin + project-specific permissions
+
+**Option B: Create Admin-Only Group**
+- Create new group "Group_106_Admins" 
+- Attach `AdministratorAccess` policy
+- Move your user to this group
+- Remove your user from Group_106
+
+### Step 3: Verify Team Access
+Each team member should be able to:
+```bash
+# Test S3 access
+aws s3 ls s3://pkg-artifacts/packages/
+
+# Test DynamoDB access  
+aws dynamodb describe-table --table-name users
+```
+
+### Policy Permissions
+- **S3**: Put/Get/List/Multipart only within `packages/*` and `validators/*` in `pkg-artifacts` bucket
+- **DynamoDB**: Put/Get/Update/Query on project tables (`users`, `tokens`, `packages`, `uploads`, `downloads`)
+- **No**: Lambda, API Gateway, CloudWatch, or other AWS services
+
+### Security Notes
+- Policy uses least-privilege principle
+- Team members cannot create/delete AWS resources
+- Only you (admin) can manage infrastructure via Terraform
+- All actions are logged in CloudTrail
 
 ## Team login and setup
 - Console access (no root):
