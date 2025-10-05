@@ -31,6 +31,6 @@ resource "aws_iam_policy" "group106_policy" {
   })
 }
 
-output "policy_arn" { value = aws_iam_policy.group106_policy.arn }
+output "group106_policy_arn" { value = aws_iam_policy.group106_policy.arn }
 
 
