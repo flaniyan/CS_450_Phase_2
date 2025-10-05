@@ -39,6 +39,53 @@ Security:
 Team workflow:
 - Infra via Terraform with GitHub OIDC. On merge to main: plan/apply, deploy Lambdas, run smoke tests.
 
+## Authentication API Usage
+
+The system uses JWT tokens with DynamoDB usage tracking (10h expiration, 1000 uses max).
+
+### 1. Register a user (admin only)
+```bash
+curl -X POST localhost:3000/api/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"secure123","roles":["admin"],"groups":["Group_106"]}'
+```
+
+### 2. Login to get token
+```bash
+curl -X POST localhost:3000/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"secure123"}'
+# Returns: {"token":"eyJ...","expiresAt":"2024-...","remainingUses":1000}
+```
+
+### 3. Use token for API calls
+```bash
+# Check token validity and consume one use
+curl localhost:3000/api/auth/me \
+  -H 'Authorization: Bearer eyJ...'
+
+# Package operations with token
+curl -X POST localhost:3000/api/packages/init \
+  -H 'Authorization: Bearer eyJ...' \
+  -H 'content-type: application/json' \
+  -d '{"pkgName":"lodash","version":"1.0.0"}'
+```
+
+### 4. Logout (revoke token)
+```bash
+curl -X POST localhost:3000/api/auth/logout \
+  -H 'Authorization: Bearer eyJ...'
+```
+
+### Environment Variables
+```bash
+export AWS_REGION=us-east-1
+export ARTIFACTS_BUCKET=pkg-artifacts
+export DDB_TABLE_USERS=users
+export DDB_TABLE_TOKENS=tokens
+export JWT_SECRET=your-secret-key
+```
+
 ## IAM (Group_106)
 - Attach the Terraform output policy `group106_project_policy` to your `Group_106`.
 - Permissions:
