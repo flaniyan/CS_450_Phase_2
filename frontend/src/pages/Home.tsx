@@ -7,7 +7,7 @@ export default function Home() {
       <VStack spacing={6} align="start">
         <Box as="header">
           <Heading as="h1" size="2xl" mb={4}>
-            Welcome to ACME Registry
+            Welcome to NPM Registry
           </Heading>
           <Text fontSize="lg" color="gray.600">
             A trustworthy package management system with built-in quality metrics
