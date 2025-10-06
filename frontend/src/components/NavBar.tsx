@@ -6,7 +6,7 @@ export default function NavBar() {
     <Box as="nav" bg="blue.600" color="white" px={8} py={4} role="navigation" aria-label="Main navigation">
       <Flex justify="space-between" align="center" maxW="1200px" mx="auto">
         <Heading as="h1" size="lg">
-          ACME Registry
+          NPM Registry
         </Heading>
         <Flex gap={4}>
           <Button as={RouterLink} to="/" variant="ghost" colorScheme="whiteAlpha" aria-label="Home">
