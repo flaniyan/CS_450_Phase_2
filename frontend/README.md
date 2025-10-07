@@ -1,74 +1,37 @@
-# ACME Registry Frontend
+# NPM Registry Frontend (Flask)
 
-React + Vite frontend for the ACME Trustworthy Package Registry.
+Python Flask implementation of the ACME Trustworthy Registry UI.
 
-## 🚀 Quick Start
+## Quick Start
 
-### Install Dependencies
 ```bash
-npm install
+python -m venv .venv
+. .venv/Scripts/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements-frontend.txt
+
+set FLASK_APP=app
+set FLASK_ENV=development
+flask run --port 3000
 ```
 
-### Run Development Server
-```bash
-npm run dev
-```
-The app will be available at `http://localhost:3000`
+App will be available at http://localhost:3000
 
-### Build for Production
-```bash
-npm run build
-```
-
-### Preview Production Build
-```bash
-npm run preview
-```
-
-## 📁 Project Structure
+## Structure
 
 ```
-frontend/
-├── src/
-│   ├── pages/          # Route pages
-│   ├── components/     # Reusable UI components
-│   ├── services/       # API client
-│   ├── App.tsx         # Main app component
-│   └── main.tsx        # Entry point
-├── tests/              # Selenium tests
-├── package.json
-└── vite.config.ts
+frontend_py/
+  app.py
+  api.py
+  templates/
+    base.html
+    home.html
+    directory.html
+    upload.html
+    rate.html
+    admin.html
+  static/
+    styles.css
+  requirements-frontend.txt
 ```
 
-## 🧪 Testing
-
-### Run Unit Tests
-```bash
-npm test
-```
-
-### Run Selenium E2E Tests
-```bash
-npm run test:selenium
-```
-
-## 🎨 Features
-
-- ✅ React + TypeScript
-- ✅ Chakra UI for styling
-- ✅ React Router for navigation
-- ✅ Axios for API calls
-- ✅ Full ADA compliance
-- ✅ Responsive design
-
-## 📡 API Integration
-
-The frontend expects a backend API at `http://localhost:8080`. Configure the proxy in `vite.config.ts` if needed.
-
-## 🔒 Environment Variables
-
-Create a `.env` file if you need custom configuration:
-```
-VITE_API_URL=http://localhost:8080
-```
 
