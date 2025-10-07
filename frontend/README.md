@@ -1,37 +1,37 @@
-# NPM Registry Frontend (Flask)
+# Frontend (Jinja Templates served by FastAPI)
 
-Python Flask implementation of the ACME Trustworthy Registry UI.
+The UI is rendered via Jinja templates and static assets, served by the FastAPI app on the same port as the API.
 
-## Quick Start
+## Run
 
-```bash
-python -m venv .venv
-. .venv/Scripts/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements-frontend.txt
-
-set FLASK_APP=app
-set FLASK_ENV=development
-flask run --port 3000
+```powershell
+cd ".."  # repository root
+. .venv/Scripts/Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
 ```
 
-App will be available at http://localhost:3000
+Open:
+- Home: `http://localhost:3000/`
+- Directory: `http://localhost:3000/directory`
+- Rate: `http://localhost:3000/rate`
+- Upload: `http://localhost:3000/upload`
+- Admin: `http://localhost:3000/admin`
 
 ## Structure
 
 ```
-frontend_py/
-  app.py
-  api.py
+frontend/
   templates/
     base.html
     home.html
     directory.html
-    upload.html
     rate.html
+    upload.html
     admin.html
   static/
     styles.css
-  requirements-frontend.txt
 ```
 
+Templates are standard Jinja; use `request.url_for('static', path='...')` for asset URLs.
 

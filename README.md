@@ -38,6 +38,17 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
    ```
    Prints a coverage summary along with the pass count extracted from pytest output.
 4. **Score repositories**
+5. **Run unified API + Frontend (single server)**
+   ```powershell
+   # From repository root
+   . .venv/Scripts/Activate.ps1
+   pip install -r requirements.txt
+   python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
+   ```
+   - API health: `http://localhost:3000/health`
+   - API hello: `http://localhost:3000/api/hello`
+   - Frontend pages: `/`, `/directory`, `/rate`, `/upload`, `/admin`
+
    ```bash
    python run.py score urls.txt
    ```
@@ -51,7 +62,10 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
 | `run.py` | CLI orchestrator for install, test, and score flows. |
 | `run` | Thin executable shim that re-invokes `run.py` with the active interpreter. |
 | `src/acmecli/` | Library package containing handlers, metrics, scoring, and types. |
-| `tests/` | Pytest suite that exercises each metric, scoring logic, and reporters. |
+| `tests/` | Pytest suite that exercises metrics, scoring logic, and reporters. |
+| `frontend/templates/` | Jinja templates served by FastAPI for the UI. |
+| `frontend/static/` | Static assets (CSS, images) served at `/static`. |
+| `docs/` | High-level documentation: overview, frontend, API/src, tests. |
 | `.github/workflows/ci.yml` | GitHub Actions workflow mirroring the local run commands. |
 | `urls.txt` | Default set of GitHub and Hugging Face URLs used for smoke scoring. |
 | `.coveragerc`, `pytest.ini`, `mypy.ini` | Tooling configuration for coverage, pytest defaults, and type checking. |
