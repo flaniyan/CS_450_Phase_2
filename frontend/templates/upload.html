@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Upload Package</h1>
+  <form method="post" enctype="multipart/form-data" aria-label="Upload package">
+    <label for="file">Select .zip file</label>
+    <input id="file" type="file" name="file" accept=".zip" required />
+    <label>
+      <input type="checkbox" name="debloat" /> Enable debloat
+    </label>
+    <button class="btn" type="submit">Upload</button>
+  </form>
+</section>
+{% endblock %}
+
+

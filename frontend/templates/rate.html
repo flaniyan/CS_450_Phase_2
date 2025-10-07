@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Rate Package</h1>
+  <form method="get" aria-label="Get package rating">
+    <input type="text" name="name" value="{{ name }}" placeholder="Enter package name" aria-label="Package name" />
+    <button class="btn" type="submit">Get Rating</button>
+  </form>
+
+  {% if rating %}
+    <div class="card">
+      <h2>Metrics</h2>
+      <ul>
+        <li>NetScore: {{ '%.2f'|format(rating.NetScore if rating.NetScore is defined else rating['NetScore']) }}</li>
+        <li>RampUp: {{ '%.2f'|format(rating.RampUp if rating.RampUp is defined else rating['RampUp']) }}</li>
+        <li>Correctness: {{ '%.2f'|format(rating.Correctness if rating.Correctness is defined else rating['Correctness']) }}</li>
+        <li>BusFactor: {{ '%.2f'|format(rating.BusFactor if rating.BusFactor is defined else rating['BusFactor']) }}</li>
+        <li>ResponsiveMaintainer: {{ '%.2f'|format(rating.ResponsiveMaintainer if rating.ResponsiveMaintainer is defined else rating['ResponsiveMaintainer']) }}</li>
+        <li>LicenseScore: {{ '%.2f'|format(rating.LicenseScore if rating.LicenseScore is defined else rating['LicenseScore']) }}</li>
+      </ul>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+

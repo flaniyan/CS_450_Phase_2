@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACME Registry</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header role="banner">
+      <nav aria-label="Main navigation" class="nav">
+        <a href="/" class="brand">ACME Registry</a>
+        <a href="/directory">Directory</a>
+        <a href="/upload">Upload</a>
+        <a href="/rate">Rate</a>
+        <a href="/admin">Admin</a>
+      </nav>
+    </header>
+    <main id="main" tabindex="-1">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-container" role="status" aria-live="polite">
+            {% for category, message in messages %}
+              <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+  </html>
+
+
