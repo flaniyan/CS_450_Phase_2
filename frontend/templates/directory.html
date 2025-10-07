@@ -11,7 +11,7 @@
       <div class="card">
         <h3>{{ p.name }}</h3>
         <p>Version: {{ p.version }}</p>
-        <form method="get" action="{{ url_for('directory') }}">
+        <form method="get" action="/directory">
           <input type="hidden" name="download" value="{{ p.name }}" />
         </form>
       </div>
