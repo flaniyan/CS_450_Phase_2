@@ -21,34 +21,71 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
 
 ## Quick Start
 
+### Option 1: Docker (Recommended)
+
+1. **Ensure Docker Desktop is running**
+   
+2. **Build and run with Docker Compose**
+   ```bash
+   cd Dev-ACME
+   docker-compose up
+   ```
+   
+3. **Or build and run manually**
+   ```bash
+   cd Dev-ACME
+   docker build -t acme-api .
+   docker run -p 3000:3000 acme-api
+   ```
+
+4. **Access the application**
+   - Frontend home: `http://localhost:3000/`
+   - API health: `http://localhost:3000/health`
+   - API hello: `http://localhost:3000/api/hello`
+   - API rate endpoint: `POST http://localhost:3000/api/registry/models/{modelId}/rate`
+   - Frontend pages: `/directory`, `/rate`, `/upload`, `/admin`
+
+5. **Stop the container**
+   ```bash
+   docker-compose down
+   ```
+
+**Note:** When Uvicorn starts, it displays `http://0.0.0.0:3000` (listening on all interfaces). Access it at `http://localhost:3000` in your browser.
+
+### Option 2: Local Development (Without Docker)
+
 1. **Environment**
    ```bash
    py -3.12 -m venv .venv
    .venv\Scripts\activate
    pip install --upgrade pip
    ```
+   
 2. **Install dependencies and project**
    ```bash
    python run.py install
    ```
    Installs requirements from `requirements.txt` followed by an editable install of the package under `src/`.
+   
 3. **Run the test suite**
    ```bash
    python run.py test
    ```
    Prints a coverage summary along with the pass count extracted from pytest output.
-4. **Score repositories**
-5. **Run unified API + Frontend (single server)**
+   
+4. **Run unified API + Frontend (single server)**
    ```powershell
    # From repository root
    . .venv/Scripts/Activate.ps1
    pip install -r requirements.txt
    python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
    ```
+   - Access at: `http://localhost:3000`
    - API health: `http://localhost:3000/health`
    - API hello: `http://localhost:3000/api/hello`
    - Frontend pages: `/`, `/directory`, `/rate`, `/upload`, `/admin`
 
+5. **Score repositories**
    ```bash
    python run.py score urls.txt
    ```
