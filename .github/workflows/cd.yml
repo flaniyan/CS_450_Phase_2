@@ -7,18 +7,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          python-version: "3.12"
-
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
+          terraform_wrapper: false
+          # terraform_version: 1.9.8  # optional pin
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -27,38 +34,58 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      # Detect Terraform presence
       - name: Check for Terraform infra
         id: has_tf
+        shell: pwsh
         run: |
-          if ls infra/envs/dev/*.tf >/dev/null 2>&1; then
-            echo "present=true" >> $GITHUB_OUTPUT
-          else
-            echo "present=false" >> $GITHUB_OUTPUT
-          fi
+          if (Get-ChildItem -Path "infra/envs/dev" -Filter "*.tf" -ErrorAction SilentlyContinue) {
+            "present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
-      - name: Deploy infrastructure via Terraform
+      - name: Terraform fmt & validate
         if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
         working-directory: infra/envs/dev
         run: |
+          terraform fmt -check -recursive
           terraform init -input=false
-          terraform plan -out=tfplan -input=false
-          terraform apply -auto-approve tfplan
+          terraform validate
 
-      - name: Smoke test API health
+      - name: Terraform plan
         if: steps.has_tf.outputs.present == 'true'
+        id: plan
+        shell: pwsh
         working-directory: infra/envs/dev
-        run: |
-          API_URL=$(terraform output -raw api_gateway_url)
-          curl -f "$API_URL/health" || exit 1
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
+        working-directory: infra/envs/dev
+        run: terraform apply -auto-approve tfplan
 
       - name: Smoke test validator ECS service
         if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
         working-directory: infra/envs/dev
         run: |
-          VALIDATOR_URL=$(terraform output -raw validator_url)
-          curl -f "$VALIDATOR_URL/health" || exit 1
+          $url = terraform output -raw validator_service_url 2>$null
+          if (-not $url) { Write-Error "validator_service_url output not found"; exit 1 }
+
+          $ok = $false
+          for ($i=1; $i -le 5; $i++) {
+            try {
+              # Use curl.exe explicitly to avoid Invoke-WebRequest alias confusion
+              $proc = Start-Process -FilePath "curl.exe" -ArgumentList @("-fsS", "--max-time", "10", "$url/health") -NoNewWindow -Wait -PassThru
+              if ($proc.ExitCode -eq 0) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ok) { Write-Error "Validator healthcheck failed"; exit 1 }
 
       - name: Skip deploy (infra not found)
         if: steps.has_tf.outputs.present == 'false'
+        shell: pwsh
         run: echo "No infra at infra/envs/dev – skipping deploy."

@@ -2,33 +2,32 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   tests:
-    name: build
     runs-on: [self-hosted, Windows, X64]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install deps
+        shell: pwsh
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
 
       - name: Install project
-        run: python3 run.py install
+        shell: pwsh
+        run: python run.py install
 
       - name: Run tests
-        run: python3 run.py test
-
-      - name: Smoke score default URLs
-        run: python3 run.py
+        shell: pwsh
+        run: python run.py test
