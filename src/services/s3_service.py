@@ -1,7 +1,8 @@
 import boto3
 import zipfile
 import io
-from typing import Dict, Any, List
+import re
+from typing import Dict, Any
 from fastapi import HTTPException
 from botocore.exceptions import ClientError
 
@@ -91,3 +92,44 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     return zip_content
+
+def list_models(name_regex: str = None,limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
+    limit = min(limit, 1000)
+    try:
+        params = {'Bucket': ap_arn,'Prefix': 'models/','MaxKeys': limit}
+        if continuation_token:
+            params['ContinuationToken'] = continuation_token
+        response = s3.list_objects_v2(**params)
+        results = []
+        if 'Contents' in response:
+            for item in response['Contents']:
+                key = item['Key']
+                if key.endswith('/model.zip'):
+                    model_name = key.split('/')[-2] if '/' in key else key
+                    model_version = key.split('/')[-1] if '/' in key else key
+                    if name_regex:
+                        try:
+                            modelName = re.compile(name_regex, re.IGNORECASE)
+                            if not modelName.search(model_name):
+                                continue
+                        except re.error as e:
+                            raise HTTPException(status_code=400, detail=f"Invalid regex: {str(e)}")
+                    results.append({"name": model_name})
+        next_token = response.get('NextContinuationToken')
+        return {
+            "models": results,
+            "next_token": next_token
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+
+
+def reset_registry() -> Dict[str, str]:
+    try:
+        response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
+        if 'Contents' in response:
+            for item in response['Contents']:
+                s3.delete_object(Bucket=ap_arn, Key=item['Key'])
+        return {"Reset done successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")

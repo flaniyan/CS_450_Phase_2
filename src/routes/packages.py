@@ -6,15 +6,24 @@ from typing import Optional
 import io
 from botocore.exceptions import ClientError
 
-from ..services.s3_service import upload_model, download_model
+from ..services.s3_service import upload_model, download_model, list_models, reset_registry
 
 router = APIRouter()
 
 
 @router.get("")
-##def list_packages():
- ##   return {"packages": []}
-##work in progress
+def list_packages(
+    limit: int = Query(100, ge=1, le=1000),
+    continuation_token: str = Query(None)
+):
+    try:
+        result = list_models(limit, continuation_token)
+        return {"packages": result["models"], "next_token": result["next_token"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list packages: {str(e)}")
+
 
 @router.post("/models/{model_id}/versions/{version}/upload")
 def upload_model_file(
@@ -76,5 +85,16 @@ def download_model_file(
             raise HTTPException(status_code=500, detail=f"S3 error: {error_code}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@router.post("/reset")
+def reset_system():
+    try:
+        result = reset_registry()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset system: {str(e)}")
 
 
