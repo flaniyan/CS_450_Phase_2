@@ -1,4 +1,4 @@
-name: PR Checks
+name: CI
 
 on:
   pull_request:
@@ -51,11 +51,10 @@ jobs:
 
       - name: Lint JavaScript
         continue-on-error: true
-        run: |
-          npm install -g eslint@8
-          npx eslint@8 src/ --ext .js --config .eslintrc.js
+        run: npx eslint@8 "src/" --ext .js --config .eslintrc.js
 
       - name: Test Python (project-defined)
+        shell: bash
         run: |
           set -o pipefail
           python -u run.py test 2>&1 | tee pytest-output.txt
