@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Package Directory</h1>
+  <form method="get" aria-label="Search packages">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search packages..." aria-label="Search packages" />
+    <button type="submit" class="btn">Search</button>
+  </form>
+  <div class="grid">
+    {% for p in packages %}
+      <div class="card">
+        <h3>{{ p.name }}</h3>
+        <p>Version: {{ p.version }}</p>
+        <form method="get" action="/directory">
+          <input type="hidden" name="download" value="{{ p.name }}" />
+        </form>
+      </div>
+    {% else %}
+      <p>No packages found.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+

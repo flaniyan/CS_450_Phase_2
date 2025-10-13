@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Admin Panel</h1>
+  <p>This action will reset the entire registry system state.</p>
+  <form method="post" action="/admin/reset" onsubmit="return confirm('Are you sure you want to reset the registry? This action cannot be undone.')">
+    <button class="btn btn-danger" type="submit">Reset Registry</button>
+  </form>
+</section>
+{% endblock %}
+
+
