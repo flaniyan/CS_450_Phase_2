@@ -54,14 +54,14 @@ def frontend_directory(request: Request):
 
 
 @app.get("/rate")
-async def frontend_rate(request: Request, name: str | None = None):
+def frontend_rate(request: Request, name: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     rating = None
     if name:
         # Reuse scoring to provide a simple rating view
         from .services.rating import run_scorer, alias  # lazy import to avoid circulars
-        row = await run_scorer(name)
+        row = run_scorer(name)
         rating = {
             "NetScore": alias(row, "net_score", "NetScore", "netScore") or 0.0,
             "RampUp": alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0,
