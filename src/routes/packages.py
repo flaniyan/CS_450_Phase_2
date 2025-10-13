@@ -37,10 +37,7 @@ def upload_model_file(
     try:
         file_content = file.file.read()
         result = upload_model(file_content, model_id, version)
-        return {
-            "message": "Model uploaded successfully",
-            "data": result
-        }
+        return result
     except HTTPException:
         raise
     except ClientError as e:

@@ -61,7 +61,7 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
     except zipfile.BadZipFile:
         raise ValueError("Invalid ZIP file")
 
-def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, Any]:
+def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
     validation = validate_huggingface_structure(file_content)
     if not validation["valid"]:
         raise HTTPException(
@@ -76,11 +76,7 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
         Body=body,
         ContentType='application/zip'
     )
-    return {
-        "model_id": model_id,
-        "version": version,
-        "size": len(file_content)
-    }
+    return {"message": "Upload successful"}
 
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
     s3_key = f"models/{model_id}/{version}/model.zip"
