@@ -22,7 +22,6 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
       TF_CLI_ARGS: "-lock-timeout=5m"
-      # remove the expression here to avoid the parser error
       TF_VAR_aws_region: us-east-1
 
     steps:
