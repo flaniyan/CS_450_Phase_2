@@ -3,6 +3,7 @@ name: CD (main)
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,80 +12,62 @@ concurrency:
   group: cd-main
   cancel-in-progress: false
 
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: infra/envs/dev
+
 jobs:
   deploy:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
+      TF_CLI_ARGS: "-lock-timeout=5m"
+      TF_VAR_aws_region: ${{ env.AWS_REGION }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check for Terraform infra
-        id: has_tf
-        shell: pwsh
-        run: |
-          if (Get-ChildItem -Path "infra/envs/dev" -Filter "*.tf" -ErrorAction SilentlyContinue) {
-            "present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } else {
-            "present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
-      - name: Terraform fmt & validate
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
-        run: |
-          terraform fmt -check -recursive
-          terraform init -input=false
-          terraform validate
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
 
-      - name: Terraform plan
-        if: steps.has_tf.outputs.present == 'true'
-        id: plan
-        shell: pwsh
-        working-directory: infra/envs/dev
-        run: terraform plan -input=false -out=tfplan
+      - name: Select/Create Workspace (dev)
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform workspace select dev || terraform workspace new dev
 
-      - name: Terraform apply
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan -input=false
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve tfplan
 
-      - name: Smoke test validator ECS service
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
+      - name: Read validator URL
+        id: tfout
+        working-directory: ${{ env.TF_DIR }}
         run: |
-          $url = terraform output -raw validator_service_url 2>$null
-          if (-not $url) { Write-Error "validator_service_url output not found"; exit 1 }
+          echo "validator_url=$(terraform output -raw validator_service_url)" >> $GITHUB_OUTPUT
 
-          $ok = $false
-          for ($i=1; $i -le 5; $i++) {
-            try {
-              # Use curl.exe explicitly to avoid Invoke-WebRequest alias confusion
-              $proc = Start-Process -FilePath "curl.exe" -ArgumentList @("-fsS", "--max-time", "10", "$url/health") -NoNewWindow -Wait -PassThru
-              if ($proc.ExitCode -eq 0) { $ok = $true; break }
-            } catch { }
-            Start-Sleep -Seconds 3
-          }
-          if (-not $ok) { Write-Error "Validator healthcheck failed"; exit 1 }
-
-      - name: Skip deploy (infra not found)
-        if: steps.has_tf.outputs.present == 'false'
-        shell: pwsh
-        run: echo "No infra at infra/envs/dev – skipping deploy."
+      - name: Smoke check /health
+        run: |
+          URL="${{ steps.tfout.outputs.validator_url }}/health"
+          echo "Checking $URL ..."
+          for i in {1..20}; do
+            curl -fsS "$URL" && exit 0
+            sleep 5
+          done
+          echo "Health check failed" && exit 1
