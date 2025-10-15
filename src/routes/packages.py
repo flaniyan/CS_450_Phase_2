@@ -12,12 +12,9 @@ router = APIRouter()
 
 
 @router.get("")
-def list_packages(
-    limit: int = Query(100, ge=1, le=1000),
-    continuation_token: str = Query(None)
-):
+def list_packages(limit: int = Query(100, ge=1, le=1000),continuation_token: str = Query(None),name_regex: str = Query(None, description="Regex to match model names"), model_regex: str = Query(None, description="Regex to match model cards"), version_range: str = Query(None, description="Version specification: exact (1.2.3), bounded (1.2.3-2.1.0), tilde (~1.2.0), or caret (^1.2.0)")):
     try:
-        result = list_models(limit, continuation_token)
+        result = list_models(name_regex=name_regex,model_regex=model_regex,version_range=version_range,limit=limit, continuation_token=continuation_token)
         return {"packages": result["models"], "next_token": result["next_token"]}
     except HTTPException:
         raise
