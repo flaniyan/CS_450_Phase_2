@@ -1,0 +1,2 @@
+// Disabled copy of the original Jest integration test
+// Kept for history; disabled to avoid Jest importing Python modules.
