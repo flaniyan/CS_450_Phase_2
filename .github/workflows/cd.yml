@@ -3,6 +3,10 @@ name: CD (main)
 on:
   push:
     branches: [main]
+<<<<<<< HEAD
+=======
+  workflow_dispatch:
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
 
 permissions:
   contents: read
@@ -11,28 +15,46 @@ concurrency:
   group: cd-main
   cancel-in-progress: false
 
+<<<<<<< HEAD
 jobs:
   deploy:
     runs-on: windows-latest
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
+=======
+env:
+  TF_DIR: infra/envs/dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_CLI_ARGS: "-lock-timeout=5m"
+      TF_VAR_aws_region: us-east-1
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
 
     steps:
       - uses: actions/checkout@v4
 
+<<<<<<< HEAD
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
         
 
+=======
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
+<<<<<<< HEAD
 
       - name: Check for Terraform infra
         id: has_tf
@@ -89,3 +111,42 @@ jobs:
         if: steps.has_tf.outputs.present == 'false'
         shell: pwsh
         run: echo "No infra at infra/envs/dev – skipping deploy."
+=======
+          # aws-session-token:   ${{ secrets.AWS_SESSION_TOKEN }}   # if using temp creds
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
+
+      - name: Select/Create Workspace (dev)
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform workspace select dev || terraform workspace new dev
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan -input=false
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Read validator URL
+        id: tfout
+        working-directory: ${{ env.TF_DIR }}
+        run: echo "validator_url=$(terraform output -raw validator_service_url)" >> $GITHUB_OUTPUT
+
+      - name: Smoke check /health
+        run: |
+          URL="${{ steps.tfout.outputs.validator_url }}/health"
+          echo "Checking $URL ..."
+          for i in {1..20}; do
+            curl -fsS "$URL" && exit 0
+            sleep 5
+          done
+          echo "Health check failed" && exit 1
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
