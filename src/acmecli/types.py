@@ -48,6 +48,12 @@ class ReportRow:
     dataset_quality_latency: int
     code_quality: float
     code_quality_latency: int
+    reproducibility: float
+    reproducibility_latency: int
+    reviewedness: float
+    reviewedness_latency: int
+    treescore: float
+    treescore_latency: int
 
 class SourceHandler(Protocol):
     def resolve_revision(self, url: str) -> str: ...

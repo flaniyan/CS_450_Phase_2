@@ -81,6 +81,9 @@ async def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(Fals
         "dataset_code": alias(row, "dataset_code", "DatasetCode", "score_available_dataset_and_code", "available_dataset_and_code"),
         "dataset_quality": alias(row, "dataset_quality", "DatasetQuality", "score_dataset_quality"),
         "code_quality": alias(row, "code_quality", "CodeQuality", "score_code_quality"),
+        "reproducibility": alias(row, "reproducibility", "Reproducibility", "score_reproducibility"),
+        "reviewedness": alias(row, "reviewedness", "Reviewedness", "score_reviewedness"),
+        "treescore": alias(row, "treescore", "Treescore", "score_treescore"),
         "dependencies": alias(row, "dependencies", "Dependencies", "score_dependencies"),
         "pull_requests": alias(row, "pull_requests", "PullRequests", "score_pull_requests"),
     }
