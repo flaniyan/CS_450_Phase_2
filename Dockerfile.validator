@@ -1,25 +1,24 @@
-FROM node:22-alpine
+FROM python:3.12-slim
 
-# Install curl for health checks
-RUN apk add --no-cache curl
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy requirements
+COPY requirements.txt .
 
-# Install dependencies
-RUN npm ci --only=production
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy validator service
-COPY src/services/validator.js ./
+COPY src/services/validator_service.py ./validator_service.py
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S validator -u 1001
-
-# Change ownership
-RUN chown -R validator:nodejs /app
+RUN groupadd -r validator && useradd -r -g validator validator
+RUN chown -R validator:validator /app
 USER validator
 
 # Expose port
@@ -30,4 +29,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3001/health || exit 1
 
 # Start the validator service
-CMD ["node", "validator.js"]
+CMD ["python", "validator_service.py"]

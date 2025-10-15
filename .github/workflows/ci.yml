@@ -30,18 +30,9 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: "npm"
-
       # Project-specific install & test commands
       - name: Install Python dependencies
         run: python -u run.py install
-
-      - name: Install Node dependencies
-        run: npm ci
 
       - name: Lint Python
         continue-on-error: true
@@ -49,18 +40,11 @@ jobs:
           python -m pip install flake8
           python -m flake8 src/ --max-line-length=100 --ignore=E203,W503
 
-      - name: Lint JavaScript
-        continue-on-error: true
-        run: npx eslint@8 "src/" --ext .js --config .eslintrc.js
-
       - name: Test Python (project-defined)
         shell: bash
         run: |
           set -o pipefail
           python -u run.py test 2>&1 | tee pytest-output.txt
-
-      - name: Test Node.js
-        run: npm test
 
       - name: Upload test log
         if: always()
@@ -86,17 +70,8 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: "npm"
-
       - name: Install Python dependencies
         run: python -u run.py install
-
-      - name: Install Node dependencies
-        run: npm ci
 
       - name: Score default URLs (non-blocking)
         continue-on-error: true
