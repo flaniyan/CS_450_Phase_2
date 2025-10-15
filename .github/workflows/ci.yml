@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
 
-# Cancel older in-flight runs for the same PR/branch
 concurrency:
   group: pr-${{ github.ref }}
   cancel-in-progress: true
@@ -15,13 +14,13 @@ permissions:
   contents: read
 
 jobs:
-  tests:
+  test:
     name: Install & Test
     runs-on: windows-latest
     timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python 3.12
@@ -56,7 +55,7 @@ jobs:
   smoke-score:
     name: Smoke score (main only)
     if: github.event_name == 'push' # skip on PRs to avoid flakiness
-    needs: tests
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
