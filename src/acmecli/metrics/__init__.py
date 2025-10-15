@@ -13,7 +13,9 @@ from .logging_env_metric import LoggingEnvMetric
 # Phase-2 new metrics
 from .score_dependencies import score_dependencies_with_latency
 from .score_pull_requests import score_pull_requests_with_latency
-
+from .reviewedness_metric import ReviewednessMetric
+from .reproducibility_metric import ReproducibilityMetric
+from .treescore_metric import TreescoreMetric
 from .base import register
 
 # Register all metrics
@@ -28,17 +30,28 @@ register(DatasetQualityMetric())
 register(HFDownloadsMetric())
 register(CLIMetric())
 register(LoggingEnvMetric())
+register(ReviewednessMetric())
+register(ReproducibilityMetric())
+register(TreescoreMetric())
 
 # Phase-2 registry for new scoring functions
-REGISTRY = {
-    "bus_factor": score_dependencies_with_latency,  # placeholder - use actual metric
-    "ramp_up": score_dependencies_with_latency,     # placeholder - use actual metric
-    "performance_claims": score_dependencies_with_latency,  # placeholder
-    "dataset_code": score_dependencies_with_latency,  # placeholder
-    "license": score_dependencies_with_latency,  # placeholder
-    "size": score_dependencies_with_latency,  # placeholder
-    "code_quality": score_dependencies_with_latency,  # placeholder
-    "dataset_quality": score_dependencies_with_latency,  # placeholder
+# This provides a mapping of metric names to their scoring functions
+# Used by the FastAPI service for direct function calls
+METRIC_FUNCTIONS = {
+    "bus_factor": BusFactorMetric().score,
+    "ramp_up": RampUpMetric().score,
+    "performance_claims": PerformanceClaimsMetric().score,
+    "dataset_code": DatasetAndCodeMetric().score,
+    "license": LicenseMetric().score,
+    "size": SizeMetric().score,
+    "code_quality": CodeQualityMetric().score,
+    "dataset_quality": DatasetQualityMetric().score,
+    "hf_downloads": HFDownloadsMetric().score,
+    "cli": CLIMetric().score,
+    "logging_env": LoggingEnvMetric().score,
+    "reviewedness": ReviewednessMetric().score,
+    "reproducibility": ReproducibilityMetric().score,
+    "treescore": TreescoreMetric().score,
     "dependencies": score_dependencies_with_latency,
     "pull_requests": score_pull_requests_with_latency,
 }
