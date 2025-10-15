@@ -89,7 +89,7 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             raise HTTPException(status_code=400, detail=str(e))
     return zip_content
 
-def list_models(name_regex: str = None,limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
+def list_models(name_regex: str = None, model_regex: str = None, limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
     limit = min(limit, 1000)
     try:
         params = {'Bucket': ap_arn,'Prefix': 'models/','MaxKeys': limit}
@@ -107,6 +107,14 @@ def list_models(name_regex: str = None,limit: int = 100, continuation_token: str
                         try:
                             modelName = re.compile(name_regex, re.IGNORECASE)
                             if not modelName.search(model_name):
+                                continue
+                        except re.error as e:
+                            raise HTTPException(status_code=400, detail=f"Invalid regex: {str(e)}")
+                    results.append({"name": model_name})
+                    if model_regex:
+                        try:
+                            modelRegex = re.compile(model_regex, re.IGNORECASE)
+                            if not modelRegex.search(model_name):
                                 continue
                         except re.error as e:
                             raise HTTPException(status_code=400, detail=f"Invalid regex: {str(e)}")
