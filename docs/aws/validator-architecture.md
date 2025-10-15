@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Validator Service Architecture
 
 ## System Overview
@@ -201,6 +202,8 @@ flowchart TD
     J --> K
 ```
 =======
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
 # Validator Service Architecture
 
 ## System Overview
@@ -402,4 +405,7 @@ flowchart TD
     I --> K
     J --> K
 ```
+<<<<<<< HEAD
 >>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d

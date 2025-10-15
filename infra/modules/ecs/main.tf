@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 variable "artifacts_bucket" { type = string }
 variable "ddb_tables_arnmap" { type = map(string) }
 
@@ -278,6 +279,8 @@ output "validator_cluster_arn" {
   value = aws_ecs_cluster.validator_cluster.arn
 }
 =======
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
   name                 = "validator-service"
@@ -593,4 +596,7 @@ output "validator_cluster_arn" {
 output "ecr_repository_url" {
   value = aws_ecr_repository.validator_repo.repository_url
 }
+<<<<<<< HEAD
 >>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
