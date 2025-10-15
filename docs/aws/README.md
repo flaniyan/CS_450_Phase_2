@@ -3,7 +3,7 @@
 ## Services and purpose
 - S3 (bucket: pkg-artifacts): store npm package zip files; SSE-KMS; private access.
   - packages/${pkgName}/${version}/package.zip
-  - validators/${pkgName}/${version}/validator.js
+  - validators/${pkgName}/${version}/validator.py
 - DynamoDB: metadata tables (users, tokens, packages, uploads, downloads) with TTL for tokens.
 - API Gateway + Lambda: REST API for upload/search/download; issues presigned S3 URLs; runs validator for sensitive packages.
 - CloudWatch: logs, metrics, alarms; dashboards for p95 latency and 5xx rate.
@@ -23,7 +23,7 @@ Functions:
 
 S3 layout:
 - packages/${pkgName}/${version}/package.zip
-- validators/${pkgName}/${version}/validator.js
+- validators/${pkgName}/${version}/validator.py
 
 Access patterns:
 - Upload uses S3 multipart; state tracked in DDB table `uploads` with conditional writes.

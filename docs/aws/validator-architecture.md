@@ -49,7 +49,7 @@ sequenceDiagram
         VS->>VS: Check user groups vs required groups
         alt User has access
             VS->>S3: Get validator script
-            S3-->>VS: validator.js content
+            S3-->>VS: validator.py content
             VS->>VS: Execute validator script
             VS->>DDB: Log successful validation
         else User lacks access
