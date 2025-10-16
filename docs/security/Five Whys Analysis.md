@@ -1,4 +1,12 @@
+<<<<<<< HEAD
+<<<<<<< HEAD
 # 🧩 Five Whys Analysis — Trustworthy Module Registry
+=======
+# 🧩 Five Whys Analysis
+>>>>>>> 3e5b6f144d5ac92802d2ae2a7086fdbe1a4bc7a5
+=======
+# 🧩 Five Whys Analysis — Trustworthy Module Registry
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
 
 This document applies the **Five Whys** root-cause method to four potential security issues discovered during STRIDE analysis.  
 Each issue traces its failure chain to an underlying cause and proposes an actionable mitigation.

@@ -3,7 +3,10 @@ name: CD (main)
 on:
   push:
     branches: [main]
+<<<<<<< HEAD
+=======
   workflow_dispatch:
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
 
 permissions:
   contents: read
@@ -12,6 +15,14 @@ concurrency:
   group: cd-main
   cancel-in-progress: false
 
+<<<<<<< HEAD
+jobs:
+  deploy:
+    runs-on: windows-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+=======
 env:
   TF_DIR: infra/envs/dev
 
@@ -23,16 +34,84 @@ jobs:
       TF_INPUT: "false"
       TF_CLI_ARGS: "-lock-timeout=5m"
       TF_VAR_aws_region: us-east-1
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
 
     steps:
       - uses: actions/checkout@v4
 
+<<<<<<< HEAD
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+        
+
+=======
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
+<<<<<<< HEAD
+
+      - name: Check for Terraform infra
+        id: has_tf
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Path "infra/envs/dev" -Filter "*.tf" -ErrorAction SilentlyContinue) {
+            "present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Terraform fmt & validate
+        if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
+        working-directory: infra/envs/dev
+        run: |
+          terraform fmt -check -recursive
+          terraform init -input=false
+          terraform validate
+
+      - name: Terraform plan
+        if: steps.has_tf.outputs.present == 'true'
+        id: plan
+        shell: pwsh
+        working-directory: infra/envs/dev
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
+        working-directory: infra/envs/dev
+        run: terraform apply -auto-approve tfplan
+
+      - name: Smoke test validator ECS service
+        if: steps.has_tf.outputs.present == 'true'
+        shell: pwsh
+        working-directory: infra/envs/dev
+        run: |
+          $url = terraform output -raw validator_service_url 2>$null
+          if (-not $url) { Write-Error "validator_service_url output not found"; exit 1 }
+
+          $ok = $false
+          for ($i=1; $i -le 5; $i++) {
+            try {
+              # Use curl.exe explicitly to avoid Invoke-WebRequest alias confusion
+              $proc = Start-Process -FilePath "curl.exe" -ArgumentList @("-fsS", "--max-time", "10", "$url/health") -NoNewWindow -Wait -PassThru
+              if ($proc.ExitCode -eq 0) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ok) { Write-Error "Validator healthcheck failed"; exit 1 }
+
+      - name: Skip deploy (infra not found)
+        if: steps.has_tf.outputs.present == 'false'
+        shell: pwsh
+        run: echo "No infra at infra/envs/dev – skipping deploy."
+=======
           # aws-session-token:   ${{ secrets.AWS_SESSION_TOKEN }}   # if using temp creds
 
       - name: Setup Terraform
@@ -70,3 +149,4 @@ jobs:
             sleep 5
           done
           echo "Health check failed" && exit 1
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
