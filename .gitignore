@@ -48,4 +48,8 @@ test-results/
 terraform.tfstate
 terraform.tfstate.backup
 terraform.tfvars
+<<<<<<< HEAD
 *.tfplan
+=======
+*.tfplan
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
