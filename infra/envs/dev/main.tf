@@ -1,3 +1,48 @@
+<<<<<<< HEAD
+<<<<<<< HEAD
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+module "s3" {
+  source         = "../../modules/s3"
+  artifacts_name = var.artifacts_bucket
+}
+
+module "ddb" {
+  source = "../../modules/dynamodb"
+}
+
+module "iam" {
+  source            = "../../modules/iam"
+  artifacts_bucket  = module.s3.artifacts_bucket
+  ddb_tables_arnmap = module.ddb.arn_map
+}
+
+module "ecs" {
+  source            = "../../modules/ecs"
+  artifacts_bucket  = module.s3.artifacts_bucket
+  ddb_tables_arnmap = module.ddb.arn_map
+}
+
+output "artifacts_bucket" { value = module.s3.artifacts_bucket }
+output "group106_policy_arn" { value = module.iam.group106_policy_arn }
+output "ddb_tables" { value = module.ddb.arn_map }
+output "validator_service_url" { value = module.ecs.validator_service_url }
+output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }
+=======
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
 terraform {
   required_version = ">= 1.6.0"
   required_providers {
@@ -89,3 +134,7 @@ output "api_gateway_url" { value = module.api_gateway.api_gateway_url }
 output "kms_key_arn" { value = module.monitoring.kms_key_arn }
 output "jwt_secret_arn" { value = module.monitoring.jwt_secret_arn }
 output "dashboard_url" { value = module.monitoring.dashboard_url }
+<<<<<<< HEAD
+>>>>>>> c1c1f250728e8f0eb8736a4331c63be9084b0856
+=======
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
