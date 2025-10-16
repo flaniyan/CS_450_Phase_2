@@ -132,6 +132,12 @@ def process_url(url: str, github_handler, hf_handler, cache):
         dataset_quality_latency=get_metric_latency('dataset_quality'),
         code_quality=get_metric_value('code_quality'),
         code_quality_latency=get_metric_latency('code_quality'),
+        reproducibility=get_metric_value('reproducibility'),
+        reproducibility_latency=get_metric_latency('reproducibility'),
+        reviewedness=get_metric_value('reviewedness'),
+        reviewedness_latency=get_metric_latency('reviewedness'),
+        treescore=get_metric_value('treescore'),
+        treescore_latency=get_metric_latency('treescore'),
     )
 
 def main(argv: list[str]) -> int:
