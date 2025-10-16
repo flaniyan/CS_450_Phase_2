@@ -39,7 +39,7 @@ class AWSTestSuite:
     
     def log_test(self, test_name: str, passed: bool, message: str = ""):
         """Log test result"""
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = "[PASS]" if passed else "[FAIL]"
         print(f"{status} {test_name}: {message}")
         
         if passed:
@@ -219,37 +219,37 @@ class AWSTestSuite:
     
     def run_all_tests(self):
         """Run all tests"""
-        print("🧪 Starting AWS Services Integration Tests")
+        print("Starting AWS Services Integration Tests")
         print("=" * 50)
         
         # Infrastructure tests
-        print("\n📦 Testing Infrastructure Components:")
+        print("\nTesting Infrastructure Components:")
         self.test_s3_bucket()
         self.test_dynamodb_tables()
         self.test_ecs_cluster()
         self.test_load_balancer()
         
         # Security tests
-        print("\n🔐 Testing Security Components:")
+        print("\nTesting Security Components:")
         self.test_kms_key()
         self.test_secrets_manager()
         
         # Monitoring tests
-        print("\n📊 Testing Monitoring Components:")
+        print("\nTesting Monitoring Components:")
         self.test_cloudwatch_logs()
         
         # Integration tests
-        print("\n🔄 Testing Integration:")
+        print("\nTesting Integration:")
         self.test_end_to_end_workflow()
         
         # Summary
         print("\n" + "=" * 50)
-        print("📋 Test Summary:")
-        print(f"✅ Passed: {self.results['passed']}")
-        print(f"❌ Failed: {self.results['failed']}")
+        print("Test Summary:")
+        print(f"[PASS] Passed: {self.results['passed']}")
+        print(f"[FAIL] Failed: {self.results['failed']}")
         
         if self.results['errors']:
-            print("\n🚨 Errors:")
+            print("\nErrors:")
             for error in self.results['errors']:
                 print(f"  - {error}")
         
@@ -268,11 +268,11 @@ def main():
     try:
         sts = boto3.client('sts')
         identity = sts.get_caller_identity()
-        print(f"🔑 AWS Identity: {identity['Arn']}")
-        print(f"🏢 Account ID: {identity['Account']}")
+        print(f"AWS Identity: {identity['Arn']}")
+        print(f"Account ID: {identity['Account']}")
         print()
     except Exception as e:
-        print(f"❌ AWS credentials not configured: {e}")
+        print(f"[ERROR] AWS credentials not configured: {e}")
         sys.exit(1)
     
     # Run tests
@@ -280,10 +280,10 @@ def main():
     success = test_suite.run_all_tests()
     
     if success:
-        print("\n🎉 All tests passed! AWS infrastructure is ready.")
+        print("\n[SUCCESS] All tests passed! AWS infrastructure is ready.")
         sys.exit(0)
     else:
-        print("\n💥 Some tests failed. Check the errors above.")
+        print("\n[ERROR] Some tests failed. Check the errors above.")
         sys.exit(1)
 
 if __name__ == "__main__":

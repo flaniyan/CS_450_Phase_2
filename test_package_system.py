@@ -22,14 +22,14 @@ TOKENS_TABLE = 'tokens'
 
 def test_s3_packages():
     """Test S3 package storage and retrieval"""
-    print("🔍 Testing S3 Package Storage...")
+    print("Testing S3 Package Storage...")
     
     try:
         # List all packages in S3
         response = s3.list_objects_v2(Bucket=ARTIFACTS_BUCKET, Prefix='models/')
         
         if 'Contents' not in response:
-            print("❌ No packages found in S3")
+            print("[FAIL] No packages found in S3")
             return False
             
         packages = []
@@ -48,20 +48,20 @@ def test_s3_packages():
                         's3_key': obj['Key']
                     })
         
-        print(f"✅ Found {len(packages)} packages in S3:")
+        print(f"[PASS] Found {len(packages)} packages in S3:")
         for pkg in packages:
             size_mb = pkg['size'] / (1024 * 1024)
-            print(f"   📦 {pkg['name']} v{pkg['version']} ({size_mb:.1f} MB)")
+            print(f"   Package {pkg['name']} v{pkg['version']} ({size_mb:.1f} MB)")
             
         return packages
         
     except Exception as e:
-        print(f"❌ Error accessing S3 packages: {e}")
+        print(f"[ERROR] Error accessing S3 packages: {e}")
         return False
 
 def test_package_metadata():
     """Test DynamoDB package metadata"""
-    print("\n🔍 Testing Package Metadata...")
+    print("\nTesting Package Metadata...")
     
     try:
         table = dynamodb.Table(PACKAGES_TABLE)
@@ -70,19 +70,19 @@ def test_package_metadata():
         response = table.scan()
         packages = response.get('Items', [])
         
-        print(f"✅ Found {len(packages)} packages in DynamoDB:")
+        print(f"[PASS] Found {len(packages)} packages in DynamoDB:")
         for pkg in packages:
-            print(f"   📦 {pkg.get('pkg_key', 'Unknown')} - {pkg.get('description', 'No description')}")
+            print(f"   Package {pkg.get('pkg_key', 'Unknown')} - {pkg.get('description', 'No description')}")
             
         return packages
         
     except Exception as e:
-        print(f"❌ Error accessing package metadata: {e}")
+        print(f"[ERROR] Error accessing package metadata: {e}")
         return False
 
 def test_presigned_urls():
     """Test presigned URL generation for package downloads"""
-    print("\n🔍 Testing Presigned URL Generation...")
+    print("\nTesting Presigned URL Generation...")
     
     try:
         # Test packages from S3
@@ -105,21 +105,21 @@ def test_presigned_urls():
                 parts = s3_key.split('/')
                 pkg_name = parts[1] if len(parts) > 1 else 'unknown'
                 
-                print(f"   ✅ {pkg_name}: Presigned URL generated")
+                print(f"   [PASS] {pkg_name}: Presigned URL generated")
                 print(f"      URL: {url[:80]}...")
                 
             except Exception as e:
-                print(f"   ❌ {s3_key}: Error generating presigned URL - {e}")
+                print(f"   [FAIL] {s3_key}: Error generating presigned URL - {e}")
                 
         return True
         
     except Exception as e:
-        print(f"❌ Error testing presigned URLs: {e}")
+        print(f"[ERROR] Error testing presigned URLs: {e}")
         return False
 
 def test_user_management():
     """Test user management system"""
-    print("\n🔍 Testing User Management...")
+    print("\nTesting User Management...")
     
     try:
         users_table = dynamodb.Table(USERS_TABLE)
@@ -128,7 +128,7 @@ def test_user_management():
         response = users_table.scan(Select='COUNT')
         user_count = response.get('Count', 0)
         
-        print(f"✅ Found {user_count} users in the system")
+        print(f"[PASS] Found {user_count} users in the system")
         
         if user_count > 0:
             # Get sample users
@@ -139,17 +139,17 @@ def test_user_management():
             for user in users:
                 username = user.get('username', 'Unknown')
                 groups = user.get('groups', [])
-                print(f"   👤 {username} (groups: {', '.join(groups)})")
+                print(f"   User {username} (groups: {', '.join(groups)})")
                 
         return True
         
     except Exception as e:
-        print(f"❌ Error testing user management: {e}")
+        print(f"[ERROR] Error testing user management: {e}")
         return False
 
 def test_package_download_workflow():
     """Test the complete package download workflow"""
-    print("\n🔍 Testing Package Download Workflow...")
+    print("\nTesting Package Download Workflow...")
     
     try:
         # Simulate a package download request
@@ -158,9 +158,9 @@ def test_package_download_workflow():
         # 1. Check if package exists
         try:
             s3.head_object(Bucket=ARTIFACTS_BUCKET, Key=test_package)
-            print("   ✅ Package exists in S3")
+            print("   [PASS] Package exists in S3")
         except s3.exceptions.NoSuchKey:
-            print("   ❌ Package not found in S3")
+            print("   [FAIL] Package not found in S3")
             return False
             
         # 2. Generate presigned URL
@@ -169,7 +169,7 @@ def test_package_download_workflow():
             Params={'Bucket': ARTIFACTS_BUCKET, 'Key': test_package},
             ExpiresIn=3600
         )
-        print("   ✅ Presigned URL generated")
+        print("   [PASS] Presigned URL generated")
         
         # 3. Log download event (simulate)
         downloads_table = dynamodb.Table('downloads')
@@ -183,18 +183,18 @@ def test_package_download_workflow():
         }
         
         # Note: We won't actually write to DynamoDB in this test
-        print("   ✅ Download event prepared")
-        print(f"   📥 Download URL: {download_url[:80]}...")
+        print("   [PASS] Download event prepared")
+        print(f"   Download URL: {download_url[:80]}...")
         
         return True
         
     except Exception as e:
-        print(f"❌ Error testing download workflow: {e}")
+        print(f"[ERROR] Error testing download workflow: {e}")
         return False
 
 def main():
     """Main test function"""
-    print("🧪 Package Management System Test Suite")
+    print("Package Management System Test Suite")
     print("=" * 50)
     
     # Test S3 packages
@@ -214,7 +214,7 @@ def main():
     
     # Summary
     print("\n" + "=" * 50)
-    print("📋 Test Summary:")
+    print("Test Summary:")
     
     tests = [
         ("S3 Package Storage", s3_packages is not False),
@@ -228,15 +228,15 @@ def main():
     total = len(tests)
     
     for test_name, success in tests:
-        status = "✅ PASS" if success else "❌ FAIL"
+        status = "[PASS]" if success else "[FAIL]"
         print(f"   {status} {test_name}")
     
-    print(f"\n🎯 Overall: {passed}/{total} tests passed")
+    print(f"\nOverall: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 All tests passed! Package management system is working.")
+        print("[SUCCESS] All tests passed! Package management system is working.")
     else:
-        print("⚠️  Some tests failed. Check the errors above.")
+        print("[WARNING] Some tests failed. Check the errors above.")
     
     return passed == total
 
