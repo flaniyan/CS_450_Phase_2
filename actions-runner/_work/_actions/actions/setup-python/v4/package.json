@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "description": "Setup python action",
-  "main": "src/setup_python.py",
+  "main": "dist/index.js",
   "scripts": {
     "build": "ncc build -o dist/setup src/setup-python.ts && ncc build -o dist/cache-save src/cache-save.ts",
     "format": "prettier --no-error-on-unmatched-pattern --config ./.prettierrc.js --write \"**/*.{ts,yml,yaml}\"",
