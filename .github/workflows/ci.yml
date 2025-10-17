@@ -31,7 +31,7 @@ jobs:
 
       # Project-specific install & test commands
       - name: Install Python dependencies
-        run: python -u run.py install
+        run: ./run install
 
       - name: Lint Python
         continue-on-error: true
@@ -40,10 +40,9 @@ jobs:
           python -m flake8 src/ --max-line-length=100 --ignore=E203,W503
 
       - name: Test Python (project-defined)
-        shell: bash
+        shell: pwsh
         run: |
-          set -o pipefail
-          python -u run.py test 2>&1 | tee pytest-output.txt
+          ./run test 2>&1 | Tee-Object -FilePath pytest-output.txt
 
       - name: Upload test log
         if: always()
@@ -70,14 +69,14 @@ jobs:
           cache: "pip"
 
       - name: Install Python dependencies
-        run: python -u run.py install
+        run: ./run install
 
       - name: Score default URLs (non-blocking)
         continue-on-error: true
         env:
           LOG_LEVEL: "1"
         run: |
-          python -u run.py score urls.txt > reports.ndjson
+          ./run urls.txt > reports.ndjson
           echo "NDJSON lines: $(wc -l < reports.ndjson)"
 
       - name: Upload NDJSON
