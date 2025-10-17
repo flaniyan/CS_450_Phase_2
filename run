@@ -81,7 +81,7 @@ install_deps() {
 # -------------------
 run_tests() {
     check_python
-    if ! $PYTHON_CMD -m coverage run --source=ai_model_catalog -m pytest tests -q --disable-warnings > pytest_output.log 2>&1; then
+    if ! $PYTHON_CMD -m coverage run --source=src -m pytest tests -q --disable-warnings > pytest_output.log 2>&1; then
         true
     fi
 
@@ -134,171 +134,13 @@ process_urls() {
     log_info "Starting URL processing..."
     log_debug "Processing file: $file"
 
-    local prev_dataset=""
-    local prev_code=""
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line=$(echo "$line" | tr -d '\r' | xargs)
-        [[ -z "$line" ]] && continue
-
-        # Detect CSV style vs plain URL list
-        if [[ "$line" == *,* ]]; then
-            IFS=',' read -r code_url dataset_url model_url <<< "$line"
-            code_url=$(echo "$code_url" | xargs)
-            dataset_url=$(echo "$dataset_url" | xargs)
-            model_url=$(echo "$model_url" | xargs)
-        else
-            code_url=""; dataset_url=""; model_url=""
-            if [[ "$line" == *"huggingface.co/datasets/"* ]]; then
-                dataset_url="$line"
-            elif [[ "$line" == *"github.com"* ]]; then
-                code_url="$line"
-            elif [[ "$line" == *"huggingface.co"* && "$line" != *"huggingface.co/datasets/"* ]]; then
-                model_url="$line"
-            fi
-        fi
-
-        # Only process model URLs, ignore GitHub and dataset URLs for now
-        if [[ -n "$model_url" ]]; then
-            local model_id
-            model_id=$(echo "$model_url" | sed 's|.*huggingface.co/||' | sed 's|/tree/.*||')
-            
-            local name
-            name=$(echo "$model_id" | sed 's|.*/||')
-
-            # Use Python to compute real scores and ensure JSON structure is valid
-            local scores_json
-            scores_json=$($PYTHON_CMD - <<PYCODE
-import sys, json, time
-sys.path.append("src")
-
-from ai_model_catalog.score_model import score_model_from_id
-from ai_model_catalog.fetch_repo import fetch_model_data
-from ai_model_catalog.metrics.score_size import score_size_with_latency
-from ai_model_catalog.metrics.score_license import score_license_with_latency
-from ai_model_catalog.metrics.score_ramp_up_time import score_ramp_up_time
-from ai_model_catalog.metrics.score_bus_factor import score_bus_factor
-from ai_model_catalog.metrics.score_available_dataset_and_code import score_available_dataset_and_code as score_availability
-from ai_model_catalog.metrics.score_dataset_quality import score_dataset_quality
-from ai_model_catalog.metrics.score_code_quality import score_code_quality
-from ai_model_catalog.metrics.score_performance_claims import score_performance_claims
-
-# Get data once and time each metric independently
-api_data = fetch_model_data("${model_id}")
-readme = api_data.get("readme", "") or api_data.get("cardData", {}).get("content", "")
-maintainers = [api_data.get("author")]
-model_data = {
-    "repo_size_bytes": api_data.get("modelSize", 0),
-    "license": api_data.get("license"),
-    "readme": readme,
-    "maintainers": maintainers,
-    "has_code": True,
-    "has_dataset": True,
-}
-
-# Time each metric independently to get real latencies
-size_result, size_latency = score_size_with_latency(model_data["repo_size_bytes"])
-license_result, license_latency = score_license_with_latency(model_data)
-
-# Simple timing wrapper for remaining metrics
-def time_metric(func, *args, **kwargs):
-    start_time = time.time()
-    result = func(*args, **kwargs)
-    latency = int((time.time() - start_time) * 1000)
-    return result, latency
-
-ramp_result, ramp_latency = time_metric(score_ramp_up_time, model_data["readme"])
-bus_result, bus_latency = time_metric(score_bus_factor, model_data["maintainers"])
-avail_result, avail_latency = time_metric(score_availability, model_data["has_code"], model_data["has_dataset"])
-dsq_result, dataset_quality_latency = time_metric(score_dataset_quality, api_data)
-cq_result, code_quality_latency = time_metric(score_code_quality, api_data)
-perf_result, perf_latency = time_metric(score_performance_claims, model_data)
-
-# Calculate total time for all metrics
-total_latency = size_latency + license_latency + ramp_latency + bus_latency + avail_latency + dataset_quality_latency + code_quality_latency + perf_latency
-
-# Build scores dict from individual results
-scores = {
-    "NetScore": 0.0,  # Will calculate below
-    "size": size_result,
-    "license": max(0.0, min(1.0, license_result)),
-    "ramp_up_time": max(0.0, min(1.0, ramp_result)),
-    "bus_factor": max(0.0, min(1.0, bus_result)),
-    "availability": max(0.0, min(1.0, avail_result)),
-    "dataset_quality": max(0.0, min(1.0, dsq_result)),
-    "code_quality": max(0.0, min(1.0, cq_result)),
-    "performance_claims": max(0.0, min(1.0, perf_result)),
-}
-
-# Calculate NetScore
-weights = {
-    "size": 0.1,
-    "license": 0.15,
-    "ramp_up_time": 0.15,
-    "bus_factor": 0.1,
-    "availability": 0.1,
-    "dataset_quality": 0.1,
-    "code_quality": 0.15,
-    "performance_claims": 0.15,
-}
-
-# Calculate weighted average for size score
-hardware_weights = {
-    "raspberry_pi": 0.1,
-    "jetson_nano": 0.2,
-    "desktop_pc": 0.3,
-    "aws_server": 0.4,
-}
-size_score_avg = sum(size_result[hw] * weight for hw, weight in hardware_weights.items())
-
-netscore = (
-    size_score_avg * weights["size"] +
-    scores["license"] * weights["license"] +
-    scores["ramp_up_time"] * weights["ramp_up_time"] +
-    scores["bus_factor"] * weights["bus_factor"] +
-    scores["availability"] * weights["availability"] +
-    scores["dataset_quality"] * weights["dataset_quality"] +
-    scores["code_quality"] * weights["code_quality"] +
-    scores["performance_claims"] * weights["performance_claims"]
-)
-scores["NetScore"] = round(netscore, 3)
-
-out = {
-    "name": "${name}",
-    "category": "MODEL",
-    "net_score": round(scores.get("NetScore", -1), 2),
-    "net_score_latency": total_latency,
-    "ramp_up_time": round(scores.get("ramp_up_time", -1), 2),
-    "ramp_up_time_latency": ramp_latency,
-    "bus_factor": round(scores.get("bus_factor", -1), 2),
-    "bus_factor_latency": bus_latency,
-    "performance_claims": round(scores.get("performance_claims", -1), 2),
-    "performance_claims_latency": perf_latency,
-    "license": round(scores.get("license", -1), 2),
-    "license_latency": license_latency,
-    "size_score": scores.get("size", {
-        "raspberry_pi": -1,
-        "jetson_nano": -1,
-        "desktop_pc": -1,
-        "aws_server": -1
-    }),
-    "size_score_latency": size_latency,
-    "dataset_and_code_score": round(scores.get("availability", -1), 2),
-    "dataset_and_code_score_latency": avail_latency,
-    "dataset_quality": round(scores.get("dataset_quality", -1), 2),
-    "dataset_quality_latency": dataset_quality_latency,
-    "code_quality": round(scores.get("code_quality", -1), 2),
-    "code_quality_latency": code_quality_latency,
-}
-print(json.dumps(out))
-PYCODE
-)
-
-            echo "$scores_json"
-        fi
-    done < "$file"
-
-    exit 0
+    # Use the existing CLI module to process URLs
+    $PYTHON_CMD -c "
+import sys
+sys.path.append('src')
+from acmecli.cli import main
+main(['run', 'score', '$file'])
+"
 }
 
 
