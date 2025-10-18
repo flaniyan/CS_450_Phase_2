@@ -21,6 +21,9 @@ const {
 
 const execAsync = promisify(exec);
 
+// Import timeout helper
+const { runWithTimeout } = require("../../validator/src/timeout");
+
 const app = express();
 
 // Security middleware: limit body size to prevent DoS
@@ -220,6 +223,22 @@ async function runJavaScriptValidator(code, payload, timeoutMs = 5000) {
       })
       .catch(reject);
   });
+}
+
+// Wrapper function that uses the timeout helper
+async function validateWithTimeout(code, payload, timeoutMs = 5000) {
+  try {
+    const result = await runWithTimeout(
+      () => runJavaScriptValidator(code, payload, timeoutMs),
+      timeoutMs
+    );
+    return result;
+  } catch (err) {
+    if (String(err?.message || err).includes("TIMEOUT")) {
+      throw new Error("VALIDATOR_TIMEOUT");
+    }
+    throw err;
+  }
 }
 
 // Worker thread code (executed when this file is run as a worker)
@@ -425,7 +444,7 @@ app.post("/validate", async (req, res) => {
         } else {
           // Run JavaScript validator using worker threads with timeout protection and concurrency control
           validationResult = await queueValidator(
-            runJavaScriptValidator,
+            validateWithTimeout,
             validatorScript,
             validatorPayload,
             5000
