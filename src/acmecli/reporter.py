@@ -1,6 +1,8 @@
 import json
+
 from dataclasses import asdict
 from .types import ReportRow
+
 
 def write_ndjson(row: ReportRow) -> None:
     print(json.dumps(asdict(row), ensure_ascii=False))

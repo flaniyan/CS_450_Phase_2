@@ -22,7 +22,7 @@ def test_object_context():
     """Test with object-like context."""
     class MockContext:
         pass
-    
+
     context = MockContext()
     result = score_dependencies(context)
     assert isinstance(result, (int, float))

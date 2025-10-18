@@ -22,7 +22,7 @@ def test_object_context():
     """Test with object-like context."""
     class MockContext:
         github_url = "https://github.com/test/repo"
-    
+
     context = MockContext()
     result = score_pull_requests(context)
     assert isinstance(result, (int, float))
