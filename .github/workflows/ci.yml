@@ -50,9 +50,7 @@ jobs:
 
       - name: Test Python (project-defined)
         shell: bash
-        run: |
-          set -o pipefail
-          python -u run.py test 2>&1 | tee pytest-output.txt
+        run: python -u run.py test
 
       - name: Validate Node.js validator service syntax
         shell: bash
@@ -63,13 +61,6 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/unit/test_validator_timeout.py -q -v
-
-      - name: Upload test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-output
-          path: pytest-output.txt
 
   smoke-score:
     name: Smoke score (main only)
