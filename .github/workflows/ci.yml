@@ -2,12 +2,13 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [ main ]
   push:
-    branches: [main]
+    branches: [ main ]
 
 concurrency:
-  group: pr-${{ github.ref }}
+  # one run per ref/PR, cancel old runs
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,7 +17,7 @@ permissions:
 jobs:
   test:
     name: Install & Test
-    runs-on: windows-latest
+    runs-on: ubuntu-latest       # ✅ switch to Ubuntu
     timeout-minutes: 15
 
     steps:
@@ -35,12 +36,9 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      # Project-specific install & test commands
+      # ---- Python project steps ----
       - name: Install Python dependencies
         run: python -u run.py install
-
-      - name: Install Node.js dependencies
-        run: npm ci
 
       - name: Lint Python
         continue-on-error: true
@@ -49,22 +47,22 @@ jobs:
           python -m flake8 src/ --max-line-length=100 --ignore=E203,W503
 
       - name: Test Python (project-defined)
-        shell: bash
         run: python -u run.py test
 
-      - name: Validate Node.js validator service syntax
-        shell: bash
-        run: |
-          node -c src/services/validator.js
+      # ---- Optional Node/validator checks (keep if file exists) ----
+      - name: Install Node.js dependencies
+        run: npm ci
 
+      - name: Validate validator service syntax
+        run: node --check src/services/validator.js   # ✅ correct flag
+
+      # Run validator timeout tests (Node.js)
       - name: Run validator timeout tests
-        shell: bash
-        run: |
-          python -m pytest tests/unit/test_validator_timeout.py -q -v
+        run: npm test -- tests/unit/validator/timeout.test.js
 
   smoke-score:
     name: Smoke score (main only)
-    if: github.event_name == 'push' # skip on PRs to avoid flakiness
+    if: github.event_name == 'push'   # ✅ don't run on PRs
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
