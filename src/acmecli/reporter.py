@@ -12,4 +12,3 @@ class Reporter:
     def format(self, data: dict) -> str:
         """Format data as JSON string."""
         return json.dumps(data, ensure_ascii=False)
-

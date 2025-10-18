@@ -1,8 +1,9 @@
 {
-  "jest.jestCommandLine": "npm test --",
-  "jest.disabledWorkspaceFolders": ["actions-runner"],
-  "search.exclude": {
-    "**/actions-runner/**": true,
-    "**/.dist/**": true
-  }
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "editor.rulers": [
+    88
+  ],
+  "editor.wordWrap": "off",
+  "python.linting.flake8Enabled": true
 }

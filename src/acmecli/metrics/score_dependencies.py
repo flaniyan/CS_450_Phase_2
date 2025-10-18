@@ -55,8 +55,8 @@ def score_dependencies(context) -> float:
     context: object with repo_path or similar attribute (aligns with your
     existing metrics). We try context.repo_path first, then context.get('repo_path').
     """
-    repo_path = (getattr(context, "repo_path", None) or
-                 getattr(context, "local_path", None))
+    repo_path = (getattr(context, "repo_path", None)
+                 or getattr(context, "local_path", None))
     if repo_path is None and isinstance(context, dict):
         repo_path = context.get("repo_path") or context.get("local_path")
 

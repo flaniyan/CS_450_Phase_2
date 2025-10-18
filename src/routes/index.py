@@ -12,4 +12,3 @@ def hello():
 
 router.include_router(packages_router, prefix="/packages")
 router.include_router(rating_router)
-

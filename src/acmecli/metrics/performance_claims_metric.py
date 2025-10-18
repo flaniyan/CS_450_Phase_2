@@ -26,8 +26,8 @@ class PerformanceClaimsMetric:
                 score += 0.3
 
             # Look for specific metrics or numbers indicating performance
-            if (re.search(r'\d+\.?\d*%', readme_text) or
-                    re.search(r'score.*\d+', readme_text)):
+            if (re.search(r'\d+\.?\d*%', readme_text)
+                    or re.search(r'score.*\d+', readme_text)):
                 score += 0.2
 
             # Look for comparison with other models

@@ -65,4 +65,3 @@ def fetch_hf_metadata(url: str) -> dict:
     """Module-level function to fetch HuggingFace metadata."""
     handler = HFHandler()
     return handler.fetch_meta(url)
-

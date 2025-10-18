@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -31,11 +32,14 @@ class RateRequest(BaseModel):
 
 
 async def run_scorer(target: str) -> Dict[str, Any]:
-    urls_file = ROOT / f".tmp_urls_{os.getpid()}_{int(asyncio.get_event_loop().time()*1000)}.txt"
+    urls_file = ROOT / f".tmp_urls_{os.getpid()}_{int(time.time()*1000)}.txt"
     urls_file.write_text(target + "\n", encoding="utf-8")
     try:
         proc = await asyncio.create_subprocess_exec(
-            python_cmd(), "run.py", "score", str(urls_file),
+            python_cmd(),
+            "run.py",
+            "score",
+            str(urls_file),
             cwd=str(ROOT),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -47,13 +51,20 @@ async def run_scorer(target: str) -> Dict[str, Any]:
             raise HTTPException(status_code=502, detail="Scoring tool timed out")
 
         if proc.returncode != 0:
-            raise HTTPException(status_code=502, detail=f"Scoring failed: {stderr.decode('utf-8')[:500]}")
+            err = stderr.decode("utf-8")[:500]
+            raise HTTPException(
+                status_code=502,
+                detail=f"Scoring failed: {err}",
+            )
 
         # take first non-empty line
         out = stdout.decode("utf-8")
         line = next((s for s in (x.strip() for x in out.splitlines()) if s), None)
         if not line:
-            raise HTTPException(status_code=502, detail="No scoring output received from Python tool")
+            raise HTTPException(
+                status_code=502,
+                detail="No scoring output received from Python tool",
+            )
         try:
             return json.loads(line)
         except json.JSONDecodeError:
@@ -68,34 +79,91 @@ async def run_scorer(target: str) -> Dict[str, Any]:
 @router.post("/registry/models/{modelId}/rate")
 async def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(False)):
     if not body.target or not isinstance(body.target, str):
-        raise HTTPException(status_code=400, detail="target is required (GitHub/HF URL string)")
+        raise HTTPException(
+            status_code=400,
+            detail="target is required (GitHub/HF URL string)",
+        )
 
     row = await run_scorer(body.target)
 
     subscores = {
         "license": alias(row, "license", "License", "score_license"),
-        "ramp_up": alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp"),
-        "bus_factor": alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"),
-        "performance_claims": alias(row, "performance_claims", "PerformanceClaims", "score_performance_claims", "performanceClaims"),
+        "ramp_up": alias(
+            row, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
+        ),
+        "bus_factor": alias(
+            row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
+        ),
+        "performance_claims": alias(
+            row,
+            "performance_claims",
+            "PerformanceClaims",
+            "score_performance_claims",
+            "performanceClaims",
+        ),
         "size": alias(row, "size", "Size", "score_size"),
-        "dataset_code": alias(row, "dataset_code", "DatasetCode", "score_available_dataset_and_code", "available_dataset_and_code"),
-        "dataset_quality": alias(row, "dataset_quality", "DatasetQuality", "score_dataset_quality"),
-        "code_quality": alias(row, "code_quality", "CodeQuality", "score_code_quality"),
-        "dependencies": alias(row, "dependencies", "Dependencies", "score_dependencies"),
-        "pull_requests": alias(row, "pull_requests", "PullRequests", "score_pull_requests"),
+        "dataset_code": alias(
+            row,
+            "dataset_code",
+            "DatasetCode",
+            "score_available_dataset_and_code",
+            "available_dataset_and_code",
+        ),
+        "dataset_quality": alias(
+            row, "dataset_quality", "DatasetQuality", "score_dataset_quality"
+        ),
+        "code_quality": alias(
+            row, "code_quality", "CodeQuality", "score_code_quality"
+        ),
+        "reproducibility": alias(
+            row, "reproducibility", "Reproducibility", "score_reproducibility"
+        ),
+        "reviewedness": alias(
+            row, "reviewedness", "Reviewedness", "score_reviewedness"
+        ),
+        "treescore": alias(
+            row, "treescore", "Treescore", "score_treescore"
+        ),
+        "dependencies": alias(
+            row, "dependencies", "Dependencies", "score_dependencies"
+        ),
+        "pull_requests": alias(
+            row, "pull_requests", "PullRequests", "score_pull_requests"
+        ),
     }
 
     netScore = alias(row, "net_score", "NetScore", "netScore")
-    latency = alias(row, "aggregation_latency", "AggregationLatency", "latency", "total_latency")
+    latency = alias(
+        row, "aggregation_latency", "AggregationLatency", "latency", "total_latency"
+    )
 
     if enforce:
-        failures = [(k, v) for k, v in subscores.items() if v is not None and float(v) <= 0.5]
+        failures = [
+            (k, v) for k, v in subscores.items() if v is not None and float(v) <= 0.5
+        ]
         if failures:
-            raise HTTPException(status_code=422, detail={
-                "error": "INGESTIBILITY_FAILURE",
-                "message": "Failed ingestibility: " + ", ".join(f"{k}={v}" for k, v in failures),
-                "data": {"modelId": modelId, "target": body.target, "netScore": netScore, "subscores": subscores, "latency": latency},
-            })
+            msg = ", ".join(f"{k}={v}" for k, v in failures)
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "INGESTIBILITY_FAILURE",
+                    "message": f"Failed ingestibility: {msg}",
+                    "data": {
+                        "modelId": modelId,
+                        "target": body.target,
+                        "netScore": netScore,
+                        "subscores": subscores,
+                        "latency": latency,
+                    },
+                },
+            )
 
-    return {"data": {"modelId": modelId, "target": body.target, "netScore": netScore, "subscores": subscores, "latency": latency}}
-
+    return {
+        "data": {
+            "modelId": modelId,
+            "target": body.target,
+            "netScore": netScore,
+            "subscores": subscores,
+            "latency": latency,
+        }
+    }

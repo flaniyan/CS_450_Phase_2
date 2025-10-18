@@ -53,20 +53,20 @@ def frontend_home(request: Request):
 def frontend_directory(request: Request):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    # For now, render with empty packages; client can be enhanced later
+
     ctx = {"request": request, "packages": [], "q": ""}
     return templates.TemplateResponse("directory.html", ctx)
 
 
 @app.get("/rate")
-def frontend_rate(request: Request, name: str | None = None):
+async def frontend_rate(request: Request, name: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     rating = None
     if name:
         # Reuse scoring to provide a simple rating view
         from .services.rating import run_scorer, alias  # lazy import
-        row = run_scorer(name)
+        row = await run_scorer(name)
         rating = {
             "NetScore": (
                 alias(row, "net_score", "NetScore", "netScore") or 0.0
@@ -106,6 +106,18 @@ def frontend_rate(request: Request, name: str | None = None):
             "LicenseScore": (
                 alias(row, "license", "License", "score_license") or 0.0
             ),
+            "Reproducibility": (
+                alias(
+                    row, "reproducibility", "Reproducibility", "score_reproducibility"
+                )
+                or 0.0
+            ),
+            "Reviewedness": (
+                alias(row, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0
+            ),
+            "Treescore": (
+                alias(row, "treescore", "Treescore", "score_treescore") or 0.0
+            ),
         }
     ctx = {
         "request": request,
@@ -134,4 +146,3 @@ if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", "3000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
-

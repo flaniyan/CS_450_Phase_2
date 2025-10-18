@@ -166,5 +166,5 @@ def _needs_heavy_setup(text: str) -> bool:
 
     return any(x in text for x in gpu + datasets)
 
-register(ReproducibilityMetric())
 
+register(ReproducibilityMetric())

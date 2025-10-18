@@ -95,4 +95,3 @@ def fetch_github_metadata(url: str) -> Dict[str, Any]:
     """Module-level function to fetch GitHub metadata."""
     handler = GitHubHandler()
     return handler.fetch_meta(url)
-

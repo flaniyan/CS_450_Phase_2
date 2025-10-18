@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict
 
 
 class InMemoryCache:
@@ -21,4 +21,3 @@ class InMemoryCache:
     def get_etag(self, key: str) -> str | None:
         """Get etag for cached data."""
         return self._etags.get(key)
-
