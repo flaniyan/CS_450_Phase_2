@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import asyncio
+import subprocess
+import time
 import json
 import os
 import sys
@@ -30,34 +31,31 @@ class RateRequest(BaseModel):
     target: str
 
 
-async def run_scorer(target: str) -> Dict[str, Any]:
-    urls_file = ROOT / f".tmp_urls_{os.getpid()}_{int(asyncio.get_event_loop().time()*1000)}.txt"
+def run_scorer(target: str) -> Dict[str, Any]:
+    urls_file = ROOT / f".tmp_urls_{os.getpid()}_{int(time.time()*1000)}.txt"
     urls_file.write_text(target + "\n", encoding="utf-8")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            python_cmd(), "run.py", "score", str(urls_file),
+        proc = subprocess.run(
+            [python_cmd(), "run.py", "score", str(urls_file)],
             cwd=str(ROOT),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            capture_output=True,
+            text=True,
+            timeout=30
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise HTTPException(status_code=502, detail="Scoring tool timed out")
-
+        
         if proc.returncode != 0:
-            raise HTTPException(status_code=502, detail=f"Scoring failed: {stderr.decode('utf-8')[:500]}")
+            raise HTTPException(status_code=502, detail=f"Scoring failed: {proc.stderr[:500]}")
 
         # take first non-empty line
-        out = stdout.decode("utf-8")
-        line = next((s for s in (x.strip() for x in out.splitlines()) if s), None)
+        line = next((s for s in (x.strip() for x in proc.stdout.splitlines()) if s), None)
         if not line:
             raise HTTPException(status_code=502, detail="No scoring output received from Python tool")
         try:
             return json.loads(line)
         except json.JSONDecodeError:
             raise HTTPException(status_code=502, detail="Invalid JSON from scorer")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=502, detail="Scoring tool timed out")
     finally:
         try:
             urls_file.unlink(missing_ok=True)  # type: ignore[arg-type]
@@ -66,11 +64,11 @@ async def run_scorer(target: str) -> Dict[str, Any]:
 
 
 @router.post("/registry/models/{modelId}/rate")
-async def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(False)):
+def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(False)):
     if not body.target or not isinstance(body.target, str):
         raise HTTPException(status_code=400, detail="target is required (GitHub/HF URL string)")
 
-    row = await run_scorer(body.target)
+    row = run_scorer(body.target)
 
     subscores = {
         "license": alias(row, "license", "License", "score_license"),
@@ -81,6 +79,9 @@ async def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(Fals
         "dataset_code": alias(row, "dataset_code", "DatasetCode", "score_available_dataset_and_code", "available_dataset_and_code"),
         "dataset_quality": alias(row, "dataset_quality", "DatasetQuality", "score_dataset_quality"),
         "code_quality": alias(row, "code_quality", "CodeQuality", "score_code_quality"),
+        "reproducibility": alias(row, "reproducibility", "Reproducibility", "score_reproducibility"),
+        "reviewedness": alias(row, "reviewedness", "Reviewedness", "score_reviewedness"),
+        "treescore": alias(row, "treescore", "Treescore", "score_treescore"),
         "dependencies": alias(row, "dependencies", "Dependencies", "score_dependencies"),
         "pull_requests": alias(row, "pull_requests", "PullRequests", "score_pull_requests"),
     }

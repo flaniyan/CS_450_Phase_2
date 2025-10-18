@@ -1,7 +1,7 @@
 
 .DS_Store
 
-
+actions-runner/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -41,3 +41,15 @@ coverage.xml
 actions-runner/
 .dist/
 test-results/
+
+# Terraform files
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+<<<<<<< HEAD
+*.tfplan
+=======
+*.tfplan
+>>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d

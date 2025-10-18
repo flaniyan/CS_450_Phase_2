@@ -1,15 +1,166 @@
-#!/usr/bin/env python3
-import os
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# -------------------
+# Logging helpers
+# -------------------
+log_info() {
+    if [[ "${LOG_VERBOSE:-false}" == "true" && -n "${LOG_FILE:-}" ]]; then
+        echo "[INFO] $1" >> "$LOG_FILE"
+    fi
+}
+log_warn() {
+    if [[ "${LOG_VERBOSE:-false}" == "true" && -n "${LOG_FILE:-}" ]]; then
+        echo "[WARNING] $1" >> "$LOG_FILE"
+    fi
+}
+log_error() {
+    if [[ "${LOG_VERBOSE:-false}" == "true" && -n "${LOG_FILE:-}" ]]; then
+        echo "[ERROR] $1" >> "$LOG_FILE"
+    fi
+}
+log_debug() {
+    if [[ "${LOG_VERBOSE:-false}" == "true" && -n "${LOG_FILE:-}" ]]; then
+        echo "[DEBUG] $1" >> "$LOG_FILE"
+    fi
+}
+
+check_logging_env() {
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        if [[ ! -f "$LOG_FILE" ]]; then
+            echo "{\"error\": \"LOG_FILE specified but file does not exist: $LOG_FILE\"}"
+            exit 1
+        fi
+        : > "$LOG_FILE"
+    fi
+
+    case "${LOG_LEVEL:-0}" in
+        0) LOG_VERBOSE=false ;;
+        1|2) LOG_VERBOSE=true ;;
+        *) LOG_VERBOSE=false ;;
+    esac
+}
+
+
+# -------------------
+# Python check
+# -------------------
+PYTHON_CMD=""
+check_python() {
+    if command -v python3 &>/dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python &>/dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "{\"error\": \"Python 3.10+ required but not found\"}"
+        exit 1
+    fi
+}
+
+# -------------------
+# Install deps
+# -------------------
+install_deps() {
+    check_python
+    if [[ -f "requirements.txt" ]]; then
+        $PYTHON_CMD -m pip install --quiet -r requirements.txt || {
+            echo "{\"error\": \"Failed to install requirements.txt\"}"
+            exit 1
+        }
+    fi
+    if [[ -f "pyproject.toml" ]]; then
+        # skip -e to avoid setup.py errors
+        $PYTHON_CMD -m pip install --quiet . || true
+    fi
+    exit 0
+}
+
+# -------------------
+# Run tests
+# -------------------
+run_tests() {
+    check_python
+    if ! $PYTHON_CMD -m coverage run --source=src -m pytest tests -q --disable-warnings > pytest_output.log 2>&1; then
+        true
+    fi
+
+    coverage_report=$($PYTHON_CMD -m coverage report -m 2>&1 || true)
+
+    passed=$(grep -Eo '[0-9]+ passed' pytest_output.log | grep -Eo '[0-9]+' || echo 0)
+    failed=$(grep -Eo '[0-9]+ failed' pytest_output.log | grep -Eo '[0-9]+' || echo 0)
+    total=$((passed + failed))
+    percent=$(echo "$coverage_report" | grep -E '^TOTAL' | awk '{print $NF}' | tr -d '%' || echo 0)
+
+    echo "${passed}/${total} test cases passed. ${percent}% line coverage achieved."
+    exit 0
+}
+
+
+
+
+# -------------------
+# GitHub token validation
+# -------------------
+check_github_token() {
+    if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+        echo "{\"error\": \"Environment variable GITHUB_TOKEN is required\"}"
+        exit 1
+    fi
+
+    # Simple format validation (tokens usually start with ghp_, gho_, etc.)
+    if [[ ! "$GITHUB_TOKEN" =~ ^gh[pousr]_[A-Za-z0-9]{36}$ ]]; then
+        echo "{\"error\": \"Invalid GitHub token format\"}"
+        exit 1
+    fi
+
+    return 0
+}
+
+
+# -------------------
+# Process URLs → NDJSON (models only)
+# ------------------
+process_urls() {
+    local file="$1"
+    if [[ ! -f "$file" ]]; then
+        echo "{\"error\": \"URL file not found: $file\"}"
+        exit 1
+    fi
+
+    check_github_token
+    check_python
+
+    log_info "Starting URL processing..."
+    log_debug "Processing file: $file"
+
+    # Use the existing CLI module to process URLs
+    $PYTHON_CMD -c "
 import sys
-from pathlib import Path
+sys.path.append('src')
+from acmecli.cli import main
+main(['run', 'score', '$file'])
+"
+}
 
 
-def main() -> None:
-    root = Path(__file__).resolve().parent
-    python = sys.executable
-    args = [python, str(root / 'run.py'), *sys.argv[1:]]
-    os.execv(python, args)
+# -------------------
+# Main entry
+# -------------------
+main() {
+    check_logging_env
+    case "${1:-}" in
+        install) install_deps ;;
+        test) run_tests ;;
+        URL_FILE)
+            process_urls "${2:-URL_FILE.txt}"
+            ;;
+        "")
+            echo "{\"error\": \"No command provided. Use: ./run install | test | <url_file.txt>\"}"
+            exit 1
+            ;;
+        *) process_urls "$1" ;;
+    esac
+}
 
-
-if __name__ == '__main__':
-    main()
+main "$@"
