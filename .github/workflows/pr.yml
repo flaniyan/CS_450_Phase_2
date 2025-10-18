@@ -38,7 +38,7 @@ jobs:
 
       # Project-specific install & test commands
       - name: Install Python dependencies
-        run: python -u run.py install
+        run: ./run install
 
       - name: Install Node dependencies
         run: npm ci
@@ -53,12 +53,12 @@ jobs:
         continue-on-error: true
         run: |
           npm install -g eslint@8
-          npx eslint@8 src/ --ext .js --config .eslintrc.js
+          npx eslint@8 frontend/ --ext .js --config .eslintrc.js
 
       - name: Test Python (project-defined)
+        shell: pwsh
         run: |
-          set -o pipefail
-          python -u run.py test 2>&1 | tee pytest-output.txt
+          ./run test 2>&1 | Tee-Object -FilePath pytest-output.txt
 
       - name: Test Node.js
         run: npm test
@@ -94,7 +94,7 @@ jobs:
           cache: "npm"
 
       - name: Install Python dependencies
-        run: python -u run.py install
+        run: ./run install
 
       - name: Install Node dependencies
         run: npm ci
@@ -104,7 +104,7 @@ jobs:
         env:
           LOG_LEVEL: "1"
         run: |
-          python -u run.py score urls.txt > reports.ndjson
+          ./run urls.txt > reports.ndjson
           echo "NDJSON lines: $(wc -l < reports.ndjson)"
 
       - name: Upload NDJSON
