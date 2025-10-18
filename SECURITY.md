@@ -110,6 +110,7 @@ User → API Gateway → Lambda → ECS Validator → S3 / DynamoDB ↔ KMS / Se
 ## 🛡️ Recent Security Improvements
 
 **Added validator wall-time guard + ECS stopTimeout=5s (Oct 2025).**
+
 - Implemented hard timeout protection in validator service to prevent DoS attacks
 - Added `runWithTimeout()` helper with 5-second limit for validator execution
 - Configured ECS container `stopTimeout = 5` for defense-in-depth
