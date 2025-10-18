@@ -9,5 +9,3 @@ router = APIRouter()
 def list_packages():
     # Minimal placeholder list endpoint (so file is non-empty/useful)
     return {"packages": []}
-
-

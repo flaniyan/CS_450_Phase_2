@@ -21,3 +21,4 @@ class LoggingEnvMetric:
         return MetricValue(self.name, value, latency_ms)
 
 register(LoggingEnvMetric())
+

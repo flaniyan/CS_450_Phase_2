@@ -4,3 +4,4 @@ REGISTRY = []
 
 def register(metric):
     REGISTRY.append(metric)
+

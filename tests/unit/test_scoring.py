@@ -1,17 +1,20 @@
 from acmecli.scoring import compute_netscore, compute_net_score
 from acmecli.types import MetricValue
 
+
 def test_compute_netscore_typical():
     scores = [0.9, 0.8, 0.7]
     weights = [0.5, 0.3, 0.2]
     net = compute_netscore(scores, weights)
     assert 0.0 <= net <= 1.0
 
+
 def test_compute_netscore_zero():
     scores = [0, 0, 0]
     weights = [0.5, 0.3, 0.2]
     net = compute_netscore(scores, weights)
     assert net == 0.0
+
 
 def test_compute_net_score():
     results = {

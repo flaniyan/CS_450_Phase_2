@@ -14,4 +14,3 @@ async def error_handler(request: Request, exc: Exception):
         },
     )
 
-

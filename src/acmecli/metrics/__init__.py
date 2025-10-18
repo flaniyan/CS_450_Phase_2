@@ -13,7 +13,9 @@ from .logging_env_metric import LoggingEnvMetric
 # Phase-2 new metrics
 from .score_dependencies import score_dependencies_with_latency
 from .score_pull_requests import score_pull_requests_with_latency
-
+from .reviewedness_metric import ReviewednessMetric
+from .reproducibility_metric import ReproducibilityMetric
+from .treescore_metric import TreescoreMetric
 from .base import register
 
 # Register all metrics
@@ -28,6 +30,9 @@ register(DatasetQualityMetric())
 register(HFDownloadsMetric())
 register(CLIMetric())
 register(LoggingEnvMetric())
+register(ReviewednessMetric())
+register(ReproducibilityMetric())
+register(TreescoreMetric())
 
 # Phase-2 registry for new scoring functions
 REGISTRY = {

@@ -51,7 +51,10 @@ class GitHubHandler:
             "size": repo_data.get("size", 0),
             "language": repo_data.get("language", ""),
             "topics": repo_data.get("topics", []),
-            "license": repo_data.get("license", {}).get("spdx_id", "") if repo_data.get("license") else "",
+            "license": (
+                repo_data.get("license", {}).get("spdx_id", "")
+                if repo_data.get("license") else ""
+            ),
             "created_at": repo_data.get("created_at", ""),
             "updated_at": repo_data.get("updated_at", ""),
             "pushed_at": repo_data.get("pushed_at", ""),
@@ -75,7 +78,10 @@ class GitHubHandler:
         if readme_data:
             try:
                 content = readme_data.get("content", "")
-                meta["readme_text"] = b64decode(content).decode("utf-8", errors="ignore") if content else ""
+                meta["readme_text"] = (
+                    b64decode(content).decode("utf-8", errors="ignore")
+                    if content else ""
+                )
             except Exception as exc:
                 logging.warning("Failed to decode README for %s: %s", url, exc)
                 meta["readme_text"] = ""
@@ -89,3 +95,4 @@ def fetch_github_metadata(url: str) -> Dict[str, Any]:
     """Module-level function to fetch GitHub metadata."""
     handler = GitHubHandler()
     return handler.fetch_meta(url)
+

@@ -2,6 +2,7 @@ import time
 from ..types import MetricValue
 from .base import register
 
+
 class CLIMetric:
     """Metric to assess CLI usability and script-based automation."""
     name = "cli"
@@ -20,5 +21,6 @@ class CLIMetric:
         value = min(1.0, score)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
+
 
 register(CLIMetric())

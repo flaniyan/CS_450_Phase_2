@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request  # type: ignore[import]
+from fastapi.staticfiles import StaticFiles  # type: ignore[import]
+from fastapi.templating import Jinja2Templates  # type: ignore[import]
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore[import]
 
 from .routes.index import router as api_router
 
@@ -35,7 +35,11 @@ STATIC_DIR = FRONTEND_DIR / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR)) if TEMPLATES_DIR.exists() else None
+templates = (
+    Jinja2Templates(directory=str(TEMPLATES_DIR))
+    if TEMPLATES_DIR.exists()
+    else None
+)
 
 
 @app.get("/")
@@ -50,27 +54,65 @@ def frontend_directory(request: Request):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     # For now, render with empty packages; client can be enhanced later
-    return templates.TemplateResponse("directory.html", {"request": request, "packages": [], "q": ""})
+    ctx = {"request": request, "packages": [], "q": ""}
+    return templates.TemplateResponse("directory.html", ctx)
 
 
 @app.get("/rate")
-async def frontend_rate(request: Request, name: str | None = None):
+def frontend_rate(request: Request, name: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     rating = None
     if name:
         # Reuse scoring to provide a simple rating view
-        from .services.rating import run_scorer, alias  # lazy import to avoid circulars
-        row = await run_scorer(name)
+        from .services.rating import run_scorer, alias  # lazy import
+        row = run_scorer(name)
         rating = {
-            "NetScore": alias(row, "net_score", "NetScore", "netScore") or 0.0,
-            "RampUp": alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0,
-            "Correctness": alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0,
-            "BusFactor": alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0,
-            "ResponsiveMaintainer": alias(row, "pull_requests", "PullRequests", "score_pull_requests") or 0.0,
-            "LicenseScore": alias(row, "license", "License", "score_license") or 0.0,
+            "NetScore": (
+                alias(row, "net_score", "NetScore", "netScore") or 0.0
+            ),
+            "RampUp": (
+                alias(
+                    row,
+                    "ramp_up",
+                    "RampUp",
+                    "score_ramp_up",
+                    "rampUp",
+                )
+                or 0.0
+            ),
+            "Correctness": (
+                alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0
+            ),
+            "BusFactor": (
+                alias(
+                    row,
+                    "bus_factor",
+                    "BusFactor",
+                    "score_bus_factor",
+                    "busFactor",
+                )
+                or 0.0
+            ),
+            "ResponsiveMaintainer": (
+                alias(
+                    row,
+                    "pull_requests",
+                    "PullRequests",
+                    "score_pull_requests",
+                )
+                or 0.0
+            ),
+            "LicenseScore": (
+                alias(row, "license", "License", "score_license") or 0.0
+            ),
         }
-    return templates.TemplateResponse("rate.html", {"request": request, "name": name or "", "rating": rating})
+    ctx = {
+        "request": request,
+        "name": name or "",
+        "rating": rating,
+    }
+    return templates.TemplateResponse("rate.html", ctx)
 
 
 @app.get("/upload")
@@ -88,9 +130,8 @@ def frontend_admin(request: Request):
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn  # type: ignore[import]
     import os
     port = int(os.getenv("PORT", "3000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
 

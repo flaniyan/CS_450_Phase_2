@@ -23,7 +23,7 @@ def test_infinite_loop_times_out():
     assert rc in (124, 1, -24) or "timeout" in out
 
 def test_memory_hog_fails():
-    
+
     code = textwrap.dedent("""
     def validate(_):
         # Try to allocate a large amount but not so large it fails immediately
@@ -34,7 +34,7 @@ def test_memory_hog_fails():
             return {"allow": False, "reason": "memory limit hit"}
     """)
     rc, out = run(code, {}, env_overrides={"VALIDATOR_MEMORY_MB": "1"})
-    
+
     assert rc in (0, 1, 137) or "exception" in out or "allow" in out
 
 def test_happy_path_allows():

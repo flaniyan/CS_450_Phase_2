@@ -14,23 +14,26 @@ def compute_net_score(results: dict):
         'dataset_quality': 0.11,           # Quality of training data
         'code_quality': 0.10,              # Engineering practices
     }
-    
+
     t0 = time.perf_counter()
     net_score = 0.0
-    
+
     for metric_name, weight in weights.items():
         if metric_name in results:
             metric_result = results[metric_name]
             metric_value = metric_result.value
-            
+
             # Handle size_score specially since it's a dict
             if metric_name == 'size_score' and isinstance(metric_value, dict):
                 # Average across all platform scores
                 platform_scores = list(metric_value.values())
-                metric_value = sum(platform_scores) / len(platform_scores) if platform_scores else 0.0
-            
+                if platform_scores:
+                    metric_value = sum(platform_scores) / len(platform_scores)
+                else:
+                    metric_value = 0.0
+
             net_score += metric_value * weight
-    
+
     latency_ms = int((time.perf_counter() - t0) * 1000)
     return net_score, latency_ms
 

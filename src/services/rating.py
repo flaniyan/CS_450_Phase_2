@@ -99,4 +99,3 @@ async def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(Fals
 
     return {"data": {"modelId": modelId, "target": body.target, "netScore": netScore, "subscores": subscores, "latency": latency}}
 
-
