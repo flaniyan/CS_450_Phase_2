@@ -13,21 +13,32 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from acmecli.cli import setup_logging
+
+from acmecli.cli import setup_logging  # noqa: E402
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Utility entrypoint for installing dependencies, running tests, and scoring URL files.",
+        description=(
+            "Utility entrypoint for installing dependencies, "
+            "running tests, and scoring URL files."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("install", help="Install the project in editable mode using pip.")
-    subparsers.add_parser("test", help="Run the pytest suite with coverage enabled.")
+    subparsers.add_parser(
+        "install", help="Install the project in editable mode using pip."
+    )
+    subparsers.add_parser(
+        "test", help="Run the pytest suite with coverage enabled."
+    )
 
     score_parser = subparsers.add_parser(
         "score",
-        help="Score repositories listed in the provided URL file and emit NDJSON to stdout.",
+        help=(
+            "Score repositories listed in the provided URL file "
+            "and emit NDJSON to stdout."
+        ),
     )
     score_parser.add_argument(
         "url_file",
@@ -76,29 +87,50 @@ def do_test() -> int:
     logging.debug("Running pytest command: %s", " ".join(cmd))
     proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
     output = (proc.stdout or "") + (proc.stderr or "")
+
+    # Parse test results with error handling
     collected = re.search(r"collected\s+(\d+)", output)
     passed = re.search(r"(\d+)\s+passed", output)
     coverage = re.search(r"TOTAL\s+.*?(\d+)%", output)
 
-    total = int(collected.group(1)) if collected else 0
-    success = int(passed.group(1)) if passed else 0
-    cov_percent = int(coverage.group(1)) if coverage else 0
+    try:
+        total = int(collected.group(1)) if collected else 0
+        success = int(passed.group(1)) if passed else 0
+        cov_percent = int(coverage.group(1)) if coverage else 0
+    except (ValueError, AttributeError):
+        # Fallback if regex parsing fails
+        total = 0
+        success = 0
+        cov_percent = 0
 
-    print(f"{success}/{total} test cases passed. {cov_percent}% line coverage achieved.")
+    print(
+        f"{success}/{total} test cases passed. "
+        f"{cov_percent}% line coverage achieved."
+    )
     if proc.returncode != 0 and output:
         print(output)
     return proc.returncode
 
 
 def do_score(url_file: str) -> int:
+    """Score repositories from the provided URL file."""
     url_path = Path(url_file)
     if not url_path.exists():
+        logging.error("URL file not found: %s", url_file)
         print(f"URL file not found: {url_file}", file=sys.stderr)
         return 1
 
-    from acmecli.cli import main as cli_main
-
-    return cli_main(["run", str(url_path)])
+    try:
+        from acmecli.cli import main as cli_main
+        return cli_main(["run", str(url_path)])
+    except ImportError as e:
+        logging.error("Failed to import acmecli.cli: %s", e)
+        print(f"Error importing required modules: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        logging.error("Unexpected error in scoring: %s", e)
+        print(f"Error during scoring: {e}", file=sys.stderr)
+        return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -128,10 +160,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 logging.error("Test command failed with exit code %s", code)
             return code
         if args.command == "score":
+            setup_logging()
+            logging.info("Starting score command")
             return do_score(args.url_file)
     else:
         if len(raw_args) != 1:
-            print("Usage: run.py [install|test|score <URL_FILE>] or run.py <URL_FILE>", file=sys.stderr)
+            print(
+                "Usage: run.py [install|test|score <URL_FILE>] or run.py <URL_FILE>",
+                file=sys.stderr,
+            )
             return 1
         return do_score(cmd)
 

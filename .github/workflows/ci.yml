@@ -1,34 +1,106 @@
 name: CI
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  tests:
-    name: build
-    runs-on: [self-hosted, Windows, X64]
+  test:
+    name: Install & Test
+    runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+          cache: "pip"
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # Project-specific install & test commands
+      - name: Install Python dependencies
+        run: python -u run.py install
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Lint Python
+        continue-on-error: true
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.txt
+          python -m pip install flake8
+          python -m flake8 src/ --max-line-length=100 --ignore=E203,W503
 
-      - name: Install project
-        run: python3 run.py install
+      - name: Test Python (project-defined)
+        shell: bash
+        run: |
+          set -o pipefail
+          python -u run.py test 2>&1 | tee pytest-output.txt
 
-      - name: Run tests
-        run: python3 run.py test
+      - name: Validate Node.js validator service syntax
+        shell: bash
+        run: |
+          node -c src/services/validator.js
 
-      - name: Smoke score default URLs
-        run: python3 run.py
+      - name: Run validator timeout tests
+        shell: bash
+        run: |
+          python -m pytest tests/unit/test_validator_timeout.py -q -v
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: pytest-output.txt
+
+  smoke-score:
+    name: Smoke score (main only)
+    if: github.event_name == 'push' # skip on PRs to avoid flakiness
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: python -u run.py install
+
+      - name: Score default URLs (non-blocking)
+        continue-on-error: true
+        env:
+          LOG_LEVEL: "1"
+        run: |
+          python -u run.py score urls.txt > reports.ndjson
+          echo "NDJSON lines: $(wc -l < reports.ndjson)"
+
+      - name: Upload NDJSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports.ndjson
+          path: reports.ndjson

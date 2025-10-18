@@ -1,9 +1,10 @@
-import sys
-from pathlib import Path
 import logging
 import os
-import json
+import sys
 import concurrent.futures
+from pathlib import Path
+from typing import Any
+
 from .types import ReportRow
 from .reporter import write_ndjson
 from .metrics.base import REGISTRY
@@ -11,6 +12,7 @@ from .github_handler import GitHubHandler
 from .hf_handler import HFHandler
 from .cache import InMemoryCache
 from .scoring import compute_net_score
+
 
 def setup_logging():
     log_file = os.environ.get("LOG_FILE")
@@ -48,6 +50,7 @@ def setup_logging():
         handler.setLevel(level)
     root_logger.addHandler(handler)
 
+
 def classify(url: str) -> str:
     u = url.strip().lower()
     if "huggingface.co/datasets/" in u:
@@ -59,23 +62,44 @@ def classify(url: str) -> str:
     return "CODE"
 
 
-
 def extract_urls(raw: str) -> list[str]:
     if not raw:
         return []
     return [part.strip() for part in raw.split(',') if part.strip()]
 
-def process_url(url: str, github_handler, hf_handler, cache):
-    if classify(url) == "MODEL_GITHUB":
-        repo_name = url.split("/")[-1]
-        meta = github_handler.fetch_meta(url)
-    elif classify(url) == "MODEL_HF":
-        repo_name = url.split("/")[-1]
-        meta = hf_handler.fetch_meta(url)
+
+def process_url(
+    url: str, github_handler: Any, hf_handler: Any, cache: Any
+) -> ReportRow | None:
+    """Process a URL and return a ReportRow if successful."""
+    url_classification = classify(url)
+
+    if url_classification == "MODEL_GITHUB":
+        try:
+            repo_name = url.split("/")[-1]
+            if not repo_name:
+                logging.warning("Empty repo name from URL: %s", url)
+                return None
+            meta = github_handler.fetch_meta(url)
+        except (IndexError, AttributeError) as e:
+            logging.error("Error parsing GitHub URL %s: %s", url, e)
+            return None
+    elif url_classification == "MODEL_HF":
+        try:
+            repo_name = url.split("/")[-1]
+            if not repo_name:
+                logging.warning("Empty repo name from URL: %s", url)
+                return None
+            meta = hf_handler.fetch_meta(url)
+        except (IndexError, AttributeError) as e:
+            logging.error("Error parsing HuggingFace URL %s: %s", url, e)
+            return None
     else:
+        logging.debug("Unsupported URL type %s for URL: %s", url_classification, url)
         return None
 
     if not meta:
+        logging.debug("No metadata retrieved for URL: %s", url)
         return None
 
     results = {}
@@ -93,24 +117,24 @@ def process_url(url: str, github_handler, hf_handler, cache):
                 # Create a default MetricValue for failed metrics
                 from .types import MetricValue
                 results[metric_name] = MetricValue(metric_name, 0.0, 0)
-    
+
     net_score, net_score_latency = compute_net_score(results)
-    
+
     # Helper function to safely get metric values
     def get_metric_value(name, default=0.0):
         metric = results.get(name)
         return metric.value if metric else default
-    
+
     def get_metric_latency(name, default=0):
         metric = results.get(name)
         return metric.latency_ms if metric else default
-    
+
     # Handle size_score specially since it returns a dict
     size_result = results.get('size_score')
     size_score_value = size_result.value if size_result else {
         'raspberry_pi': 0.0, 'jetson_nano': 0.0, 'desktop_pc': 0.0, 'aws_server': 0.0
     }
-    
+
     return ReportRow(
         name=repo_name,
         category="MODEL",
@@ -134,16 +158,31 @@ def process_url(url: str, github_handler, hf_handler, cache):
         code_quality_latency=get_metric_latency('code_quality'),
     )
 
+
 def main(argv: list[str]) -> int:
     setup_logging()
     if len(argv) < 2:
         print("Usage: run score <URL_FILE>")
         return 1
     _, url_file = argv
+
+    # Check if file exists
+    url_path = Path(url_file)
+    if not url_path.exists():
+        logging.error("URL file not found: %s", url_file)
+        print(f"Error: URL file not found: {url_file}", file=sys.stderr)
+        return 1
+
+    try:
+        lines = url_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as e:
+        logging.error("Failed to read URL file %s: %s", url_file, e)
+        print(f"Error reading file {url_file}: {e}", file=sys.stderr)
+        return 1
+
     github_handler = GitHubHandler()
     hf_handler = HFHandler()
     cache = InMemoryCache()
-    lines = Path(url_file).read_text(encoding="utf-8").splitlines()
     for raw in lines:
         for url in extract_urls(raw):
             kind = classify(url)
@@ -152,10 +191,14 @@ def main(argv: list[str]) -> int:
                 logging.debug("Skipping unsupported URL: %s", url)
                 continue
             logging.info("Processing URL: %s", url)
-            row = process_url(url, github_handler, hf_handler, cache)
-            if row:
-                logging.info("Emitted report for %s", row.name)
-                write_ndjson(row)
-            else:
-                logging.debug("No report produced for %s", url)
+            try:
+                row = process_url(url, github_handler, hf_handler, cache)
+                if row:
+                    logging.info("Emitted report for %s", row.name)
+                    write_ndjson(row)
+                else:
+                    logging.debug("No report produced for %s", url)
+            except Exception as e:
+                logging.error("Error processing URL %s: %s", url, e)
+                # Continue processing other URLs even if one fails
     return 0

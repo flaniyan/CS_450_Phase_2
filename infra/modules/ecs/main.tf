@@ -36,7 +36,11 @@ resource "aws_ecs_task_definition" "validator_task" {
       { name = "AWS_REGION", value = "us-east-1" },
       { name = "ARTIFACTS_BUCKET", value = var.artifacts_bucket },
       { name = "DDB_TABLE_PACKAGES", value = "packages" },
-      { name = "DDB_TABLE_DOWNLOADS", value = "downloads" }
+      { name = "DDB_TABLE_DOWNLOADS", value = "downloads" },
+      { name = "VALIDATOR_TIMEOUT_SEC", value = "5" },
+      { name = "VALIDATOR_MEMORY_MB", value = "128" },
+      { name = "VALIDATOR_NOFILE_SOFT", value = "64" },
+      { name = "VALIDATOR_NPROC_SOFT", value = "64" }
     ]
     
     logConfiguration = {
@@ -55,6 +59,9 @@ resource "aws_ecs_task_definition" "validator_task" {
       retries     = 3
       startPeriod = 60
     }
+    
+    # Set stopTimeout to 5 seconds for validator timeout protection
+    stopTimeout = 5
   }])
 }
 
