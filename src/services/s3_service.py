@@ -174,6 +174,6 @@ def reset_registry() -> Dict[str, str]:
         if 'Contents' in response:
             for item in response['Contents']:
                 s3.delete_object(Bucket=ap_arn, Key=item['Key'])
-        return response(message="Reset done successfully")
+        return {"message": "Reset done successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")

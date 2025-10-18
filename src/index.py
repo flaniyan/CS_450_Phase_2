@@ -50,11 +50,20 @@ def frontend_home(request: Request):
 
 
 @app.get("/directory")
-def frontend_directory(request: Request):
+def frontend_directory(request: Request, q: str = ""):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    # For now, render with empty packages; client can be enhanced later
-    ctx = {"request": request, "packages": [], "q": ""}
+    
+    # Fetch packages from the API
+    try:
+        from .services.s3_service import list_models
+        result = list_models(name_regex=q if q else None, limit=100)
+        packages = result["models"]
+    except Exception as e:
+        # If there's an error fetching packages, show empty list
+        packages = []
+    
+    ctx = {"request": request, "packages": packages, "q": q}
     return templates.TemplateResponse("directory.html", ctx)
 
 
@@ -125,6 +134,43 @@ def frontend_upload(request: Request):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     return templates.TemplateResponse("upload.html", {"request": request})
+
+
+@app.post("/upload")
+async def frontend_upload_post(request: Request):
+    from fastapi import Form, UploadFile, File
+    from fastapi.responses import RedirectResponse
+    
+    try:
+        # Get form data
+        form = await request.form()
+        file = form.get("file")
+        debloat = form.get("debloat") == "on"
+        
+        if not file or not hasattr(file, 'filename'):
+            return {"error": "No file uploaded"}
+        
+        # Generate model_id and version from filename or use defaults
+        filename = file.filename
+        if not filename.endswith('.zip'):
+            return {"error": "Only ZIP files are supported"}
+        
+        # Extract model name from filename (remove .zip extension)
+        model_id = filename[:-4]  # Remove .zip
+        version = "1.0.0"  # Default version
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Upload to S3
+        from .services.s3_service import upload_model
+        result = upload_model(file_content, model_id, version, debloat)
+        
+        # Redirect to directory page with success message
+        return RedirectResponse(url="/directory", status_code=303)
+        
+    except Exception as e:
+        return {"error": f"Upload failed: {str(e)}"}
 
 
 @app.get("/admin")
