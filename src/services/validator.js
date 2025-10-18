@@ -235,6 +235,7 @@ async function validateWithTimeout(code, payload, timeoutMs = 5000) {
     return result;
   } catch (err) {
     if (String(err?.message || err).includes("TIMEOUT")) {
+      console.warn({ validator_timeout: true, ms: timeoutMs }, "validator exceeded wall-time");
       throw new Error("VALIDATOR_TIMEOUT");
     }
     throw err;
