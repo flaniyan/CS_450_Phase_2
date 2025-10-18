@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
   push:
-    branches: [ main ]
+    branches: [main]
 
 concurrency:
   # one run per ref/PR, cancel old runs
@@ -17,7 +17,7 @@ permissions:
 jobs:
   test:
     name: Install & Test
-    runs-on: ubuntu-latest       # ✅ switch to Ubuntu
+    runs-on: ubuntu-latest # ✅ switch to Ubuntu
     timeout-minutes: 15
 
     steps:
@@ -54,7 +54,7 @@ jobs:
         run: npm ci
 
       - name: Validate validator service syntax
-        run: node --check src/services/validator.js   # ✅ correct flag
+        run: node --check src/services/validator.js # ✅ correct flag
 
       # Run validator timeout tests (Node.js)
       - name: Run validator timeout tests
@@ -62,7 +62,7 @@ jobs:
 
   smoke-score:
     name: Smoke score (main only)
-    if: github.event_name == 'push'   # ✅ don't run on PRs
+    if: github.event_name == 'push' # ✅ don't run on PRs
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
