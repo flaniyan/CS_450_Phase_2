@@ -17,6 +17,9 @@
         <li>BusFactor: {{ '%.2f'|format(rating.BusFactor if rating.BusFactor is defined else rating['BusFactor']) }}</li>
         <li>ResponsiveMaintainer: {{ '%.2f'|format(rating.ResponsiveMaintainer if rating.ResponsiveMaintainer is defined else rating['ResponsiveMaintainer']) }}</li>
         <li>LicenseScore: {{ '%.2f'|format(rating.LicenseScore if rating.LicenseScore is defined else rating['LicenseScore']) }}</li>
+        <li>Reproducibility: {{ '%.2f'|format(rating.Reproducibility if rating.Reproducibility is defined else rating['Reproducibility']) }}</li>
+        <li>Reviewedness: {{ '%.2f'|format(rating.Reviewedness if rating.Reviewedness is defined else rating['Reviewedness']) }}</li>
+        <li>Treescore: {{ '%.2f'|format(rating.Treescore if rating.Treescore is defined else rating['Treescore']) }}</li>
       </ul>
     </div>
   {% endif %}

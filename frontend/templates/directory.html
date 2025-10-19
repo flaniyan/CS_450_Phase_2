@@ -11,9 +11,16 @@
       <div class="card">
         <h3>{{ p.name }}</h3>
         <p>Version: {{ p.version }}</p>
-        <form method="get" action="/directory">
-          <input type="hidden" name="download" value="{{ p.name }}" />
-        </form>
+        {% if p.size %}
+        <p>Size: {{ p.size }} bytes</p>
+        {% endif %}
+        {% if p.upload_time %}
+        <p>Upload Time: {{ p.upload_time }}</p>
+        {% endif %}
+        <div class="card-actions">
+          <a href="/download/{{ p.name }}/{{ p.version }}" class="btn">Download</a>
+          <a href="/rate?name={{ p.name }}" class="btn">Rate</a>
+        </div>
       </div>
     {% else %}
       <p>No packages found.</p>
