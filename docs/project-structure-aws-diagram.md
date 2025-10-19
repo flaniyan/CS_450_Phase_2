@@ -2,27 +2,27 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           ACME Model Registry Project Structure                │
+│                           ACME Model Registry Project Structure                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                                    src/                                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   index.py      │  │   routes/       │  │   services/      │                │
-│  │                 │  │                 │  │                 │                │
-│  │ Main FastAPI    │  │ packages.py     │  │ s3_service.py   │                │
-│  │ application     │  │ handles API     │  │ manages AWS S3  │                │
-│  │ entry point     │  │ routing and     │  │ model storage   │                │
-│  │ with frontend   │  │ request         │  │ operations      │                │
-│  │ templates       │  │ processing      │  │                 │                │
-│  │                 │  │                 │  │ rating.py       │                │
-│  │                 │  │                 │  │ calculates      │                │
-│  │                 │  │                 │  │ model metrics   │                │
-│  │                 │  │                 │  │                 │                │
-│  │                 │  │                 │  │ auth_service.py │                │
-│  │                 │  │                 │  │ handles user    │                │
-│  │                 │  │                 │  │ authentication │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                                    src/                                         │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   index.py      │  │   routes/       │  │   services/     │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │ Main FastAPI    │  │ packages.py     │  │ s3_service.py   │                  │
+│  │ application     │  │ handles API     │  │ manages AWS S3  │                  │
+│  │ entry point     │  │ routing and     │  │ model storage   │                  │
+│  │ with frontend   │  │ request         │  │ operations      │                  │
+│  │ templates       │  │ processing      │  │                 │                  │
+│  │                 │  │                 │  │ rating.py       │                  │
+│  │                 │  │                 │  │ calculates      │                  │
+│  │                 │  │                 │  │ model metrics   │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │                 │  │                 │  │ auth_service.py │                  │
+│  │                 │  │                 │  │ handles user    │                  │
+│  │                 │  │                 │  │ authentication  │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                     ┌───────────┼───────────┐
@@ -30,7 +30,7 @@
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │   AWS S3        │ │   AWS DynamoDB  │ │   AWS ECS       │
 │                 │ │                 │ │                 │
-│ Stores model    │ │ Stores model    │ │ Hosts FastAPI  │
+│ Stores model    │ │ Stores model    │ │ Hosts FastAPI   │
 │ ZIP files and   │ │ metadata and    │ │ application in  │
 │ handles upload/ │ │ search indices  │ │ containerized   │
 │ download        │ │ for queries     │ │ environment     │
@@ -39,95 +39,95 @@
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           AWS Infrastructure Layer                             │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   AWS API       │  │   AWS           │  │   AWS           │                │
-│  │   Gateway        │  │   CloudWatch    │  │   IAM           │                │
-│  │                 │  │                 │  │                 │                │
-│  │ Provides        │  │ Monitors        │  │ Manages         │                │
-│  │ external API    │  │ system          │  │ access control  │                │
-│  │ endpoint with   │  │ performance     │  │ and permissions│                │
-│  │ rate limiting   │  │ and logs        │  │ for AWS         │                │
-│  │                 │  │                 │  │ services        │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                           AWS Infrastructure Layer                              │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   AWS API       │  │   AWS           │  │   AWS           │                  │
+│  │   Gateway       │  │   CloudWatch    │  │   IAM           │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │ Provides        │  │ Monitors        │  │ Manages         │                  │
+│  │ external API    │  │ system          │  │ access control  │                  │
+│  │ endpoint with   │  │ performance     │  │ and permissions │                  │
+│  │ rate limiting   │  │ and logs        │  │ for AWS         │                  │
+│  │                 │  │                 │  │ services        │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           External Integrations                                │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   GitHub API    │  │   HuggingFace   │  │   acmecli/      │                │
-│  │   Integration   │  │   Model Hub     │  │   metrics/       │                │
-│  │                 │  │                 │  │                 │                │
-│  │ Analyzes        │  │ Ingests models  │  │ Contains        │                │
-│  │ repository      │  │ from HuggingFace│  │ metric          │                │
-│  │ code quality    │  │ hub for scoring │  │ calculation     │                │
-│  │ and pull        │  │ and validation  │  │ modules for     │                │
-│  │ requests        │  │                 │  │ model analysis  │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                           External Integrations                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   GitHub API    │  │   HuggingFace   │  │   acmecli/      │                  │
+│  │   Integration   │  │   Model Hub     │  │   metrics/      │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │ Analyzes        │  │ Ingests models  │  │ Contains        │                  │
+│  │ repository      │  │ from HuggingFace│  │ metric          │                  │
+│  │ code quality    │  │ hub for scoring │  │ calculation     │                  │
+│  │ and pull        │  │ and validation  │  │ modules for     │                  │
+│  │ requests        │  │                 │  │ model analysis  │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           Development Tools                                     │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   GitHub        │  │   LLM Tools      │  │   Testing       │                │
-│  │   Ecosystem     │  │                 │  │   Framework     │                │
-│  │                 │  │                 │  │                 │                │
-│  │ GitHub Actions  │  │ GitHub Copilot  │  │ pytest         │                │
-│  │ for CI/CD       │  │ Auto-Review     │  │ for unit tests  │                │
-│  │ pipeline        │  │ for code review │  │                 │                │
-│  │                 │  │                 │  │ Selenium        │                │
-│  │ Dependabot      │  │ ChatGPT for     │  │ for GUI tests   │                │
-│  │ for dependency  │  │ engineering     │  │                 │                │
-│  │ management      │  │ assistance      │  │                 │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   GitHub        │  │   LLM Tools     │  │   Testing       │                  │
+│  │   Ecosystem     │  │                 │  │   Framework     │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │ GitHub Actions  │  │ GitHub Copilot  │  │ pytest          │                  │
+│  │ for CI/CD       │  │ Auto-Review     │  │ for unit tests  │                  │
+│  │ pipeline        │  │ for code review │  │                 │                  │
+│  │                 │  │                 │  │ Selenium        │                  │
+│  │ Dependabot      │  │ ChatGPT for     │  │ for GUI tests   │                  │
+│  │ for dependency  │  │ engineering     │  │                 │                  │
+│  │ management      │  │ assistance      │  │                 │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           Frontend Layer                                       │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   Jinja2        │  │   Static        │  │   Templates     │                │
-│  │   Templates     │  │   Assets        │  │                 │                │
-│  │                 │  │                 │  │ home.html       │                │
-│  │ Renders dynamic │  │ styles.css      │  │ directory.html  │                │
-│  │ web pages with  │  │ provides CSS    │  │ upload.html     │                │
-│  │ user interface  │  │ styling for     │  │ rate.html       │                │
-│  │ components      │  │ frontend        │  │ admin.html      │                │
-│  │                 │  │                 │  │ base.html       │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                           Frontend Layer                                        │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   Jinja2        │  │   Static        │  │   Templates     │                  │
+│  │   Templates     │  │   Assets        │  │                 │                  │
+│  │                 │  │                 │  │ home.html       │                  │
+│  │ Renders dynamic │  │ styles.css      │  │ directory.html  │                  │
+│  │ web pages with  │  │ provides CSS    │  │ upload.html     │                  │
+│  │ user interface  │  │ styling for     │  │ rate.html       │                  │
+│  │ components      │  │ frontend        │  │ admin.html      │                  │
+│  │                 │  │                 │  │ base.html       │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           Testing & Validation                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   Unit Tests    │  │   Integration   │  │   End-to-End    │                │
-│  │                 │  │   Tests         │  │   Tests         │                │
-│  │ tests/unit/     │  │ tests/integration│  │ test_aws_       │                │
-│  │ contains        │  │ contains API    │  │ integration.py  │                │
-│  │ individual      │  │ endpoint        │  │ tests complete  │                │
-│  │ metric tests    │  │ testing         │  │ system          │                │
-│  │                 │  │                 │  │ functionality  │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                           Testing & Validation                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   Unit Tests    │  │   Integration   │  │   End-to-End    │                  │
+│  │                 │  │   Tests         │  │   Tests         │                  │
+│  │ tests/unit/     │  │tests/integration│  │ test_aws_       │                  │
+│  │ contains        │  │ contains API    │  │ integration.py  │                  │
+│  │ individual      │  │ endpoint        │  │ tests complete  │                  │
+│  │ metric tests    │  │ testing         │  │ system          │                  │
+│  │                 │  │                 │  │ functionality   │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           Infrastructure as Code                               │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │
-│  │   Terraform     │  │   Docker        │  │   CI/CD         │                │
-│  │   Modules       │  │   Containers    │  │   Pipeline      │                │
-│  │                 │  │                 │  │                 │                │
-│  │ infra/modules/  │  │ Dockerfile      │  │ GitHub Actions │                │
-│  │ defines AWS     │  │ containerizes   │  │ automates       │                │
-│  │ infrastructure  │  │ application     │  │ testing and     │                │
-│  │ resources       │  │ deployment      │  │ deployment      │                │
-│  │                 │  │                 │  │                 │                │
-│  │                 │  │                 │  │ OpenAPI spec    │                │
-│  │                 │  │                 │  │ compliance      │                │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                │
+│                           Infrastructure as Code                                │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   Terraform     │  │   Docker        │  │   CI/CD         │                  │
+│  │   Modules       │  │   Containers    │  │   Pipeline      │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │ infra/modules/  │  │ Dockerfile      │  │ GitHub Actions  │                  │
+│  │ defines AWS     │  │ containerizes   │  │ automates       │                  │
+│  │ infrastructure  │  │ application     │  │ testing and     │                  │
+│  │ resources       │  │ deployment      │  │ deployment      │                  │
+│  │                 │  │                 │  │                 │                  │
+│  │                 │  │                 │  │ OpenAPI spec    │                  │
+│  │                 │  │                 │  │ compliance      │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
