@@ -44,10 +44,19 @@ def frontend_directory(request: Request, q: str | None = None, name_regex: str |
     packages = []
     try:
         effective_version_range = version_range or version
+        
         if q:
-            escaped_query = re.escape(q)
-            search_regex = f".*{escaped_query}.*"
-            result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=100)
+            # Check if the query looks like a version (e.g., "1.0.0", "v1.0.0", "~1.0.0", "^1.0.0", "1.0.0-2.0.0")
+            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
+            if re.match(version_pattern, q.strip()):
+                # Treat as version search
+                effective_version_range = q.strip()
+                result = list_models(version_range=effective_version_range, limit=100)
+            else:
+                # Treat as name search
+                escaped_query = re.escape(q)
+                search_regex = f".*{escaped_query}.*"
+                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=100)
         elif name_regex or model_regex:
             result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=100)
         else:

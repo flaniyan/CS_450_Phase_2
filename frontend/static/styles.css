@@ -17,4 +17,3 @@ form { display: grid; gap: 12px; max-width: 520px; }
 .flash.success { background: #ecfeff; border: 1px solid #22d3ee; }
 .flash.error { background: #fff1f2; border: 1px solid #fb7185; }
 .flash.warning { background: #fefce8; border: 1px solid #f59e0b; }
-

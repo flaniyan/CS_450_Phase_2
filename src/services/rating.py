@@ -40,8 +40,7 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
                 if model_content:
                     break
         if not model_content:
-            print(f"No model content found for {target}")
-            return get_default_scores()
+            raise ValueError(f"No model content found for {target}. Cannot compute metrics without model data.")
         with tempfile.TemporaryDirectory() as temp_dir:
             zip_path = os.path.join(temp_dir, f"{target}.zip")
             with open(zip_path, 'wb') as f:
@@ -55,7 +54,7 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
         print(f"Error analyzing model {target}: {e}")
         import traceback
         traceback.print_exc()
-        return get_default_scores()
+        raise RuntimeError(f"Failed to analyze model {target}: {str(e)}")
 
 def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]:
     import os
@@ -137,19 +136,6 @@ def run_acme_metrics(meta: Dict[str, Any], metric_functions: Dict[str, Any]) -> 
                 scores[output_name] = 0.0
     return scores
 
-def get_default_scores() -> Dict[str, Any]:
-    return {
-        "net_score": 0.5,
-        "ramp_up": 0.5,
-        "code_quality": 0.5,
-        "bus_factor": 0.5,
-        "pull_requests": 0.5,
-        "license": 0.5,
-        "reproducibility": 0.5,
-        "reviewedness": 0.5,
-        "treescore": 0.5,
-        "aggregation_latency": 1.0
-    }
 
 def run_scorer(target: str) -> Dict[str, Any]:
     github_token = os.environ.get("GITHUB_TOKEN")

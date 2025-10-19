@@ -122,7 +122,7 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
 def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
     if not aws_available:
         # For development/testing purposes, simulate successful upload
-        print(f"Mock upload: {model_id} v{version} ({len(file_content)} bytes)")
+        print(f"AWS not active. Mock upload: {model_id} v{version} ({len(file_content)} bytes)") 
         # Store in mock storage
         _mock_models.append({
             "model_id": model_id,
@@ -132,34 +132,54 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
         })
         return {"message": "Upload successful (mock mode - AWS not available)"}
     
-    validation = validate_huggingface_structure(file_content)
-    if not validation["valid"]:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}"
+    # AWS is available - proceed with real S3 upload
+    try:
+        validation = validate_huggingface_structure(file_content)
+        if not validation["valid"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}"
+            )
+        
+        s3_key = f"models/{model_id}/{version}/model.zip"
+        s3.put_object(
+            Bucket=ap_arn,
+            Key=s3_key,
+            Body=file_content,
+            ContentType='application/zip'
         )
-    s3_key = f"models/{model_id}/{version}/model.zip"
-    s3.put_object(
-        Bucket=ap_arn,
-        Key=s3_key,
-        Body=file_content,
-        ContentType='application/zip'
-    )
-    return {"message": "Upload successful"}
+        print(f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}")
+        return {"message": "Upload successful"}
+    
+    except Exception as e:
+        print(f"AWS S3 upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AWS upload failed: {str(e)}")
 
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     
-    s3_key = f"models/{model_id}/{version}/model.zip"
-    response = s3.get_object(Bucket=ap_arn, Key=s3_key)
-    zip_content = response['Body'].read()
-    if component != "full":
-        try:
-            return extract_model_component(zip_content, component)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    return zip_content
+    # AWS is available - proceed with real S3 download
+    try:
+        s3_key = f"models/{model_id}/{version}/model.zip"
+        print(f"AWS S3 download: {model_id} v{version} ({component}) -> {s3_key}")
+        response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+        zip_content = response['Body'].read()
+        
+        if component != "full":
+            try:
+                result = extract_model_component(zip_content, component)
+                print(f"AWS S3 download successful: {model_id} v{version} ({component})")
+                return result
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        
+        print(f"AWS S3 download successful: {model_id} v{version} (full)")
+        return zip_content
+    
+    except Exception as e:
+        print(f"AWS S3 download failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
 
 def list_models(name_regex: str = None, model_regex: str = None, version_range: str = None, limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
     if not aws_available:
@@ -170,6 +190,13 @@ def list_models(name_regex: str = None, model_regex: str = None, version_range: 
             if name_regex:
                 if not re.search(name_regex, model["model_id"], re.IGNORECASE):
                     continue
+            
+            # Apply version range filtering if specified
+            if version_range:
+                normalized_version = model["version"].lstrip('v')
+                if not version_matches_range(normalized_version, version_range):
+                    continue
+            
             filtered_models.append({
                 "model_id": model["model_id"],
                 "version": model["version"],
@@ -224,11 +251,22 @@ def reset_registry() -> Dict[str, str]:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     
+    # AWS is available - proceed with real S3 reset
     try:
+        print("AWS S3 reset: Starting registry reset...")
         response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
+        
         if 'Contents' in response:
+            deleted_count = 0
             for item in response['Contents']:
                 s3.delete_object(Bucket=ap_arn, Key=item['Key'])
+                deleted_count += 1
+            print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
+        else:
+            print("AWS S3 reset: No objects found to delete")
+        
         return {"message": "Reset done successfully"}
+    
     except Exception as e:
+        print(f"AWS S3 reset failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")
