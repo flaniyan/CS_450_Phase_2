@@ -55,12 +55,18 @@ The application is deployed on AWS with the following URLs:
    
 2. **Install dependencies and project**
    ```bash
-   python run.py install
+   ./run install
    ```
    
 3. **Run the application locally**
    ```bash
    python -m src.index
+   ```
+   
+   **Or using the Unix runner:**
+   ```bash
+   ./run install  # Install dependencies
+   python -m src.index  # Run the application
    ```
 
 4. **Access the local application**
@@ -124,16 +130,16 @@ The application provides a comprehensive package management system with the foll
 
 **Run the test suite:**
 ```bash
-python run.py test
+./run test
 ```
 Prints a coverage summary along with the pass count extracted from pytest output.
 
 **Score repositories:**
 ```bash
-python run.py score urls.txt
+./run score urls.txt
 ```
 - Passing no arguments defaults to `urls.txt`.
-- NDJSON is written to stdout; redirect to a file to persist results: `python run.py > reports.ndjson`.
+- NDJSON is written to stdout; redirect to a file to persist results: `./run score urls.txt > reports.ndjson`.
 
 ## AWS Infrastructure
 
