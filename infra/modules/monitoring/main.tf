@@ -104,6 +104,7 @@ resource "aws_cloudwatch_metric_alarm" "validator_task_count" {
     ServiceName = "validator-service"
     ClusterName = "validator-cluster"
   }
+
   
   tags = {
     Name        = "validator-task-count"
@@ -197,4 +198,5 @@ output "jwt_secret_arn" {
 output "dashboard_url" {
   value = "https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=${aws_cloudwatch_dashboard.main_dashboard.dashboard_name}"
 }
+
 

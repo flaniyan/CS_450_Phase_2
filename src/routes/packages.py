@@ -1,15 +1,37 @@
 from __future__ import annotations
-
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
+import re
 from botocore.exceptions import ClientError
-
 from ..services.s3_service import upload_model, download_model, list_models, reset_registry
 
 router = APIRouter()
 
+@router.get("/rate/{name}")
+def rate_package(name: str):
+    try:
+        from ..services.rating import run_scorer
+        result = run_scorer(name)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rate package: {str(e)}")
+
+@router.get("/search")
+def search_packages(q: str = Query(..., description="Search query for model names")):
+    try:
+        import re
+        escaped_query = re.escape(q)
+        name_regex = f".*{escaped_query}.*"
+        result = list_models(name_regex=name_regex, limit=100)
+        return {"packages": result["models"], "next_token": result["next_token"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search packages: {str(e)}")
 
 @router.get("")
 def list_packages(limit: int = Query(100, ge=1, le=1000),continuation_token: str = Query(None),name_regex: str = Query(None, description="Regex to match model names"), model_regex: str = Query(None, description="Regex to match model cards"), version_range: str = Query(None, description="Version specification: exact (1.2.3), bounded (1.2.3-2.1.0), tilde (~1.2.0), or caret (^1.2.0)")):
@@ -21,16 +43,10 @@ def list_packages(limit: int = Query(100, ge=1, le=1000),continuation_token: str
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list packages: {str(e)}")
 
-
-@router.post("/models/{model_id}/versions/{version}/upload")
-def upload_model_file(
-    model_id: str,
-    version: str,
-    file: UploadFile = File(...)
-):
+@router.post("/models/{model_id}/{version}/model.zip")
+def upload_model_file(model_id: str, version: str, file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith('.zip'):
         raise HTTPException(status_code=400, detail="Only ZIP files are supported")
-    
     try:
         file_content = file.file.read()
         result = upload_model(file_content, model_id, version)
@@ -48,23 +64,11 @@ def upload_model_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-
-@router.get("/models/{model_id}/versions/{version}/download")
-def download_model_file(
-    model_id: str,
-    version: str,
-    component: str = Query("full", description="Component to download: 'full', 'weights', or 'datasets'")
-):
+@router.get("/models/{model_id}/{version}/model.zip")
+def download_model_file(model_id: str, version: str, component: str = Query("full", description="Component to download: 'full', 'weights', or 'datasets'")):
     try:
         file_content = download_model(model_id, version, component)
-        
-        return StreamingResponse(
-            io.BytesIO(file_content),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip"
-            }
-        )
+        return StreamingResponse(io.BytesIO(file_content), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip"})
     except HTTPException:
         raise
     except ClientError as e:
@@ -80,6 +84,21 @@ def download_model_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
+@router.post("/upload")
+def upload_package(file: UploadFile = File(...), debloat: bool = Query(False)):
+    if not file.filename or not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="Only ZIP files are supported")
+    try:
+        filename = file.filename.replace('.zip', '')
+        model_id = filename
+        version = "1.0.0"
+        file_content = file.file.read()
+        result = upload_model(file_content, model_id, version, debloat)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.post("/reset")
 def reset_system():
@@ -90,5 +109,3 @@ def reset_system():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset system: {str(e)}")
-
-

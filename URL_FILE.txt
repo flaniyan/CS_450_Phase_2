@@ -1,9 +1,3 @@
-https://github.com/pallets/flask,,https://huggingface.co/pallets/flask
-https://github.com/tiangolo/fastapi,,https://huggingface.co/tiangolo/fastapi
-https://github.com/huggingface/transformers,,https://huggingface.co/transformers
-https://github.com/psf/requests,,https://huggingface.co/psf/requests
-,,https://huggingface.co/gpt2
-,,https://huggingface.co/facebook/bart-large
-https://github.com/pytorch/pytorch,,https://huggingface.co/pytorch/pytorch
-https://github.com/numpy/numpy,,https://huggingface.co/numpy/numpy
-https://github.com/scikit-learn/scikit-learn,,https://huggingface.co/scikit-learn/scikit-learn
+https://github.com/google-research/bert, https://huggingface.co/datasets/bookcorpus/bookcorpus, https://huggingface.co/google-bert/bert-base-uncased
+,,https://huggingface.co/parvk11/audience_classifier_model
+,,https://huggingface.co/openai/whisper-tiny/tree/main

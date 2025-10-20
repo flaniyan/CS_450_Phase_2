@@ -8,6 +8,8 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarel
 .btn-danger { background: var(--danger); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+.card-actions { display: flex; gap: 8px; margin-top: 12px; }
+.card-actions .btn { flex: 1; text-align: center; }
 input[type=text], input[type=file] { padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
 form { display: grid; gap: 12px; max-width: 520px; }
 .flash-container { margin: 16px auto; max-width: 1100px; padding: 0 16px; }
@@ -15,4 +17,3 @@ form { display: grid; gap: 12px; max-width: 520px; }
 .flash.success { background: #ecfeff; border: 1px solid #22d3ee; }
 .flash.error { background: #fff1f2; border: 1px solid #fb7185; }
 .flash.warning { background: #fefce8; border: 1px solid #f59e0b; }
-
