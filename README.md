@@ -155,6 +155,23 @@ The application is deployed on AWS using the following services:
 - **ECR**: Container registry for Docker images
 - **IAM**: Role-based access control for AWS services
 
+### 🚀 CI/CD Pipeline
+
+The project includes a complete CI/CD pipeline:
+
+**Continuous Integration (CI):**
+- Automated testing on pull requests
+- Code quality checks and linting
+- Smoke testing on main branch
+
+**Continuous Deployment (CD):**
+- Automatic Docker image build and push to ECR
+- Infrastructure updates via Terraform
+- ECS service deployment with health checks
+- Rollback capability on deployment failures
+
+See [CD_SETUP_GUIDE.md](CD_SETUP_GUIDE.md) for configuration instructions.
+
 ### 📊 Current Deployment Status
 
 **✅ Working Features:**
