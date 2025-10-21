@@ -1,5 +1,4 @@
 name: Add Copilot Reviewer
-
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
@@ -9,13 +8,14 @@ jobs:
   add-copilot:
     runs-on: ubuntu-latest
     steps:
-      - name: Add Copilot reviewer
+      - name: Add Copilot as reviewer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
+          echo '{"reviewers":["github-copilot"]}' > body.json
           gh api \
-            -X POST \
             repos/$REPO/pulls/$PR_NUMBER/requested_reviewers \
-            -f reviewers='["github-copilot"]'
+            --method POST \
+            --input body.json
