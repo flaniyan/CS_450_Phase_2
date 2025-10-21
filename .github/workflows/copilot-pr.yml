@@ -1,25 +1,21 @@
-name: Copilot PR Review
+name: Add Copilot Reviewer
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  workflow_dispatch:  # allows manual run via CLI or Actions tab
-
+    types: [opened, reopened, ready_for_review]
 permissions:
-  contents: read
-  pull-requests: write  # required for leaving PR review comments
-
+  pull-requests: write
 jobs:
-  copilot-pr-review:
-    name: Run Copilot PR Review
+  add-copilot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Run Copilot review
-        uses: actions/github-script@v7
-        with:
-          script: |
-            console.log('Copilot PR review placeholder - no official action available');
+      - name: Add Copilot reviewer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api \
+            -X POST \
+            repos/$REPO/pulls/$PR_NUMBER/requested_reviewers \
+            -f reviewers='["github-copilot"]'
