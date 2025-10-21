@@ -1,0 +1,16 @@
+This is a simulated GPT-2 model weights file for testing purposes.
+It contains dummy weight data that represents a 117M parameter GPT-2 model.
+The actual content doesn't matter for testing the upload functionality,
+but this simulates the structure of a real PyTorch model file.
+
+File size: ~500MB (simulated)
+Model type: GPT-2
+Architecture: Transformer
+Layers: 12
+Hidden size: 768
+Attention heads: 12
+Vocabulary size: 50,257
+
+This file would normally contain the actual model weights
+in PyTorch's state_dict format, but for testing purposes,
+we're using this placeholder content.

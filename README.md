@@ -21,40 +21,32 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### Option 1: AWS Cloud Deployment (Production Ready)
 
-1. **Ensure Docker Desktop is running**
-   
-2. **Build and run with Docker Compose**
-   ```bash
-   cd Dev-ACME
-   docker-compose up
-   ```
-   
-3. **Or build and run manually**
-   ```bash
-   cd Dev-ACME
-   docker build -t acme-api .
-   docker run -p 3000:3000 acme-api
-   ```
+The application is deployed on AWS with the following URLs:
 
-4. **Access the application**
-   - Frontend home: `http://localhost:3000/`
-   - API health: `http://localhost:3000/health`
-   - API hello: `http://localhost:3000/api/hello`
-   - API rate endpoint: `POST http://localhost:3000/api/registry/models/{modelId}/rate`
-   - Frontend pages: `/directory`, `/rate`, `/upload`, `/admin`
+**🌐 Production URLs:**
+- **Main Website**: `https://d6zjk2j65mgd4.cloudfront.net/`
+- **Package Directory**: `https://d6zjk2j65mgd4.cloudfront.net/directory`
+- **Upload Packages**: `https://d6zjk2j65mgd4.cloudfront.net/upload` *(Note: CloudFront POST requests need configuration fix)*
+- **Rate Packages**: `https://d6zjk2j65mgd4.cloudfront.net/rate`
+- **Admin Panel**: `https://d6zjk2j65mgd4.cloudfront.net/admin`
 
-5. **Stop the container**
-   ```bash
-   docker-compose down
-   ```
+**🔧 Direct AWS URLs (Bypass CloudFront):**
+- **Direct Upload**: `http://validator-lb-727503296.us-east-1.elb.amazonaws.com/upload`
+- **Direct Directory**: `http://validator-lb-727503296.us-east-1.elb.amazonaws.com/directory`
 
-**Note:** When Uvicorn starts, it displays `http://0.0.0.0:3000` (listening on all interfaces). Access it at `http://localhost:3000` in your browser.
+**📡 API Endpoints:**
+- **Health Check**: `https://d6zjk2j65mgd4.cloudfront.net/health`
+- **API Hello**: `https://d6zjk2j65mgd4.cloudfront.net/api/hello`
+- **List Packages**: `GET https://d6zjk2j65mgd4.cloudfront.net/api/packages`
+- **Upload Package**: `POST https://d6zjk2j65mgd4.cloudfront.net/api/packages/models/{model_id}/versions/{version}/upload`
+- **Download Package**: `GET https://d6zjk2j65mgd4.cloudfront.net/api/packages/models/{model_id}/versions/{version}/download`
+- **Reset Registry**: `POST https://d6zjk2j65mgd4.cloudfront.net/api/packages/reset`
 
-### Option 2: Local Development (Without Docker)
+### Option 2: Local Development
 
-1. **Environment**
+1. **Environment Setup**
    ```bash
    py -3.12 -m venv .venv
    .venv\Scripts\activate
@@ -63,34 +55,124 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
    
 2. **Install dependencies and project**
    ```bash
-   python run.py install
+   ./run install
    ```
-   Installs requirements from `requirements.txt` followed by an editable install of the package under `src/`.
    
-3. **Run the test suite**
+3. **Run the application locally**
    ```bash
-   python run.py test
+   python -m src.index
    ```
-   Prints a coverage summary along with the pass count extracted from pytest output.
    
-4. **Run unified API + Frontend (single server)**
-   ```powershell
-   # From repository root
-   . .venv/Scripts/Activate.ps1
-   pip install -r requirements.txt
-   python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
+   **Or using the Unix runner:**
+   ```bash
+   ./run install  # Install dependencies
+   python -m src.index  # Run the application
    ```
-   - Access at: `http://localhost:3000`
+
+4. **Access the local application**
+   - Frontend home: `http://localhost:3000/`
+   - Package Directory: `http://localhost:3000/directory`
+   - Upload Packages: `http://localhost:3000/upload`
+   - Rate Packages: `http://localhost:3000/rate`
+   - Admin Panel: `http://localhost:3000/admin`
    - API health: `http://localhost:3000/health`
    - API hello: `http://localhost:3000/api/hello`
-   - Frontend pages: `/`, `/directory`, `/rate`, `/upload`, `/admin`
 
-5. **Score repositories**
+### Option 3: Docker (Development)
+
+1. **Ensure Docker Desktop is running**
+   
+2. **Build and run with Docker Compose**
    ```bash
-   python run.py score urls.txt
+   docker-compose up
    ```
-   - Passing no arguments defaults to `urls.txt`.
-   - NDJSON is written to stdout; redirect to a file to persist results: `python run.py > reports.ndjson`.
+   
+3. **Or build and run manually**
+   ```bash
+   docker build -t validator-api .
+   docker run -p 3000:3000 validator-api
+   ```
+
+4. **Stop the container**
+   ```bash
+   docker-compose down
+   ```
+
+**Note:** When Uvicorn starts, it displays `http://0.0.0.0:3000` (listening on all interfaces). Access it at `http://localhost:3000` in your browser.
+
+## Package Management API
+
+The application provides a comprehensive package management system with the following capabilities:
+
+### 📦 Package Operations
+
+**Upload Packages:**
+- **Frontend**: Use the web interface at `/upload` to upload ZIP files containing HuggingFace models
+- **API**: `POST /api/packages/models/{model_id}/versions/{version}/upload`
+- **Supported formats**: ZIP files containing HuggingFace model structure (config.json, pytorch_model.bin, tokenizer files, etc.)
+- **Features**: Automatic model validation, S3 storage, version management
+
+**List Packages:**
+- **Frontend**: Browse packages at `/directory` with search functionality
+- **API**: `GET /api/packages?limit=100&name_regex=pattern&version_range=1.0.0-2.0.0`
+- **Features**: Pagination, regex filtering, version range filtering
+
+**Download Packages:**
+- **API**: `GET /api/packages/models/{model_id}/versions/{version}/download?component=full`
+- **Components**: `full` (complete model), `weights` (model weights only), `datasets` (datasets only)
+- **Features**: Streaming download, component extraction
+
+**Reset Registry:**
+- **API**: `POST /api/packages/reset`
+- **Purpose**: Clear all packages from the registry (admin function)
+
+### 🔧 Testing and Development
+
+**Run the test suite:**
+```bash
+./run test
+```
+Prints a coverage summary along with the pass count extracted from pytest output.
+
+**Score repositories:**
+```bash
+./run score urls.txt
+```
+- Passing no arguments defaults to `urls.txt`.
+- NDJSON is written to stdout; redirect to a file to persist results: `./run score urls.txt > reports.ndjson`.
+
+## AWS Infrastructure
+
+The application is deployed on AWS using the following services:
+
+### 🏗️ Architecture Components
+
+- **ECS Fargate**: Containerized FastAPI application running on AWS managed containers
+- **Application Load Balancer (ALB)**: Routes traffic to ECS tasks with health checks
+- **CloudFront CDN**: Global content delivery with HTTPS and caching
+- **S3 Bucket**: Package storage with Access Point for secure access
+- **DynamoDB**: Metadata storage for packages and user data
+- **ECR**: Container registry for Docker images
+- **IAM**: Role-based access control for AWS services
+
+### 📊 Current Deployment Status
+
+**✅ Working Features:**
+- Package upload via localhost and direct AWS URLs
+- Package listing and directory browsing
+- Package download and streaming
+- Health checks and API endpoints
+- Frontend web interface
+
+**⚠️ Known Issues:**
+- CloudFront POST requests blocked (403 error) - needs AllowedMethods configuration update
+- Use direct AWS URLs for uploads until CloudFront is fixed
+
+**🔧 Infrastructure Files:**
+- `AWS_SETUP_GUIDE.md`: Complete AWS infrastructure documentation
+- `AWS_IMPLEMENTATION_SUMMARY.md`: Current deployment status and issues
+- `docker-compose.yml`: Local development with Docker
+- `Dockerfile`: Container configuration for AWS deployment
 
 ## Project Layout
 
