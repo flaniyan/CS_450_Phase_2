@@ -1,62 +1,66 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "trustworthy-model-registry"
-version = "1.0.0"
-description = "A Trustworthy Model Registry for ACME Corporation"
-authors = [{name = "BSS Team", email = "team@bss.com"}]
-license = {text = "MIT"}
+name = "ai-model-catalog"
+version = "0.1.0"
+description = "CLI to browse and evaluate AI/ML models with metadata."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "boto3>=1.34.0",
-    "botocore>=1.34.0",
-    "pydantic>=2.5.0",
-    "python-multipart>=0.0.6",
-    "requests>=2.31.0",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
-    "python-dotenv>=1.0.0"
+  "typer>=0.12",
+  "requests>=2.32",
+  "pydantic>=2.8",        # handy for typed config/models
+  "GitPython>=3.1",       # for local repository analysis
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "httpx>=0.25.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.7.0"
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "coverage>=7.0",
+  "pylint>=3.2",
+  "pre-commit>=3.7",
 ]
 
-[tool.black]
-line-length = 88
-target-version = ['py38']
+[project.scripts]
+catalog = "ai_model_catalog.cli:app"  # `catalog ...` runs Typer app
+catalog-interactive = "ai_model_catalog.cli:interactive_main"  # `catalog-interactive` runs interactive version
+
+[tool.pytest.ini_options]
+addopts = "-ra -q --strict-markers --disable-warnings"
+testpaths = ["tests"]
+
+[tool.pylint.'MESSAGES CONTROL']
+disable = [
+  "missing-module-docstring",
+  "missing-function-docstring",
+  "missing-class-docstring",
+  "too-few-public-methods"
+]
+
+[tool.pylint.FORMAT]
+max-line-length = 100
+
+[tool.pylint.MASTER]
+py-version = "3.10"
+
+[tool.pylint.BASIC]
+good-names = ["i","j","k","v","e","id","db"]
+
+[tool.coverage.run]
+source = ["src/ai_model_catalog"]
+
+[tool.coverage.report]
+skip_empty = true
 
 [tool.isort]
 profile = "black"
-line_length = 88
+line_length = 100
+src_paths = ["src", "tests"]
+known_first_party = ["ai_model_catalog"]
 
 [tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
-[tool.pytest.ini_options]
-testpaths = ["tests/unit"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = ["-v", "--tb=short"]
-markers = [
-    "unit: Unit tests",
-    "integration: Integration tests"
-]
-norecursedirs = ["actions_runner"]
+python_version = "3.13"
+mypy_path = ["src"]                # so it finds ai_model_catalog in src/
+ignore_missing_imports = true      # don't fail on 3rd-party packages without stubs
+pretty = true
+warn_unused_ignores = true
+warn_redundant_casts = true
