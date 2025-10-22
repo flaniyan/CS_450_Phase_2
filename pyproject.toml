@@ -35,9 +35,6 @@ dev = [
     "mypy>=1.7.0"
 ]
 
-[project.scripts]
-dev = "src.index:main"
-start = "src.index:main"
 
 [tool.black]
 line-length = 88
