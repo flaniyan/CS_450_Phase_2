@@ -35,7 +35,6 @@ dev = [
     "mypy>=1.7.0"
 ]
 
-
 [tool.black]
 line-length = 88
 target-version = ['py38']
@@ -51,7 +50,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -60,3 +59,4 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests"
 ]
+norecursedirs = ["actions_runner"]
