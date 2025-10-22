@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ai-model-catalog"
 version = "0.1.0"
@@ -20,13 +24,10 @@ dev = [
   "pre-commit>=3.7",
 ]
 
-[project.scripts]
-catalog = "ai_model_catalog.cli:app"  # `catalog ...` runs Typer app
-catalog-interactive = "ai_model_catalog.cli:interactive_main"  # `catalog-interactive` runs interactive version
-
 [tool.pytest.ini_options]
 addopts = "-ra -q --strict-markers --disable-warnings"
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
+norecursedirs = ["actions_runner"]
 
 [tool.pylint.'MESSAGES CONTROL']
 disable = [
