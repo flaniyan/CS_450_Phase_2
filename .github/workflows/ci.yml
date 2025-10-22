@@ -42,7 +42,24 @@ jobs:
         run: |
           echo "Cache bust: $(date +%s)" > .cache-bust
           echo "Commit: ${{ github.sha }}" >> .cache-bust
+      - name: Debug environment
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Files in directory:"
+          ls -la
+          echo "Python version:"
+          python --version
+          echo "Pip version:"
+          pip --version
+      - name: Make run script executable
+        run: chmod +x ./run
       - name: Install dependencies
-        run: ./run install
+        run: |
+          echo "Starting dependency installation..."
+          ./run install
+          echo "Dependency installation completed"
       - name: Run tests
-        run: ./run test
+        run: |
+          echo "Starting test execution..."
+          ./run test
+          echo "Test execution completed"
