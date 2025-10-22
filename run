@@ -70,8 +70,8 @@ install_deps() {
         }
     fi
     if [[ -f "pyproject.toml" ]]; then
-        # skip -e to avoid setup.py errors
-        $PYTHON_CMD -m pip install --quiet . || true
+        # Install in development mode so tests can import acmecli
+        $PYTHON_CMD -m pip install --quiet -e . || true
     fi
     echo "✅ Installation completed successfully!"
     exit 0
@@ -82,7 +82,7 @@ install_deps() {
 # -------------------
 run_tests() {
     check_python
-    if ! $PYTHON_CMD -m coverage run --source=src/acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
+    if ! $PYTHON_CMD -m coverage run --source=acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
         true
     fi
 
