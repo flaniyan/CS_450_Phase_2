@@ -30,7 +30,7 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
       TF_CLI_ARGS: "-lock-timeout=5m"
-      USE_OIDC: "true" # Set to "false" to use static credentials
+      USE_OIDC: "false" # Set to "false" to use static credentials
 
     steps:
       - name: Checkout
