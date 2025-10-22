@@ -21,9 +21,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch || github.ref }}
+          fetch-depth: 0  # Fetch full history to avoid shallow clone issues
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: false  # Disable pip cache
+      - name: Clear pip cache
+        run: |
+          python -m pip cache purge
+          rm -rf ~/.cache/pip
+      - name: Clean build artifacts
+        run: |
+          rm -rf build/
+          rm -rf dist/
+          rm -rf *.egg-info/
+          rm -rf src/*.egg-info/
+          find . -name "__pycache__" -type d -exec rm -rf {} + || true
+          find . -name "*.pyc" -delete || true
+      - name: Force fresh installation
+        run: |
+          echo "Cache bust: $(date +%s)" > .cache-bust
+          echo "Commit: ${{ github.sha }}" >> .cache-bust
       - name: Install dependencies
         run: ./run install
       - name: Run tests
