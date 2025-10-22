@@ -134,6 +134,10 @@ def frontend_reset():
     except Exception as e:
         return {"error": f"Reset failed: {str(e)}"}
 
+def main():
+    """Main entry point for the application."""
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "3000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    main()

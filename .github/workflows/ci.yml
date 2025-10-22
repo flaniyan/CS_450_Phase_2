@@ -6,17 +6,25 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on'
+        required: true
+        default: 'main'
+        type: string
 
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - shell: bash
+      - name: Install dependencies
         run: ./run install
-      - shell: bash
+      - name: Run tests
         run: ./run test

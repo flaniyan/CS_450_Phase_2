@@ -81,7 +81,7 @@ install_deps() {
 # -------------------
 run_tests() {
     check_python
-    if ! $PYTHON_CMD -m coverage run --source=ai_model_catalog -m pytest tests -q --disable-warnings > pytest_output.log 2>&1; then
+    if ! $PYTHON_CMD -m coverage run --source=src -m pytest tests -q --disable-warnings > pytest_output.log 2>&1; then
         true
     fi
 
