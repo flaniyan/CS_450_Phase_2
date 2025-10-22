@@ -63,6 +63,22 @@ check_python() {
 # -------------------
 install_deps() {
     check_python
+    
+    # Create virtual environment if it doesn't exist
+    if [[ ! -d ".venv" ]]; then
+        echo "Creating virtual environment..."
+        $PYTHON_CMD -m venv .venv
+    fi
+    
+    # Activate virtual environment
+    if [[ -f ".venv/bin/activate" ]]; then
+        source .venv/bin/activate
+        PYTHON_CMD=".venv/bin/python"
+    elif [[ -f ".venv/Scripts/activate" ]]; then
+        source .venv/Scripts/activate
+        PYTHON_CMD=".venv/Scripts/python"
+    fi
+    
     if [[ -f "requirements.txt" ]]; then
         $PYTHON_CMD -m pip install --quiet -r requirements.txt || {
             echo "{\"error\": \"Failed to install requirements.txt\"}"
@@ -81,6 +97,16 @@ install_deps() {
 # -------------------
 run_tests() {
     check_python
+    
+    # Use virtual environment if it exists
+    if [[ -f ".venv/bin/activate" ]]; then
+        source .venv/bin/activate
+        PYTHON_CMD=".venv/bin/python"
+    elif [[ -f ".venv/Scripts/activate" ]]; then
+        source .venv/Scripts/activate
+        PYTHON_CMD=".venv/Scripts/python"
+    fi
+    
     if ! $PYTHON_CMD -m coverage run --source=src/acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
         true
     fi

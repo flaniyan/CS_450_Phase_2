@@ -6,60 +6,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      branch:
-        description: 'Branch to run CI on'
-        required: true
-        default: 'main'
-        type: string
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.branch || github.ref }}
-          fetch-depth: 0  # Fetch full history to avoid shallow clone issues
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: false  # Disable pip cache
-      - name: Clear pip cache
-        run: |
-          python -m pip cache purge
-          rm -rf ~/.cache/pip
-      - name: Clean build artifacts
-        run: |
-          rm -rf build/
-          rm -rf dist/
-          rm -rf *.egg-info/
-          rm -rf src/*.egg-info/
-          find . -name "__pycache__" -type d -exec rm -rf {} + || true
-          find . -name "*.pyc" -delete || true
-      - name: Force fresh installation
-        run: |
-          echo "Cache bust: $(date +%s)" > .cache-bust
-          echo "Commit: ${{ github.sha }}" >> .cache-bust
-      - name: Debug environment
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "Files in directory:"
-          ls -la
-          echo "Python version:"
-          python --version
-          echo "Pip version:"
-          pip --version
-      - name: Make run script executable
-        run: chmod +x ./run
-      - name: Install dependencies
-        run: |
-          echo "Starting dependency installation..."
-          ./run install
-          echo "Dependency installation completed"
-      - name: Run tests
-        run: |
-          echo "Starting test execution..."
-          ./run test
-          echo "Test execution completed"
+      - shell: bash
+        run: ./run install
+      - shell: bash
+        run: ./run test
