@@ -1,6 +1,3 @@
-variable "artifacts_bucket" { type = string }
-variable "ddb_tables_arnmap" { type = map(string) }
-
 # ECS Cluster
 resource "aws_ecs_cluster" "validator_cluster" {
   name = "validator-cluster"
@@ -23,7 +20,7 @@ resource "aws_ecs_task_definition" "validator_task" {
 
   container_definitions = jsonencode([{
     name  = "validator-service"
-    image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-api:latest"
+    image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
     
     portMappings = [{
       containerPort = 3000

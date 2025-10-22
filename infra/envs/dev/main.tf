@@ -36,6 +36,7 @@ module "iam" {
 module "ecs" {
   source            = "../../modules/ecs"
   artifacts_bucket  = "pkg-artifacts"
+  image_tag         = var.image_tag
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
@@ -46,11 +47,29 @@ module "ecs" {
 }
 
 module "monitoring" {
-  source = "../../modules/monitoring"
+  source                = "../../modules/monitoring"
+  artifacts_bucket      = "pkg-artifacts"
+  validator_service_url = module.ecs.validator_service_url
+  ddb_tables_arnmap     = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
+  }
 }
 
 module "api_gateway" {
-  source = "../../modules/api-gateway"
+  source                = "../../modules/api-gateway"
+  artifacts_bucket      = "pkg-artifacts"
+  validator_service_url = module.ecs.validator_service_url
+  ddb_tables_arnmap     = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
+  }
 }
 
 output "artifacts_bucket" { value = "pkg-artifacts" }
