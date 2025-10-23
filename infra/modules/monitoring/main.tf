@@ -1,202 +1,132 @@
-variable "artifacts_bucket" { type = string }
-variable "ddb_tables_arnmap" { type = map(string) }
-variable "validator_service_url" { type = string }
-
-# KMS Key for encryption
-resource "aws_kms_key" "main_key" {
-  description             = "KMS key for ACME project encryption"
-  deletion_window_in_days = 7
-  
-  tags = {
-    Name        = "acme-main-key"
-    Environment = "dev"
-    Project     = "CS_450_Phase_2"
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
   }
 }
 
-resource "aws_kms_alias" "main_key_alias" {
-  name          = "alias/acme-main-key"
-  target_key_id = aws_kms_key.main_key.key_id
+provider "aws" {
+  region = var.aws_region
 }
 
-# Secrets Manager for JWT secret
-resource "aws_secretsmanager_secret" "jwt_secret" {
-  name = "acme-jwt-secret"
-  
-  kms_key_id = aws_kms_key.main_key.arn
-  
-  tags = {
-    Name        = "acme-jwt-secret"
-    Environment = "dev"
-    Project     = "CS_450_Phase_2"
+# module "s3" {
+#   source         = "../../modules/s3"
+#   artifacts_name = var.artifacts_bucket
+# }
+
+# module "ddb" {
+#   source = "../../modules/dynamodb"
+# }
+
+module "iam" {
+  source            = "../../modules/iam"
+  artifacts_bucket  = "pkg-artifacts"
+  ddb_tables_arnmap = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
   }
 }
 
-resource "aws_secretsmanager_secret_version" "jwt_secret" {
-  secret_id = aws_secretsmanager_secret.jwt_secret.id
-  secret_string = jsonencode({
-    jwt_secret = "your-super-secret-jwt-key-change-this-in-production"
-    jwt_algorithm = "HS256"
-    jwt_expiration_hours = 10
-    jwt_max_uses = 1000
-  })
-}
-
-# CloudWatch Alarms
-resource "aws_cloudwatch_metric_alarm" "validator_high_cpu" {
-  alarm_name          = "validator-high-cpu"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/ECS"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "This metric monitors validator service CPU utilization"
-  
-  dimensions = {
-    ServiceName = "validator-service"
-    ClusterName = "validator-cluster"
-  }
-  
-  tags = {
-    Name        = "validator-high-cpu"
-    Environment = "dev"
-    Project     = "CS_450_Phase_2"
+module "ecs" {
+  source            = "../../modules/ecs"
+  artifacts_bucket  = "pkg-artifacts"
+  ddb_tables_arnmap = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "validator_high_memory" {
-  alarm_name          = "validator-high-memory"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "MemoryUtilization"
-  namespace           = "AWS/ECS"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "This metric monitors validator service memory utilization"
-  
-  dimensions = {
-    ServiceName = "validator-service"
-    ClusterName = "validator-cluster"
+module "api_gateway" {
+  source              = "../../modules/api-gateway"
+  artifacts_bucket    = "pkg-artifacts"
+  ddb_tables_arnmap   = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
   }
-  
-  tags = {
-    Name        = "validator-high-memory"
-    Environment = "dev"
-    Project     = "CS_450_Phase_2"
-  }
+  validator_service_url = module.ecs.validator_service_url
 }
 
-resource "aws_cloudwatch_metric_alarm" "validator_task_count" {
-  alarm_name          = "validator-task-count"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "RunningTaskCount"
-  namespace           = "AWS/ECS"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = "1"
-  alarm_description   = "This metric monitors validator service task count"
-  
-  dimensions = {
-    ServiceName = "validator-service"
-    ClusterName = "validator-cluster"
+module "monitoring" {
+  source              = "../../modules/monitoring"
+  artifacts_bucket    = "pkg-artifacts"
+  ddb_tables_arnmap   = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
   }
+  validator_service_url = module.ecs.validator_service_url
+}
 
-  
-  tags = {
-    Name        = "validator-task-count"
-    Environment = "dev"
-    Project     = "CS_450_Phase_2"
+output "artifacts_bucket" { value = "pkg-artifacts" }
+output "group106_policy_arn" { value = module.iam.group106_policy_arn }
+output "ddb_tables" { 
+  value = {
+    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
+    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
+    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
+    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
+    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
   }
 }
+output "validator_service_url" { value = module.ecs.validator_service_url }
+output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }
+output "ecr_repository_url" { value = module.ecs.ecr_repository_url }
+output "api_gateway_url" { value = module.api_gateway.api_gateway_url }
+output "kms_key_arn" { value = module.monitoring.kms_key_arn }
+output "jwt_secret_arn" { value = module.monitoring.jwt_secret_arn }
+output "dashboard_url" { value = module.monitoring.dashboard_url }
 
-# CloudWatch Dashboard
-resource "aws_cloudwatch_dashboard" "main_dashboard" {
-  dashboard_name = "acme-main-dashboard"
-
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "metric"
-        x      = 0
-        y      = 0
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/ECS", "CPUUtilization", "ServiceName", "validator-service", "ClusterName", "validator-cluster"],
-            [".", "MemoryUtilization", ".", ".", ".", "."],
-            [".", "RunningTaskCount", ".", ".", ".", "."]
-          ]
-          view    = "timeSeries"
-          stacked = false
-          region  = "us-east-1"
-          title   = "ECS Validator Service Metrics"
-          period  = 300
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 6
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "packages"],
-            [".", "ConsumedWriteCapacityUnits", ".", "."],
-            [".", "ConsumedReadCapacityUnits", "TableName", "users"],
-            [".", "ConsumedWriteCapacityUnits", ".", "."]
-          ]
-          view    = "timeSeries"
-          stacked = false
-          region  = "us-east-1"
-          title   = "DynamoDB Metrics"
-          period  = 300
-        }
-      },
-      {
-        type   = "metric"
-        x      = 0
-        y      = 12
-        width  = 12
-        height = 6
-
-        properties = {
-          metrics = [
-            ["AWS/S3", "BucketSizeBytes", "BucketName", var.artifacts_bucket, "StorageType", "StandardStorage"],
-            [".", "NumberOfObjects", ".", ".", ".", "."]
-          ]
-          view    = "timeSeries"
-          stacked = false
-          region  = "us-east-1"
-          title   = "S3 Bucket Metrics"
-          period  = 300
-        }
-      }
-    ]
-  })
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
+  }
 }
 
-output "kms_key_arn" {
-  value = aws_kms_key.main_key.arn
+provider "aws" {
+  region = var.aws_region
 }
 
-output "kms_key_alias" {
-  value = aws_kms_alias.main_key_alias.name
+module "s3" {
+  source         = "../../modules/s3"
+  artifacts_name = var.artifacts_bucket
 }
 
-output "jwt_secret_arn" {
-  value = aws_secretsmanager_secret.jwt_secret.arn
+module "ddb" {
+  source = "../../modules/dynamodb"
 }
 
-output "dashboard_url" {
-  value = "https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=${aws_cloudwatch_dashboard.main_dashboard.dashboard_name}"
+module "iam" {
+  source            = "../../modules/iam"
+  artifacts_bucket  = module.s3.artifacts_bucket
+  ddb_tables_arnmap = module.ddb.arn_map
 }
 
+module "ecs" {
+  source            = "../../modules/ecs"
+  artifacts_bucket  = module.s3.artifacts_bucket
+  ddb_tables_arnmap = module.ddb.arn_map
+}
 
+output "artifacts_bucket" { value = module.s3.artifacts_bucket }
+output "group106_policy_arn" { value = module.iam.group106_policy_arn }
+output "ddb_tables" { value = module.ddb.arn_map }
+output "validator_service_url" { value = module.ecs.validator_service_url }
+output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }

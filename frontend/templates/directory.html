@@ -2,10 +2,79 @@
 {% block content %}
 <section class="container">
   <h1>Package Directory</h1>
-  <form method="get" aria-label="Search packages">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search packages..." aria-label="Search packages" />
-    <button type="submit" class="btn">Search</button>
+  
+  <!-- Basic Search -->
+  <form method="get" aria-label="Search packages" class="search-form">
+    <div class="search-group">
+      <label for="q">Quick Search:</label>
+      <input type="text" name="q" id="q" value="{{ q }}" placeholder="Search packages..." aria-label="Search packages" />
+      <button type="submit" class="btn">Search</button>
+    </div>
   </form>
+
+  <!-- Advanced Search -->
+  <details class="advanced-search">
+    <summary>Advanced Search Options</summary>
+    
+    <div class="search-help">
+      <h4>Search Types:</h4>
+      <ul>
+        <li><strong>Name Regex:</strong> Searches model names (e.g., <code>^gpt-.*</code> finds models starting with "gpt-")</li>
+        <li><strong>Model Card Regex:</strong> Searches within model files like README.md, config.json, and code files (e.g., <code>transformer|bert</code> finds models mentioning these terms)</li>
+        <li><strong>Version Range:</strong> Filters by version using exact, bounded, tilde (~), or caret (^) ranges</li>
+      </ul>
+    </div>
+    <form method="get" aria-label="Advanced search" class="advanced-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="name_regex">Name Regex:</label>
+          <input type="text" name="name_regex" id="name_regex" value="{{ name_regex or '' }}" placeholder="e.g., ^model-.*" />
+          <small>Regular expression to match model names</small>
+        </div>
+        <div class="form-group">
+          <label for="model_regex">Model Card Regex:</label>
+          <input type="text" name="model_regex" id="model_regex" value="{{ model_regex or '' }}" placeholder="e.g., .*transformer.*|.*bert.*" />
+          <small>Regular expression to search within model files (README, config.json, code files, etc.)</small>
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label for="version_range">Version Range:</label>
+          <input type="text" name="version_range" id="version_range" value="{{ version_range or '' }}" placeholder="e.g., 1.0.0, ~1.2.0, ^2.0.0, 1.0.0-2.1.0" />
+          <small>Version specification: exact (1.2.3), bounded (1.2.3-2.1.0), tilde (~1.2.0), or caret (^1.2.0)</small>
+        </div>
+        <div class="form-group">
+          <label for="version">Exact Version:</label>
+          <input type="text" name="version" id="version" value="{{ version or '' }}" placeholder="e.g., 1.0.0" />
+          <small>Alternative to version range for exact version matching</small>
+        </div>
+      </div>
+      
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Advanced Search</button>
+        <button type="button" class="btn btn-secondary" onclick="clearAdvancedForm()">Clear</button>
+      </div>
+    </form>
+  </details>
+
+  <!-- Search Results Info -->
+  {% if packages %}
+    <div class="search-info">
+      <p>Found {{ packages|length }} package(s)</p>
+      {% if q or name_regex or model_regex or version_range or version %}
+        <p>Search criteria: 
+          {% if q %}<span class="search-criteria">Query: "{{ q }}"</span>{% endif %}
+          {% if name_regex %}<span class="search-criteria">Name Regex: "{{ name_regex }}"</span>{% endif %}
+          {% if model_regex %}<span class="search-criteria">Model Regex: "{{ model_regex }}"</span>{% endif %}
+          {% if version_range %}<span class="search-criteria">Version Range: "{{ version_range }}"</span>{% endif %}
+          {% if version %}<span class="search-criteria">Exact Version: "{{ version }}"</span>{% endif %}
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <!-- Package Grid -->
   <div class="grid">
     {% for p in packages %}
       <div class="card">
@@ -23,10 +92,177 @@
         </div>
       </div>
     {% else %}
-      <p>No packages found.</p>
+      <div class="no-results">
+        <p>No packages found.</p>
+        {% if q or name_regex or model_regex or version_range or version %}
+          <p>Try adjusting your search criteria or <a href="/directory">view all packages</a>.</p>
+        {% endif %}
+      </div>
     {% endfor %}
   </div>
 </section>
+
+<style>
+.search-form {
+  margin-bottom: 1rem;
+}
+
+.search-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.search-group label {
+  font-weight: bold;
+  min-width: 100px;
+}
+
+.search-group input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.advanced-search {
+  margin: 1rem 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.advanced-search summary {
+  cursor: pointer;
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.search-help {
+  background-color: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  border-left: 4px solid #007bff;
+}
+
+.search-help h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #495057;
+}
+
+.search-help ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.search-help li {
+  margin-bottom: 0.5rem;
+}
+
+.search-help code {
+  background-color: #e9ecef;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.advanced-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.form-group input {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.form-group small {
+  color: #666;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-secondary {
+  background-color: #6c757d;
+  color: white;
+}
+
+.search-info {
+  background-color: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.search-criteria {
+  background-color: #e9ecef;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  margin-right: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.no-results {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .search-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .search-group label {
+    min-width: auto;
+  }
+}
+</style>
+
+<script>
+function clearAdvancedForm() {
+  document.getElementById('name_regex').value = '';
+  document.getElementById('model_regex').value = '';
+  document.getElementById('version_range').value = '';
+  document.getElementById('version').value = '';
+}
+</script>
 {% endblock %}
 
 

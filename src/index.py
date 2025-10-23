@@ -44,16 +44,13 @@ def frontend_directory(request: Request, q: str | None = None, name_regex: str |
     packages = []
     try:
         effective_version_range = version_range or version
-        
         if q:
             # Check if the query looks like a version (e.g., "1.0.0", "v1.0.0", "~1.0.0", "^1.0.0", "1.0.0-2.0.0")
             version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
             if re.match(version_pattern, q.strip()):
-                # Treat as version search
                 effective_version_range = q.strip()
                 result = list_models(version_range=effective_version_range, limit=100)
             else:
-                # Treat as name search
                 escaped_query = re.escape(q)
                 search_regex = f".*{escaped_query}.*"
                 result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=100)
@@ -100,6 +97,24 @@ def frontend_admin(request: Request):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     return templates.TemplateResponse("admin.html", {"request": request})
+
+@app.get("/lineage")
+def frontend_lineage(request: Request):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    return templates.TemplateResponse("lineage.html", {"request": request})
+
+@app.get("/size-cost")
+def frontend_size_cost(request: Request):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    return templates.TemplateResponse("size_cost.html", {"request": request})
+
+@app.get("/ingest")
+def frontend_ingest(request: Request):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    return templates.TemplateResponse("ingest.html", {"request": request})
 
 @app.post("/upload")
 def frontend_upload_post(request: Request, file: UploadFile = File(...)):
