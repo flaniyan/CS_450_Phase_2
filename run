@@ -82,6 +82,12 @@ install_deps() {
 # -------------------
 run_tests() {
     check_python
+    
+    # Ensure package is installed in development mode for coverage
+    if [[ -f "pyproject.toml" ]]; then
+        $PYTHON_CMD -m pip install --quiet -e . || true
+    fi
+    
     if ! $PYTHON_CMD -m coverage run --source=acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
         true
     fi
