@@ -9,6 +9,7 @@ permissions:
   id-token: write
   contents: read
   actions: read
+  pull-requests: read
 
 concurrency:
   group: cd-main
@@ -42,12 +43,21 @@ jobs:
           path: ~/.terraform.d/plugin-cache
           key: ${{ runner.os }}-tf-${{ hashFiles('**/*.tf') }}
 
+      - name: Debug OIDC Configuration
+        if: ${{ env.USE_OIDC == 'true' }}
+        run: |
+          echo "USE_OIDC: ${{ env.USE_OIDC }}"
+          echo "AWS_ROLE_TO_ASSUME secret exists: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}"
+          echo "AWS_REGION: ${{ env.AWS_REGION }}"
+
       - name: Configure AWS credentials (OIDC)
         if: ${{ env.USE_OIDC == 'true' }}
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions-CDPipeline
+          audience: sts.amazonaws.com
 
       - name: Configure AWS credentials (Static)
         if: ${{ env.USE_OIDC != 'true' }}
