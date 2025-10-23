@@ -32,6 +32,9 @@ jobs:
       TF_INPUT: "false"
       TF_CLI_ARGS: "-lock-timeout=5m"
       USE_OIDC: "true" # Set to "true" to use OIDC authentication
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -51,13 +54,12 @@ jobs:
           echo "AWS_REGION: ${{ env.AWS_REGION }}"
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ env.USE_OIDC == 'true' }}
-        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: arn:aws:iam::838693051036:role/github-actions-oidc-role
           role-session-name: GitHubActions-CDPipeline
-          audience: sts.amazonaws.com
+      
 
       - name: Configure AWS credentials (Static)
         if: ${{ env.USE_OIDC != 'true' }}
