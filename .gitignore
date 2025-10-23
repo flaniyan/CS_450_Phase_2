@@ -155,3 +155,6 @@ infra/envs/dev/terraform.tfvars
 # Temporary files
 *.tmp
 *.temp
+
+# Cache busting files
+.cache-bust
