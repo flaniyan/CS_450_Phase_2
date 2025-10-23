@@ -5,9 +5,6 @@ import re
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
 
-# Mock storage for development when AWS is not available
-_mock_models = []
-
 region = "us-east-1"
 access_point_name = "cs450-s3"
 
@@ -38,20 +35,18 @@ def parse_version(version_str: str) -> tuple:
     if not match:
         return None
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-
+    
 def version_matches_range(version_str: str, version_spec: str) -> bool:
     try:
         version = parse_version(version_str)
         if not version:
             return False
-        
         if not any(op in version_spec for op in ['-', '~', '^']):
             spec_version = parse_version(version_spec)
             if spec_version:
                 return spec_version == version
             else:
                 return False
-        
         if '-' in version_spec and not version_spec.startswith(('~', '^')):
             parts = version_spec.split('-', 1)
             min_ver, max_ver = parse_version(parts[0]), parse_version(parts[1])
@@ -59,14 +54,12 @@ def version_matches_range(version_str: str, version_spec: str) -> bool:
                 return min_ver <= version <= max_ver
             else:
                 return False
-        
         if version_spec.startswith('~'):
             base = parse_version(version_spec[1:])
             if base:
                 return base <= version < (base[0], base[1] + 1, 0)
             else:
                 return False
-        
         if version_spec.startswith('^'):
             base = parse_version(version_spec[1:])
             if not base:
@@ -78,11 +71,10 @@ def version_matches_range(version_str: str, version_spec: str) -> bool:
             else:
                 max_ver = (0, 0, base[2] + 1)
             return base <= version < max_ver
-        
         return False
     except Exception:
         return False
-
+        
 def validate_huggingface_structure(zip_content: bytes) -> Dict[str, Any]:
     try:
         with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
@@ -107,10 +99,8 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
                 files = [f for f in zip_file.namelist() if any(ext in f for ext in ['.csv', '.json', '.txt', '.parquet'])]
             else:
                 return zip_content
-            
             if not files:
                 raise ValueError(f"No {component} files found")
-            
             output = io.BytesIO()
             with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as new_zip:
                 for file in files:
@@ -121,18 +111,7 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
 
 def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
     if not aws_available:
-        # For development/testing purposes, simulate successful upload
-        print(f"AWS not active. Mock upload: {model_id} v{version} ({len(file_content)} bytes)") 
-        # Store in mock storage
-        _mock_models.append({
-            "model_id": model_id,
-            "version": version,
-            "size": len(file_content),
-            "upload_time": "2024-01-01T00:00:00Z"
-        })
-        return {"message": "Upload successful (mock mode - AWS not available)"}
-    
-    # AWS is available - proceed with real S3 upload
+        raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     try:
         validation = validate_huggingface_structure(file_content)
         if not validation["valid"]:
@@ -140,7 +119,6 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
                 status_code=400, 
                 detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}"
             )
-        
         s3_key = f"models/{model_id}/{version}/model.zip"
         s3.put_object(
             Bucket=ap_arn,
@@ -150,7 +128,6 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
         )
         print(f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}")
         return {"message": "Upload successful"}
-    
     except Exception as e:
         print(f"AWS S3 upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS upload failed: {str(e)}")
@@ -158,14 +135,11 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
-    
-    # AWS is available - proceed with real S3 download
     try:
         s3_key = f"models/{model_id}/{version}/model.zip"
         print(f"AWS S3 download: {model_id} v{version} ({component}) -> {s3_key}")
         response = s3.get_object(Bucket=ap_arn, Key=s3_key)
         zip_content = response['Body'].read()
-        
         if component != "full":
             try:
                 result = extract_model_component(zip_content, component)
@@ -173,67 +147,81 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
                 return result
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-        
         print(f"AWS S3 download successful: {model_id} v{version} (full)")
         return zip_content
-    
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
 
+# Cache for model card content to avoid repeated downloads
+_model_card_cache = {}
+def clear_model_card_cache():
+    global _model_card_cache
+    _model_card_cache.clear()
+def search_model_card_content(model_id: str, version: str, regex_pattern: str) -> bool:
+    try:
+        cache_key = f"{model_id}@{version}"
+        if cache_key in _model_card_cache:
+            cached_content = _model_card_cache[cache_key]
+            pattern = re.compile(regex_pattern, re.IGNORECASE)
+            return any(pattern.search(content) for content in cached_content)
+        zip_content = download_model(model_id, version, "full")
+        if not zip_content:
+            return False
+        pattern = re.compile(regex_pattern, re.IGNORECASE)
+        cached_content = []
+        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
+            for file_info in zip_file.filelist:
+                filename = file_info.filename.lower()
+                if any(ext in filename for ext in ['.txt', '.md', '.json', '.yaml', '.yml', '.py', '.js', '.ts', '.cfg', '.ini']):
+                    try:
+                        content = zip_file.read(file_info).decode('utf-8', errors='ignore')
+                        cached_content.append(content)
+                        if pattern.search(content):
+                            _model_card_cache[cache_key] = cached_content
+                            return True
+                    except:
+                        continue
+        _model_card_cache[cache_key] = cached_content
+        return False
+    except Exception:
+        return False
+
 def list_models(name_regex: str = None, model_regex: str = None, version_range: str = None, limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
     if not aws_available:
-        # Return mock data for development
-        filtered_models = []
-        for model in _mock_models:
-            # Apply name filtering if specified
-            if name_regex:
-                if not re.search(name_regex, model["model_id"], re.IGNORECASE):
-                    continue
-            
-            # Apply version range filtering if specified
-            if version_range:
-                normalized_version = model["version"].lstrip('v')
-                if not version_matches_range(normalized_version, version_range):
-                    continue
-            
-            filtered_models.append({
-                "model_id": model["model_id"],
-                "version": model["version"],
-                "size": model["size"],
-                "upload_time": model["upload_time"],
-                "download_url": f"http://localhost:3000/api/packages/models/{model['model_id']}/versions/{model['version']}/download"
-            })
-        return {"models": filtered_models[:limit], "next_token": None}
-    
+        raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     limit = min(limit, 1000)
     try:
         params = {'Bucket': ap_arn, 'Prefix': 'models/', 'MaxKeys': limit}
         if continuation_token:
             params['ContinuationToken'] = continuation_token
-        
         response = s3.list_objects_v2(**params)
         results = []
-        
         if 'Contents' in response:
+            name_pattern = None
+            if name_regex:
+                try:
+                    name_pattern = re.compile(name_regex, re.IGNORECASE)
+                except re.error as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid name regex: {str(e)}")
             for item in response['Contents']:
                 key = item['Key']
                 if key.endswith('/model.zip'):
                     if len(key.split('/')) >= 3:
                         model_name = key.split('/')[1]
                         model_version = key.split('/')[2]
-                        if name_regex or model_regex:
-                            regex_pattern = name_regex or model_regex
-                            try:
-                                pattern = re.compile(regex_pattern, re.IGNORECASE)
-                                if not pattern.search(model_name):
-                                    continue
-                            except re.error as e:
-                                raise HTTPException(status_code=400, detail=f"Invalid regex: {str(e)}")
+                        if name_pattern and not name_pattern.search(model_name):
+                            continue
                         if version_range:
                             normalized_version = model_version.lstrip('v')
                             if not version_matches_range(normalized_version, version_range):
                                 continue
+                        if model_regex:
+                            try:
+                                if not search_model_card_content(model_name, model_version, model_regex):
+                                    continue
+                            except re.error as e:
+                                raise HTTPException(status_code=400, detail=f"Invalid model regex: {str(e)}")
                         results.append({
                             "name": model_name,
                             "version": model_version
@@ -250,12 +238,9 @@ def list_models(name_regex: str = None, model_regex: str = None, version_range: 
 def reset_registry() -> Dict[str, str]:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
-    
-    # AWS is available - proceed with real S3 reset
     try:
         print("AWS S3 reset: Starting registry reset...")
         response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
-        
         if 'Contents' in response:
             deleted_count = 0
             for item in response['Contents']:
@@ -264,9 +249,7 @@ def reset_registry() -> Dict[str, str]:
             print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
         else:
             print("AWS S3 reset: No objects found to delete")
-        
         return {"message": "Reset done successfully"}
-    
     except Exception as e:
         print(f"AWS S3 reset failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")
