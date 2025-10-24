@@ -21,6 +21,7 @@ resource "aws_ecs_task_definition" "validator_task" {
   container_definitions = jsonencode([{
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
+    stopTimeout = 5
     
     portMappings = [{
       containerPort = 3000
@@ -28,7 +29,7 @@ resource "aws_ecs_task_definition" "validator_task" {
       protocol      = "tcp"
     }]
     
-    environment = [
+    environment = concat([
       {
         name  = "AWS_DEFAULT_REGION"
         value = "us-east-1"
@@ -37,7 +38,11 @@ resource "aws_ecs_task_definition" "validator_task" {
         name  = "AWS_REGION"
         value = "us-east-1"
       }
-    ]
+    ], [
+      { name = "VALIDATOR_TIMEOUT_MS",  value = "4000" },
+      { name = "VALIDATOR_HEAP_MB",     value = "128"  },
+      { name = "VALIDATOR_MAX_WORKERS", value = "2"    }
+    ])
     
     logConfiguration = {
       logDriver = "awslogs"
