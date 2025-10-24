@@ -343,7 +343,7 @@ resource "aws_cloudwatch_log_group" "validator_logs" {
 
 # Outputs
 output "validator_service_url" {
-  value = aws_lb.validator_lb.dns_name
+  value = "http://${aws_lb.validator_lb.dns_name}"
 }
 
 output "validator_cluster_arn" {
