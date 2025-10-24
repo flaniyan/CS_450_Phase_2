@@ -22,8 +22,8 @@ provider "aws" {
 # }
 
 module "iam" {
-  source            = "../../modules/iam"
-  artifacts_bucket  = "pkg-artifacts"
+  source           = "../../modules/iam"
+  artifacts_bucket = "pkg-artifacts"
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
@@ -34,9 +34,9 @@ module "iam" {
 }
 
 module "ecs" {
-  source            = "../../modules/ecs"
-  artifacts_bucket  = "pkg-artifacts"
-  image_tag         = var.image_tag
+  source           = "../../modules/ecs"
+  artifacts_bucket = "pkg-artifacts"
+  image_tag        = var.image_tag
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
@@ -50,7 +50,7 @@ module "monitoring" {
   source                = "../../modules/monitoring"
   artifacts_bucket      = "pkg-artifacts"
   validator_service_url = module.ecs.validator_service_url
-  ddb_tables_arnmap     = {
+  ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
     packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
@@ -63,7 +63,7 @@ module "api_gateway" {
   source                = "../../modules/api-gateway"
   artifacts_bucket      = "pkg-artifacts"
   validator_service_url = module.ecs.validator_service_url
-  ddb_tables_arnmap     = {
+  ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
     packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
@@ -74,7 +74,7 @@ module "api_gateway" {
 
 output "artifacts_bucket" { value = "pkg-artifacts" }
 output "group106_policy_arn" { value = module.iam.group106_policy_arn }
-output "ddb_tables" { 
+output "ddb_tables" {
   value = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"

@@ -5,11 +5,11 @@ variable "validator_service_url" { type = string }
 # API Gateway
 resource "aws_api_gateway_rest_api" "main_api" {
   name = "acme-api"
-  
+
   endpoint_configuration {
     types = ["REGIONAL"]
   }
-  
+
   tags = {
     Name        = "acme-api"
     Environment = "dev"
@@ -54,10 +54,10 @@ resource "aws_api_gateway_integration" "health_get" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   resource_id = aws_api_gateway_resource.health.id
   http_method = aws_api_gateway_method.health_get.http_method
-  
+
   integration_http_method = "GET"
-  type                   = "HTTP_PROXY"
-  uri                    = "${var.validator_service_url}/health"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/health"
 }
 
 # Packages endpoints
@@ -72,10 +72,10 @@ resource "aws_api_gateway_integration" "packages_get" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   resource_id = aws_api_gateway_resource.packages.id
   http_method = aws_api_gateway_method.packages_get.http_method
-  
+
   integration_http_method = "GET"
-  type                   = "HTTP_PROXY"
-  uri                    = "${var.validator_service_url}/packages"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/packages"
 }
 
 # Auth endpoints
@@ -96,22 +96,22 @@ resource "aws_api_gateway_integration" "auth_login_post" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   resource_id = aws_api_gateway_resource.auth_login.id
   http_method = aws_api_gateway_method.auth_login_post.http_method
-  
+
   integration_http_method = "POST"
-  type                   = "HTTP_PROXY"
-  uri                    = "${var.validator_service_url}/login"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/login"
 }
 
 # API Gateway Deployment
 resource "aws_api_gateway_deployment" "main_deployment" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
-  
+
   depends_on = [
     aws_api_gateway_integration.health_get,
     aws_api_gateway_integration.packages_get,
     aws_api_gateway_integration.auth_login_post
   ]
-  
+
   lifecycle {
     create_before_destroy = true
   }
@@ -122,7 +122,7 @@ resource "aws_api_gateway_stage" "main_stage" {
   deployment_id = aws_api_gateway_deployment.main_deployment.id
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
   stage_name    = "prod"
-  
+
   tags = {
     Name        = "acme-api-prod"
     Environment = "dev"
@@ -171,7 +171,7 @@ resource "aws_iam_role" "lambda_role" {
       }
     }]
   })
-  
+
   tags = {
     Name        = "lambda-execution-role"
     Environment = "dev"

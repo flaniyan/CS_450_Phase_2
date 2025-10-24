@@ -19,7 +19,7 @@ resource "aws_ecr_repository" "validator_repo" {
 # ECS Cluster
 resource "aws_ecs_cluster" "validator_cluster" {
   name = "validator-cluster"
-  
+
   setting {
     name  = "containerInsights"
     value = "enabled"
@@ -39,13 +39,13 @@ resource "aws_ecs_task_definition" "validator_task" {
   container_definitions = jsonencode([{
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
-    
+
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
-    
+
     environment = [
       {
         name  = "AWS_REGION"
@@ -84,7 +84,7 @@ resource "aws_ecs_task_definition" "validator_task" {
         value = "production"
       }
     ]
-    
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -93,7 +93,7 @@ resource "aws_ecs_task_definition" "validator_task" {
         awslogs-stream-prefix = "ecs"
       }
     }
-    
+
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30
@@ -139,10 +139,10 @@ resource "aws_lb" "validator_lb" {
 }
 
 resource "aws_lb_target_group" "validator_tg" {
-  name     = "validator-tg"
-  port     = 3000
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.validator_vpc.id
+  name        = "validator-tg"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.validator_vpc.id
   target_type = "ip"
 
   health_check {
