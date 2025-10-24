@@ -117,7 +117,7 @@ jobs:
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="image_tag=${{ steps.build-image.outputs.image }}"
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts-existing" -var="image_tag=${{ steps.build-image.outputs.image }}"
 
       - name: Terraform apply
         shell: bash
