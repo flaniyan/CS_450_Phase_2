@@ -102,7 +102,7 @@ jobs:
       - name: Select or create workspace
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform workspace select dev || terraform workspace new dev
+        run: terraform workspace select default || terraform workspace new default
 
       - name: Terraform format check
         shell: bash
