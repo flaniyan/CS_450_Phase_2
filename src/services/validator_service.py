@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# envs (team-aligned)
+# envs
 VALIDATOR_TIMEOUT_MS  = int(os.getenv("VALIDATOR_TIMEOUT_MS",  "4000"))
 VALIDATOR_HEAP_MB     = int(os.getenv("VALIDATOR_HEAP_MB",     "128"))
 VALIDATOR_MAX_WORKERS = int(os.getenv("VALIDATOR_MAX_WORKERS", "2"))
@@ -267,5 +267,5 @@ async def get_user_history(user_id: str, limit: int = 50):
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", "3001"))
+    port = int(os.getenv("PORT", "3000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
