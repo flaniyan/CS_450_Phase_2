@@ -30,7 +30,6 @@ jobs:
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
-      TF_CLI_ARGS: "-lock-timeout=5m"
       USE_OIDC: "true" # Set to "true" to use OIDC authentication
     permissions:
       id-token: write
@@ -98,7 +97,7 @@ jobs:
       - name: Terraform init
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false
+        run: terraform init -input=false -lock-timeout=5m
 
       - name: Select or create workspace
         shell: bash
@@ -118,12 +117,12 @@ jobs:
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -var="image_tag=${{ steps.build-image.outputs.image }}"
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="image_tag=${{ steps.build-image.outputs.image }}"
 
       - name: Terraform apply
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve -lock-timeout=5m tfplan
 
       - name: Force ECS service update
         shell: bash
