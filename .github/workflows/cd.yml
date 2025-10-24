@@ -138,9 +138,7 @@ jobs:
           echo "Waiting for ECS service to stabilize..."
           aws ecs wait services-stable \
             --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --max-attempts 30 \
-            --delay 30
+            --services $ECS_SERVICE
 
       - name: Read service URL
         id: tfout
