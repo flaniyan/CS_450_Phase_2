@@ -1,3 +1,21 @@
+# ECR Repository
+resource "aws_ecr_repository" "validator_repo" {
+  name                 = "validator-service"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name = "validator-service"
+  }
+}
+
 # ECS Cluster
 resource "aws_ecs_cluster" "validator_cluster" {
   name = "validator-cluster"
@@ -31,12 +49,40 @@ resource "aws_ecs_task_definition" "validator_task" {
     
     environment = concat([
       {
-        name  = "AWS_DEFAULT_REGION"
+        name  = "AWS_REGION"
         value = "us-east-1"
       },
       {
-        name  = "AWS_REGION"
-        value = "us-east-1"
+        name  = "PORT"
+        value = "3000"
+      },
+      {
+        name  = "ARTIFACTS_BUCKET"
+        value = "pkg-artifacts"
+      },
+      {
+        name  = "DDB_TABLE_PACKAGES"
+        value = "packages"
+      },
+      {
+        name  = "DDB_TABLE_DOWNLOADS"
+        value = "downloads"
+      },
+      {
+        name  = "DDB_TABLE_UPLOADS"
+        value = "uploads"
+      },
+      {
+        name  = "DDB_TABLE_USERS"
+        value = "users"
+      },
+      {
+        name  = "DDB_TABLE_TOKENS"
+        value = "tokens"
+      },
+      {
+        name  = "PYTHON_ENV"
+        value = "production"
       }
     ], [
       { name = "VALIDATOR_TIMEOUT_MS",  value = "4000" },
@@ -72,7 +118,7 @@ resource "aws_ecs_service" "validator_service" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = [aws_subnet.validator_subnet.id]
+    subnets          = [aws_subnet.validator_subnet_1.id, aws_subnet.validator_subnet_2.id]
     security_groups  = [aws_security_group.validator_sg.id]
     assign_public_ip = true
   }
@@ -92,7 +138,7 @@ resource "aws_lb" "validator_lb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.validator_sg.id]
-  subnets            = [aws_subnet.validator_subnet.id]
+  subnets            = [aws_subnet.validator_subnet_1.id, aws_subnet.validator_subnet_2.id]
 
   enable_deletion_protection = false
 }
@@ -139,14 +185,25 @@ resource "aws_vpc" "validator_vpc" {
   }
 }
 
-resource "aws_subnet" "validator_subnet" {
+resource "aws_subnet" "validator_subnet_1" {
   vpc_id                  = aws_vpc.validator_vpc.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = "10.0.10.0/24"
   availability_zone       = "us-east-1a"
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "validator-subnet"
+    Name = "validator-subnet-1"
+  }
+}
+
+resource "aws_subnet" "validator_subnet_2" {
+  vpc_id                  = aws_vpc.validator_vpc.id
+  cidr_block              = "10.0.20.0/24"
+  availability_zone       = "us-east-1b"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "validator-subnet-2"
   }
 }
 
@@ -172,7 +229,7 @@ resource "aws_route_table" "validator_rt" {
 }
 
 resource "aws_route_table_association" "validator_rta" {
-  subnet_id      = aws_subnet.validator_subnet.id
+  subnet_id      = aws_subnet.validator_subnet_1.id
   route_table_id = aws_route_table.validator_rt.id
 }
 
@@ -296,4 +353,8 @@ output "validator_service_url" {
 
 output "validator_cluster_arn" {
   value = aws_ecs_cluster.validator_cluster.arn
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.validator_repo.repository_url
 }

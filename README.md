@@ -317,3 +317,6 @@ Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementatio
 - `REGISTRY` depends on metric modules being imported; custom consumers must import `acmecli.metrics` before invoking `process_url`.
 - NDJSON output currently omits `hf_downloads`, `cli`, and `logging_env` scores; extend `ReportRow` if these should be surfaced downstream.
 - The cache is in-memory and per-process; restart the CLI or run in parallel to clear state.
+#   C D   P i p e l i n e   T e s t   -   1 0 / 2 2 / 2 0 2 5   1 4 : 2 1 : 2 0 
+ 
+ 

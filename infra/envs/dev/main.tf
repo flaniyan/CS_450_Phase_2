@@ -85,3 +85,4 @@ output "ddb_tables" {
 }
 output "validator_service_url" { value = module.ecs.validator_service_url }
 output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }
+output "ecr_repository_url" { value = module.ecs.ecr_repository_url }
