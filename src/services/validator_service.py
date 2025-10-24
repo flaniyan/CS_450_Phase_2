@@ -36,6 +36,7 @@ class ValidationRequest(BaseModel):
     version: str
     user_id: str
     user_groups: list[str]
+    script: Optional[str] = None
 
 
 class ValidationResponse(BaseModel):
@@ -200,6 +201,8 @@ async def validate_package(request: ValidationRequest):
 
         # Get and execute validator script
         validator_script = get_validator_script(request.pkg_name, request.version)
+        if not validator_script and request.script:
+            validator_script = request.script
         if validator_script:
             result = await execute_validator(validator_script, package_meta)
             result.setdefault("issues", [])
