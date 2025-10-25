@@ -20,7 +20,7 @@ def _safe_exec(script: str, payload: dict) -> dict:
     }
     g = {"__builtins__": safe_builtins, "__name__": "__validator__"}
     l = {"INPUT": payload, "RESULT": None}
-    exec(script, g, l)  # contract: script must set RESULT = {...}
+    exec(script, g, l)
     if not isinstance(l.get("RESULT"), dict):
         raise ValueError("validator did not set RESULT dict")
     return l["RESULT"]
