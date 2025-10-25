@@ -19,7 +19,7 @@ resource "aws_ecr_repository" "validator_repo" {
 # ECS Cluster
 resource "aws_ecs_cluster" "validator_cluster" {
   name = "validator-cluster"
-  
+
   setting {
     name  = "containerInsights"
     value = "enabled"
@@ -31,14 +31,17 @@ resource "aws_ecs_task_definition" "validator_task" {
   family                   = "validator-service"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = 1024
+  memory                   = 2048
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
 
   container_definitions = jsonencode([{
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
+
+    memoryReservation = 1536
+    memory             = 2048
     
     portMappings = [{
       containerPort = 3000
@@ -46,6 +49,14 @@ resource "aws_ecs_task_definition" "validator_task" {
       protocol      = "tcp"
     }]
     
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
+
     environment = [
       {
         name  = "AWS_REGION"
@@ -84,7 +95,7 @@ resource "aws_ecs_task_definition" "validator_task" {
         value = "production"
       }
     ]
-    
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -93,7 +104,7 @@ resource "aws_ecs_task_definition" "validator_task" {
         awslogs-stream-prefix = "ecs"
       }
     }
-    
+
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30
@@ -139,10 +150,10 @@ resource "aws_lb" "validator_lb" {
 }
 
 resource "aws_lb_target_group" "validator_tg" {
-  name     = "validator-tg"
-  port     = 3000
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.validator_vpc.id
+  name        = "validator-tg"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.validator_vpc.id
   target_type = "ip"
 
   health_check {
@@ -343,7 +354,7 @@ resource "aws_cloudwatch_log_group" "validator_logs" {
 
 # Outputs
 output "validator_service_url" {
-  value = aws_lb.validator_lb.dns_name
+  value = "http://${aws_lb.validator_lb.dns_name}"
 }
 
 output "validator_cluster_arn" {
