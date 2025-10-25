@@ -25,12 +25,16 @@ class HFHandler:
     def fetch_meta(self, url: str) -> dict:
         # Example: https://huggingface.co/google/gemma-3-270m or https://huggingface.co/gpt2
         parsed = urlparse(url)
-        path_parts = [part for part in parsed.path.split('/') if part]
+        path_parts = [part for part in parsed.path.split("/") if part]
         if not path_parts:
             logging.error("Invalid HuggingFace URL format: %s", url)
             return {}
 
-        namespace_segments = [segment for segment in path_parts if segment not in {"blob", "resolve", "tree"}]
+        namespace_segments = [
+            segment
+            for segment in path_parts
+            if segment not in {"blob", "resolve", "tree"}
+        ]
         if not namespace_segments:
             logging.error("Unsupported HuggingFace URL format: %s", url)
             return {}
@@ -39,7 +43,11 @@ class HFHandler:
             logging.debug("Skipping dataset URL: %s", url)
             return {}
 
-        model_id = namespace_segments[0] if len(namespace_segments) == 1 else f"{namespace_segments[0]}/{namespace_segments[1]}"
+        model_id = (
+            namespace_segments[0]
+            if len(namespace_segments) == 1
+            else f"{namespace_segments[0]}/{namespace_segments[1]}"
+        )
         api_url = f"https://huggingface.co/api/models/{model_id}"
         meta = self._get_json(api_url)
         if not meta:

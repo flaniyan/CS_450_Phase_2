@@ -1,5 +1,6 @@
 from acmecli.reporter import Reporter
 
+
 def test_reporter_format():
     reporter = Reporter()
     data = {"foo": "bar"}

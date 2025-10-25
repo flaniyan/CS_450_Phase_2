@@ -1,14 +1,47 @@
+<<<<<<< Updated upstream
+=======
+version: "3.9"
+
+>>>>>>> Stashed changes
 services:
-  app:
-    build: .
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
+<<<<<<< Updated upstream
       - "3000:3000"
     env_file:
       - .env
+=======
+      - "${PORT:-3000}:3000"
+    env_file: .env
+>>>>>>> Stashed changes
     environment:
-      - PORT=3000
+      PORT: ${PORT:-3000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # If using LocalStack profile, your code can read AWS_ENDPOINT_URL
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      - localstack
+    profiles: ["default"]
+
+  # Starts only when you pass: docker compose --profile localaws up
+  localstack:
+    image: localstack/localstack:latest
+    profiles: ["localaws"]
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,dynamodb
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
     volumes:
-      # Mount for development (hot reload)
-      - ./src:/app/src
-      - ./frontend:/app/frontend
-    restart: unless-stopped
+      - "localstack-data:/var/lib/localstack"
+
+volumes:
+  localstack-data:

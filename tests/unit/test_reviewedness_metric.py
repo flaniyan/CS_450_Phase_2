@@ -61,9 +61,7 @@ def test_direct_commits_unreviewed():
     meta = {
         "github_url": "https://github.com/u/r",
         "github": {
-            "direct_commits": [
-                {"files": [{"filename": "src/c.py", "additions": 30}]}
-            ]
+            "direct_commits": [{"files": [{"filename": "src/c.py", "additions": 30}]}]
         },
     }
     assert m.score(meta) == 0.0

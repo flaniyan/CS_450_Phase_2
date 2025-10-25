@@ -1,4 +1,6 @@
 import json, sys, time
+import time as time_module
+
 def _limits(heap_mb: int, cpu_s: int):
     try:
         import resource
@@ -14,6 +16,7 @@ def _safe_exec(script: str, payload: dict) -> dict:
         "len": len, "range": range, "min": min, "max": max, "sum": sum, "abs": abs,
         "float": float, "int": int, "str": str, "bool": bool, "enumerate": enumerate,
         "zip": zip, "map": map, "filter": filter, "all": all, "any": any,
+        "time": time_module,
     }
     g = {"__builtins__": safe_builtins, "__name__": "__validator__"}
     l = {"INPUT": payload, "RESULT": None}

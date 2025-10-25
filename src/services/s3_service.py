@@ -1,8 +1,9 @@
-import boto3
-import zipfile
 import io
 import re
-from typing import Dict, Any, Optional
+import zipfile
+from typing import Any, Dict, Optional
+
+import boto3
 from fastapi import HTTPException
 
 region = "us-east-1"
@@ -29,38 +30,65 @@ except Exception as e:
     s3 = None
     aws_available = False
 
+
 def parse_version(version_str: str) -> tuple:
-    version_str = version_str.lstrip('v')
-    match = re.match(r'^(\d+)\.(\d+)\.(\d+)$', version_str)
+    version_str = version_str.lstrip("v")
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)$", version_str)
     if not match:
         return None
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+<<<<<<< Updated upstream
     
+=======
+
+
+>>>>>>> Stashed changes
 def version_matches_range(version_str: str, version_spec: str) -> bool:
     try:
         version = parse_version(version_str)
         if not version:
             return False
+<<<<<<< Updated upstream
         if not any(op in version_spec for op in ['-', '~', '^']):
+=======
+
+        if not any(op in version_spec for op in ["-", "~", "^"]):
+>>>>>>> Stashed changes
             spec_version = parse_version(version_spec)
             if spec_version:
                 return spec_version == version
             else:
                 return False
+<<<<<<< Updated upstream
         if '-' in version_spec and not version_spec.startswith(('~', '^')):
             parts = version_spec.split('-', 1)
+=======
+
+        if "-" in version_spec and not version_spec.startswith(("~", "^")):
+            parts = version_spec.split("-", 1)
+>>>>>>> Stashed changes
             min_ver, max_ver = parse_version(parts[0]), parse_version(parts[1])
             if min_ver and max_ver:
                 return min_ver <= version <= max_ver
             else:
                 return False
+<<<<<<< Updated upstream
         if version_spec.startswith('~'):
+=======
+
+        if version_spec.startswith("~"):
+>>>>>>> Stashed changes
             base = parse_version(version_spec[1:])
             if base:
                 return base <= version < (base[0], base[1] + 1, 0)
             else:
                 return False
+<<<<<<< Updated upstream
         if version_spec.startswith('^'):
+=======
+
+        if version_spec.startswith("^"):
+>>>>>>> Stashed changes
             base = parse_version(version_spec[1:])
             if not base:
                 return False
@@ -71,88 +99,167 @@ def version_matches_range(version_str: str, version_spec: str) -> bool:
             else:
                 max_ver = (0, 0, base[2] + 1)
             return base <= version < max_ver
+<<<<<<< Updated upstream
         return False
     except Exception:
         return False
         
+=======
+
+        return False
+    except Exception:
+        return False
+
+
+>>>>>>> Stashed changes
 def validate_huggingface_structure(zip_content: bytes) -> Dict[str, Any]:
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
+        with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
             file_list = zip_file.namelist()
-            has_config = any('config.json' in f for f in file_list)
-            has_weights = any(f.endswith(('.bin', '.safetensors')) for f in file_list)
+            has_config = any("config.json" in f for f in file_list)
+            has_weights = any(f.endswith((".bin", ".safetensors")) for f in file_list)
             return {
                 "valid": has_config and has_weights,
                 "has_config": has_config,
                 "has_weights": has_weights,
-                "files": file_list
+                "files": file_list,
             }
     except zipfile.BadZipFile:
         return {"valid": False, "error": "Invalid ZIP file"}
 
+
 def extract_model_component(zip_content: bytes, component: str) -> bytes:
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
+        with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
             if component == "weights":
-                files = [f for f in zip_file.namelist() if f.endswith(('.bin', '.safetensors'))]
+                files = [
+                    f
+                    for f in zip_file.namelist()
+                    if f.endswith((".bin", ".safetensors"))
+                ]
             elif component == "datasets":
-                files = [f for f in zip_file.namelist() if any(ext in f for ext in ['.csv', '.json', '.txt', '.parquet'])]
+                files = [
+                    f
+                    for f in zip_file.namelist()
+                    if any(ext in f for ext in [".csv", ".json", ".txt", ".parquet"])
+                ]
             else:
                 return zip_content
+<<<<<<< Updated upstream
             if not files:
                 raise ValueError(f"No {component} files found")
+=======
+
+            if not files:
+                raise ValueError(f"No {component} files found")
+
+>>>>>>> Stashed changes
             output = io.BytesIO()
-            with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as new_zip:
                 for file in files:
                     new_zip.writestr(file, zip_file.read(file))
             return output.getvalue()
     except zipfile.BadZipFile:
         raise ValueError("Invalid ZIP file")
 
-def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
+
+def upload_model(
+    file_content: bytes, model_id: str, version: str, debloat: bool = False
+) -> Dict[str, str]:
     if not aws_available:
+<<<<<<< Updated upstream
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
+=======
+        # For development/testing purposes, simulate successful upload
+        print(
+            f"AWS not active. Mock upload: {model_id} v{version} ({len(file_content)} bytes)"
+        )
+        # Store in mock storage
+        _mock_models.append(
+            {
+                "model_id": model_id,
+                "version": version,
+                "size": len(file_content),
+                "upload_time": "2024-01-01T00:00:00Z",
+            }
+        )
+        return {"message": "Upload successful (mock mode - AWS not available)"}
+
+    # AWS is available - proceed with real S3 upload
+>>>>>>> Stashed changes
     try:
         validation = validate_huggingface_structure(file_content)
         if not validation["valid"]:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}"
+                status_code=400,
+                detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}",
             )
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
         s3_key = f"models/{model_id}/{version}/model.zip"
         s3.put_object(
-            Bucket=ap_arn,
-            Key=s3_key,
-            Body=file_content,
-            ContentType='application/zip'
+            Bucket=ap_arn, Key=s3_key, Body=file_content, ContentType="application/zip"
         )
-        print(f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}")
+        print(
+            f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}"
+        )
         return {"message": "Upload successful"}
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
     except Exception as e:
         print(f"AWS S3 upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS upload failed: {str(e)}")
 
+
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
     if not aws_available:
+<<<<<<< Updated upstream
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
+=======
+        raise HTTPException(
+            status_code=503,
+            detail="AWS services not available. Please check your AWS configuration.",
+        )
+
+    # AWS is available - proceed with real S3 download
+>>>>>>> Stashed changes
     try:
         s3_key = f"models/{model_id}/{version}/model.zip"
         print(f"AWS S3 download: {model_id} v{version} ({component}) -> {s3_key}")
         response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+<<<<<<< Updated upstream
         zip_content = response['Body'].read()
+=======
+        zip_content = response["Body"].read()
+
+>>>>>>> Stashed changes
         if component != "full":
             try:
                 result = extract_model_component(zip_content, component)
-                print(f"AWS S3 download successful: {model_id} v{version} ({component})")
+                print(
+                    f"AWS S3 download successful: {model_id} v{version} ({component})"
+                )
                 return result
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
+<<<<<<< Updated upstream
         print(f"AWS S3 download successful: {model_id} v{version} (full)")
         return zip_content
+=======
+
+        print(f"AWS S3 download successful: {model_id} v{version} (full)")
+        return zip_content
+
+>>>>>>> Stashed changes
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
 
+<<<<<<< Updated upstream
 # Cache for model card content to avoid repeated downloads
 _model_card_cache = {}
 def clear_model_card_cache():
@@ -190,10 +297,47 @@ def search_model_card_content(model_id: str, version: str, regex_pattern: str) -
 def list_models(name_regex: str = None, model_regex: str = None, version_range: str = None, limit: int = 100, continuation_token: str = None) -> Dict[str, Any]:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
+=======
+
+def list_models(
+    name_regex: str = None,
+    model_regex: str = None,
+    version_range: str = None,
+    limit: int = 100,
+    continuation_token: str = None,
+) -> Dict[str, Any]:
+    if not aws_available:
+        # Return mock data for development
+        filtered_models = []
+        for model in _mock_models:
+            # Apply name filtering if specified
+            if name_regex:
+                if not re.search(name_regex, model["model_id"], re.IGNORECASE):
+                    continue
+
+            # Apply version range filtering if specified
+            if version_range:
+                normalized_version = model["version"].lstrip("v")
+                if not version_matches_range(normalized_version, version_range):
+                    continue
+
+            filtered_models.append(
+                {
+                    "model_id": model["model_id"],
+                    "version": model["version"],
+                    "size": model["size"],
+                    "upload_time": model["upload_time"],
+                    "download_url": f"http://localhost:3000/api/packages/models/{model['model_id']}/versions/{model['version']}/download",
+                }
+            )
+        return {"models": filtered_models[:limit], "next_token": None}
+
+>>>>>>> Stashed changes
     limit = min(limit, 1000)
     try:
-        params = {'Bucket': ap_arn, 'Prefix': 'models/', 'MaxKeys': limit}
+        params = {"Bucket": ap_arn, "Prefix": "models/", "MaxKeys": limit}
         if continuation_token:
+<<<<<<< Updated upstream
             params['ContinuationToken'] = continuation_token
         response = s3.list_objects_v2(**params)
         results = []
@@ -212,10 +356,37 @@ def list_models(name_regex: str = None, model_regex: str = None, version_range: 
                         model_version = key.split('/')[2]
                         if name_pattern and not name_pattern.search(model_name):
                             continue
+=======
+            params["ContinuationToken"] = continuation_token
+
+        response = s3.list_objects_v2(**params)
+        results = []
+
+        if "Contents" in response:
+            for item in response["Contents"]:
+                key = item["Key"]
+                if key.endswith("/model.zip"):
+                    if len(key.split("/")) >= 3:
+                        model_name = key.split("/")[1]
+                        model_version = key.split("/")[2]
+                        if name_regex or model_regex:
+                            regex_pattern = name_regex or model_regex
+                            try:
+                                pattern = re.compile(regex_pattern, re.IGNORECASE)
+                                if not pattern.search(model_name):
+                                    continue
+                            except re.error as e:
+                                raise HTTPException(
+                                    status_code=400, detail=f"Invalid regex: {str(e)}"
+                                )
+>>>>>>> Stashed changes
                         if version_range:
-                            normalized_version = model_version.lstrip('v')
-                            if not version_matches_range(normalized_version, version_range):
+                            normalized_version = model_version.lstrip("v")
+                            if not version_matches_range(
+                                normalized_version, version_range
+                            ):
                                 continue
+<<<<<<< Updated upstream
                         if model_regex:
                             try:
                                 if not search_model_card_content(model_name, model_version, model_regex):
@@ -230,26 +401,56 @@ def list_models(name_regex: str = None, model_regex: str = None, version_range: 
             "models": results,
             "next_token": response.get('NextContinuationToken')
         }
+=======
+                        results.append({"name": model_name, "version": model_version})
+        return {"models": results, "next_token": response.get("NextContinuationToken")}
+>>>>>>> Stashed changes
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
 
+
 def reset_registry() -> Dict[str, str]:
     if not aws_available:
+<<<<<<< Updated upstream
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     try:
         print("AWS S3 reset: Starting registry reset...")
         response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
         if 'Contents' in response:
+=======
+        raise HTTPException(
+            status_code=503,
+            detail="AWS services not available. Please check your AWS configuration.",
+        )
+
+    # AWS is available - proceed with real S3 reset
+    try:
+        print("AWS S3 reset: Starting registry reset...")
+        response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
+
+        if "Contents" in response:
+>>>>>>> Stashed changes
             deleted_count = 0
-            for item in response['Contents']:
-                s3.delete_object(Bucket=ap_arn, Key=item['Key'])
+            for item in response["Contents"]:
+                s3.delete_object(Bucket=ap_arn, Key=item["Key"])
                 deleted_count += 1
             print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
         else:
             print("AWS S3 reset: No objects found to delete")
+<<<<<<< Updated upstream
         return {"message": "Reset done successfully"}
     except Exception as e:
         print(f"AWS S3 reset failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")
+=======
+
+        return {"message": "Reset done successfully"}
+
+    except Exception as e:
+        print(f"AWS S3 reset failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to reset registry: {str(e)}"
+        )
+>>>>>>> Stashed changes

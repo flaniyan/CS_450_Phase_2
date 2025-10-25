@@ -1,9 +1,9 @@
 import json
 import logging
 from base64 import b64decode
+from typing import Any, Dict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from typing import Any, Dict
 
 
 class GitHubHandler:
@@ -51,7 +51,11 @@ class GitHubHandler:
             "size": repo_data.get("size", 0),
             "language": repo_data.get("language", ""),
             "topics": repo_data.get("topics", []),
-            "license": repo_data.get("license", {}).get("spdx_id", "") if repo_data.get("license") else "",
+            "license": (
+                repo_data.get("license", {}).get("spdx_id", "")
+                if repo_data.get("license")
+                else ""
+            ),
             "created_at": repo_data.get("created_at", ""),
             "updated_at": repo_data.get("updated_at", ""),
             "pushed_at": repo_data.get("pushed_at", ""),
@@ -65,17 +69,25 @@ class GitHubHandler:
 
         contributors_url = f"https://api.github.com/repos/{owner}/{repo}/contributors"
         contributors = self._get_json(contributors_url)
-        meta["contributors"] = {
-            contrib.get("login", "unknown"): contrib.get("contributions", 0)
-            for contrib in contributors[:10]
-        } if isinstance(contributors, list) else {}
+        meta["contributors"] = (
+            {
+                contrib.get("login", "unknown"): contrib.get("contributions", 0)
+                for contrib in contributors[:10]
+            }
+            if isinstance(contributors, list)
+            else {}
+        )
 
         readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
         readme_data = self._get_json(readme_url)
         if readme_data:
             try:
                 content = readme_data.get("content", "")
-                meta["readme_text"] = b64decode(content).decode("utf-8", errors="ignore") if content else ""
+                meta["readme_text"] = (
+                    b64decode(content).decode("utf-8", errors="ignore")
+                    if content
+                    else ""
+                )
             except Exception as exc:
                 logging.warning("Failed to decode README for %s: %s", url, exc)
                 meta["readme_text"] = ""

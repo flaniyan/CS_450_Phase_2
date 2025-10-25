@@ -1,22 +1,22 @@
+from .base import register
 from .bus_factor_metric import BusFactorMetric
-from .ramp_up_metric import RampUpMetric
-from .performance_claims_metric import PerformanceClaimsMetric
-from .dataset_and_code_metric import DatasetAndCodeMetric
-from .license_metric import LicenseMetric
-from .size_metric import SizeMetric
+from .cli_metric import CLIMetric
 from .code_quality_metric import CodeQualityMetric
+from .dataset_and_code_metric import DatasetAndCodeMetric
 from .dataset_quality_metric import DatasetQualityMetric
 from .hf_downloads_metric import HFDownloadsMetric
-from .cli_metric import CLIMetric
+from .license_metric import LicenseMetric
 from .logging_env_metric import LoggingEnvMetric
+from .performance_claims_metric import PerformanceClaimsMetric
+from .ramp_up_metric import RampUpMetric
+from .reproducibility_metric import ReproducibilityMetric
+from .reviewedness_metric import ReviewednessMetric
 
 # Phase-2 new metrics
 from .score_dependencies import score_dependencies_with_latency
 from .score_pull_requests import score_pull_requests_with_latency
-from .reviewedness_metric import ReviewednessMetric
-from .reproducibility_metric import ReproducibilityMetric
+from .size_metric import SizeMetric
 from .treescore_metric import TreescoreMetric
-from .base import register
 
 # Register all metrics
 register(BusFactorMetric())

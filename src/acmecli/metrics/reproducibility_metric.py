@@ -78,7 +78,9 @@ class ReproducibilityMetric:
             "poetry install",
         )
 
-        return any(p in text for p in simple_patterns) and not any(h in text for h in heavy)
+        return any(p in text for p in simple_patterns) and not any(
+            h in text for h in heavy
+        )
 
     def _extract_run_target(self, text: str):
         referenced = []
@@ -95,7 +97,9 @@ class ReproducibilityMetric:
             if "examples/" in ln or "demo/" in ln or "scripts/" in ln:
                 for token in ln.replace("(", " ").replace(")", " ").split():
                     if token.endswith(".py") and (
-                        "/examples/" in token or "/demo/" in token or "/scripts/" in token
+                        "/examples/" in token
+                        or "/demo/" in token
+                        or "/scripts/" in token
                     ):
                         referenced.append(token)
 

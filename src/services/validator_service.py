@@ -7,6 +7,7 @@ import boto3
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from src.utils.ddb_sanitize import to_ddb
 
 # envs
 VALIDATOR_TIMEOUT_MS  = int(os.getenv("VALIDATOR_TIMEOUT_MS",  "4000"))
@@ -36,7 +37,6 @@ class ValidationRequest(BaseModel):
     version: str
     user_id: str
     user_groups: list[str]
-    script: Optional[str] = None
 
 
 class ValidationResponse(BaseModel):
@@ -54,7 +54,7 @@ def get_package_metadata(pkg_name: str, version: str) -> Optional[Dict[str, Any]
     """Get package metadata from DynamoDB"""
     try:
         table = dynamodb.Table(PACKAGES_TABLE)
-        response = table.get_item(Key={"pkg_key": f"{pkg_name}/{version}"})
+        response = table.get_item(Key={"pkg_key": f"{pkg_name}#{version}"})
         return response.get("Item")
     except Exception as e:
         logging.error(f"Error getting package metadata: {e}")
@@ -137,7 +137,7 @@ def log_download_event(
             "validation_result": validation_result or {},
         }
 
-        table.put_item(Item=item)
+        table.put_item(Item=to_ddb(item))
     except Exception as e:
         logging.error(f"Error logging download event: {e}")
 
@@ -201,8 +201,6 @@ async def validate_package(request: ValidationRequest):
 
         # Get and execute validator script
         validator_script = get_validator_script(request.pkg_name, request.version)
-        if not validator_script and request.script:
-            validator_script = request.script
         if validator_script:
             result = await execute_validator(validator_script, package_meta)
             result.setdefault("issues", [])
@@ -212,10 +210,35 @@ async def validate_package(request: ValidationRequest):
             logging.info(f"job_id={job_id} ok={result.get('ok')} dur_ms={result['duration_ms_total']}")
             
             if not result.get("ok"):
-                code = result.get("error", {}).get("code")
+                # Defensive error handling - normalize error shape
+                raw_err = result.get("error")
+                
+                if raw_err is None:
+                    norm_err = None
+                elif isinstance(raw_err, dict):
+                    # Already structured
+                    norm_err = {
+                        "code": raw_err.get("code", "VALIDATOR_ERROR"),
+                        "message": raw_err.get("message", "Validator error"),
+                        "details": raw_err.get("details") or {},
+                    }
+                else:
+                    # String or something else
+                    norm_err = {
+                        "code": "VALIDATOR_ERROR",
+                        "message": str(raw_err),
+                        "details": {},
+                    }
+                
+                result["error"] = norm_err
+                
+                # Now safe to access
+                code = result["error"]["code"] if result["error"] else None
+                msg = result["error"]["message"] if result["error"] else "Validation failed"
+                
                 raise HTTPException(
                     status_code=408 if code == "TIMEOUT" else 422,
-                    detail=result.get("error", {}).get("message", "Validation failed")
+                    detail=msg
                 )
             
             log_download_event(
