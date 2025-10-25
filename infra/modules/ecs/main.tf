@@ -31,8 +31,8 @@ resource "aws_ecs_task_definition" "validator_task" {
   family                   = "validator-service"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = 1024
+  memory                   = 2048
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
 
@@ -40,11 +40,22 @@ resource "aws_ecs_task_definition" "validator_task" {
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
 
+    memoryReservation = 1536
+    memory             = 2048
+    
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
+    
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
 
     environment = [
       {
