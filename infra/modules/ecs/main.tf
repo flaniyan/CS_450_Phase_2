@@ -87,7 +87,8 @@ resource "aws_ecs_task_definition" "validator_task" {
     ], [
       { name = "VALIDATOR_TIMEOUT_MS",  value = "4000" },
       { name = "VALIDATOR_HEAP_MB",     value = "128"  },
-      { name = "VALIDATOR_MAX_WORKERS", value = "2"    }
+      { name = "VALIDATOR_MAX_WORKERS", value = "2"    },
+      { name = "KMS_KEY_ID",            value = var.validator_kms_key_id }
     ])
     
     logConfiguration = {
@@ -335,6 +336,26 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "dynamodb:Query"
         ]
         Resource = values(var.ddb_tables_arnmap)
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "task_kms" {
+  name = "validator-kms"
+  role = aws_iam_role.ecs_task_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = [var.validator_kms_key_id]
+        Condition = {
+          StringEquals = {
+            "kms:EncryptionContext:Service" = "validator"
+          }
+        }
       }
     ]
   })

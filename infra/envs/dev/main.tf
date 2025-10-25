@@ -37,6 +37,7 @@ module "ecs" {
   source            = "../../modules/ecs"
   artifacts_bucket  = "pkg-artifacts"
   image_tag         = var.image_tag
+  validator_kms_key_id = module.monitoring.kms_key_arn
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"

@@ -35,10 +35,19 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
     import os
     import tempfile
     import zipfile
+    from typing import Optional
 
     from ..acmecli.metrics import METRIC_FUNCTIONS
-    from ..acmecli.types import MetricValue
     from ..services.s3_service import download_model
+    from .secure_temp import (
+        encrypt_bytes_to_files,
+        decrypt_file_to_bytes,
+        safe_delete,
+        register_sigterm_cleanup,
+    )
+
+    # Ensure we clean encrypted sidecars on SIGTERM from ECS
+    register_sigterm_cleanup()
 
     try:
         model_content = download_model(target, "1.0.0", "full")
@@ -49,19 +58,36 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
                     break
         if not model_content:
             raise ValueError(
-                f"No model content found for {target}. Cannot compute metrics without model data."
+                f"No model content found for {target}. "
+                f"Cannot compute metrics without model data."
             )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            zip_path = os.path.join(temp_dir, f"{target}.zip")
-            with open(zip_path, "wb") as f:
-                f.write(model_content)
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(temp_dir)
-            meta = create_metadata_from_files(temp_dir, target)
-            print(
-                f"Running ACME metrics for {target} with {len(meta['repo_files'])} files"
-            )
-            return run_acme_metrics(meta, METRIC_FUNCTIONS)
+
+        enc_zip_path: Optional[str] = None
+        enc_meta_path: Optional[str] = None
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # 1) Write encrypted ZIP and sidecar (no plaintext ZIP on disk)
+                enc_zip_path = os.path.join(temp_dir, f"{target}.zip.enc")
+                enc_meta_path = os.path.join(temp_dir, f"{target}.zip.meta.json")
+                kms_ctx = {"Service": "validator", "Target": target}
+                encrypt_bytes_to_files(
+                    model_content, kms_ctx, enc_zip_path, enc_meta_path
+                )
+
+                # 2) Decrypt to memory and extract
+                decrypted = decrypt_file_to_bytes(enc_zip_path, enc_meta_path)
+                with zipfile.ZipFile(io.BytesIO(decrypted), "r") as zip_ref:
+                    zip_ref.extractall(temp_dir)
+
+                meta = create_metadata_from_files(temp_dir, target)
+                print(
+                    f"Running ACME metrics for {target} with "
+                    f"{len(meta['repo_files'])} files"
+                )
+                return run_acme_metrics(meta, METRIC_FUNCTIONS)
+        finally:
+            # Crypto-shred (delete encrypted blobs/sidecars)
+            safe_delete(enc_zip_path or "", enc_meta_path or "")
     except Exception as e:
         print(f"Error analyzing model {target}: {e}")
         import traceback

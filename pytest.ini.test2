@@ -1,0 +1,4 @@
+[pytest]
+addopts = --pythonpath=src -q
+testpaths = tests/unit tests/integration
+norecursedirs = tests/actions_runner

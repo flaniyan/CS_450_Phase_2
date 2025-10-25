@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from src.utils.ddb_sanitize import to_ddb
+from .secure_temp import register_sigterm_cleanup
 
 # envs
 VALIDATOR_TIMEOUT_MS  = int(os.getenv("VALIDATOR_TIMEOUT_MS",  "4000"))
@@ -153,6 +154,7 @@ async def health_check():
 @app.post("/validate", response_model=ValidationResponse)
 async def validate_package(request: ValidationRequest):
     """Validate package access and execute custom validators"""
+    register_sigterm_cleanup()
     async with _SEM:
         t0 = time.perf_counter()
         job_id = str(uuid.uuid4())
