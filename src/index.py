@@ -130,10 +130,28 @@ def frontend_sync_neptune():
         return {"error": f"Sync failed: {str(e)}"}
 
 @app.get("/size-cost")
-def frontend_size_cost(request: Request):
+def frontend_size_cost(request: Request, name: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("size_cost.html", {"request": request})
+    size_data = None
+    if name:
+        try:
+            from .services.s3_service import get_model_sizes
+            result = get_model_sizes(name, "1.0.0")
+            size_data = {
+                "model_id": name,
+                "full_size": result.get("full", 0),
+                "weights_size": result.get("weights", 0),
+                "datasets_size": result.get("datasets", 0),
+                "weights_uncompressed": result.get("weights_uncompressed", 0),
+                "datasets_uncompressed": result.get("datasets_uncompressed", 0),
+                "error": result.get("error")
+            }
+        except Exception as e:
+            print(f"Size cost error: {e}")
+            size_data = {"model_id": name, "error": str(e)}
+    ctx = {"request": request, "name": name or "", "size_data": size_data}
+    return templates.TemplateResponse("size_cost.html", ctx)
 
 @app.get("/ingest")
 def frontend_ingest(request: Request):

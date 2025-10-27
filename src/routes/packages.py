@@ -5,7 +5,7 @@ from typing import Optional
 import io
 import re
 from botocore.exceptions import ClientError
-from ..services.s3_service import upload_model, download_model, list_models, reset_registry, sync_model_lineage_to_neptune, get_model_lineage_from_config
+from ..services.s3_service import upload_model, download_model, list_models, reset_registry, sync_model_lineage_to_neptune, get_model_lineage_from_config, get_model_sizes
 
 router = APIRouter()
 
@@ -162,3 +162,13 @@ def get_model_lineage_from_config_api(model_id: str, version: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get lineage: {str(e)}")
+
+@router.get("/models/{model_id}/{version}/size")
+def get_model_sizes_api(model_id: str, version: str):
+    try:
+        result = get_model_sizes(model_id, version)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get model sizes: {str(e)}")

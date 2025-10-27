@@ -2,3 +2,5 @@ https://www.youtube.com/watch?v=-gvgBWI0yQs -> Uploading, deleting, and listing 
 https://www.youtube.com/watch?v=7r2z3Qn3Qz8 -> In depth s3
 https://www.youtube.com/watch?v=5q7FtT_DyME -> Intro to s3
 https://www.youtube.com/watch?v=qbLc5a9jdXo -> REST API Crash course
+https://docs.aws.amazon.com/datazone/latest/userguide/datazone-data-lineage.html -> for lineage requirement
+https://aws.amazon.com/blogs/big-data/building-end-to-end-data-lineage-for-one-time-and-complex-queries-using-amazon-athena-amazon-redshift-amazon-neptune-and-dbt/ -> more on lineage

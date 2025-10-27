@@ -92,6 +92,26 @@ def validate_huggingface_structure(zip_content: bytes) -> Dict[str, Any]:
     except zipfile.BadZipFile:
         return {"valid": False, "error": "Invalid ZIP file"}
 
+def get_model_sizes(model_id: str, version: str) -> Dict[str, Any]:
+    if not aws_available:
+        return {"full": 0, "weights": 0, "datasets": 0, "error": "AWS services not available"}
+    try:
+        s3_key = f"models/{model_id}/{version}/model.zip"
+        response = s3.head_object(Bucket=ap_arn, Key=s3_key)
+        full_size = response['ContentLength']
+        s3_response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+        zip_content = s3_response['Body'].read()
+        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
+            weight_files = [f for f in zip_file.namelist() if f.endswith(('.bin', '.safetensors'))]
+            dataset_files = [f for f in zip_file.namelist() if any(ext in f for ext in ['.csv', '.json', '.txt', '.parquet'])]
+            weights_size = sum(zip_file.getinfo(f).compress_size for f in weight_files)
+            datasets_size = sum(zip_file.getinfo(f).compress_size for f in dataset_files)
+            weights_uncompressed = sum(zip_file.getinfo(f).file_size for f in weight_files)
+            datasets_uncompressed = sum(zip_file.getinfo(f).file_size for f in dataset_files)
+        return {"full": full_size, "weights": weights_size, "datasets": datasets_size, "weights_uncompressed": weights_uncompressed, "datasets_uncompressed": datasets_uncompressed, "model_id": model_id, "version": version}
+    except Exception as e:
+        print(f"Error getting model sizes: {e}")
+        return {"full": 0, "weights": 0, "datasets": 0, "error": str(e)}
 def extract_model_component(zip_content: bytes, component: str) -> bytes:
     try:
         with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
@@ -399,3 +419,4 @@ def sync_model_lineage_to_neptune():
     except Exception as e:
         print(f"Error syncing lineage: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync lineage: {str(e)}")
+
