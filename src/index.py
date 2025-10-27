@@ -72,17 +72,7 @@ def frontend_rate(request: Request, name: str | None = None):
     rating = None
     if name:
         row = run_scorer(name)
-        rating = {
-            "NetScore": (alias(row, "net_score", "NetScore", "netScore") or 0.0),
-            "RampUp": (alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0),
-            "Correctness": (alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0),
-            "BusFactor": (alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0),
-            "ResponsiveMaintainer": (alias(row, "pull_requests", "PullRequests", "score_pull_requests") or 0.0),
-            "LicenseScore": (alias(row, "license", "License", "score_license") or 0.0),
-            "Reproducibility": (alias(row, "reproducibility", "Reproducibility", "score_reproducibility") or 0.0),
-            "Reviewedness": (alias(row, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0),
-            "Treescore": (alias(row, "treescore", "Treescore", "score_treescore") or 0.0),
-        }
+        rating = {"NetScore": (alias(row, "net_score", "NetScore", "netScore") or 0.0), "RampUp": (alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0), "Correctness": (alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0), "BusFactor": (alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0), "ResponsiveMaintainer": (alias(row, "pull_requests", "PullRequests", "score_pull_requests") or 0.0), "LicenseScore": (alias(row, "license", "License", "score_license") or 0.0), "Reproducibility": (alias(row, "reproducibility", "Reproducibility", "score_reproducibility") or 0.0), "Reviewedness": (alias(row, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0), "Treescore": (alias(row, "treescore", "Treescore", "score_treescore") or 0.0)}
     ctx = {"request": request, "name": name or "", "rating": rating}
     return templates.TemplateResponse("rate.html", ctx)
 
@@ -107,13 +97,7 @@ def frontend_lineage(request: Request, name: str | None = None):
         try:
             from .services.s3_service import get_model_lineage_from_config
             result = get_model_lineage_from_config(name, "1.0.0")
-            lineage_data = {
-                "model_id": name,
-                "lineage_metadata": result.get("lineage_metadata", {}),
-                "lineage_map": result.get("lineage_map", {}),
-                "config": result.get("config", {}),
-                "error": result.get("error")
-            }
+            lineage_data = {"model_id": name, "lineage_metadata": result.get("lineage_metadata", {}), "lineage_map": result.get("lineage_map", {}), "config": result.get("config", {}), "error": result.get("error")}
         except Exception as e:
             print(f"Lineage error: {e}")
             lineage_data = {"model_id": name, "error": str(e)}
@@ -138,15 +122,7 @@ def frontend_size_cost(request: Request, name: str | None = None):
         try:
             from .services.s3_service import get_model_sizes
             result = get_model_sizes(name, "1.0.0")
-            size_data = {
-                "model_id": name,
-                "full_size": result.get("full", 0),
-                "weights_size": result.get("weights", 0),
-                "datasets_size": result.get("datasets", 0),
-                "weights_uncompressed": result.get("weights_uncompressed", 0),
-                "datasets_uncompressed": result.get("datasets_uncompressed", 0),
-                "error": result.get("error")
-            }
+            size_data = {"model_id": name, "full_size": result.get("full", 0), "weights_size": result.get("weights", 0), "datasets_size": result.get("datasets", 0), "weights_uncompressed": result.get("weights_uncompressed", 0), "datasets_uncompressed": result.get("datasets_uncompressed", 0), "error": result.get("error")}
         except Exception as e:
             print(f"Size cost error: {e}")
             size_data = {"model_id": name, "error": str(e)}
