@@ -96,7 +96,7 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
             if component == "weights":
                 files = [f for f in zip_file.namelist() if f.endswith(('.bin', '.safetensors'))]
             elif component == "datasets":
-                files = [f for f in zip_file.namelist() if any(ext in f for ext in ['.csv', '.json', '.txt', '.parquet'])]
+                files = [f for f in zip_file.namelist() if any(ext in f for ext in ['.txt', '.json'])]
             else:
                 return zip_content
             if not files:
@@ -137,7 +137,6 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     try:
         s3_key = f"models/{model_id}/{version}/model.zip"
-        print(f"AWS S3 download: {model_id} v{version} ({component}) -> {s3_key}")
         response = s3.get_object(Bucket=ap_arn, Key=s3_key)
         zip_content = response['Body'].read()
         if component != "full":
@@ -153,7 +152,6 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
         print(f"AWS S3 download failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
 
-# Cache for model card content to avoid repeated downloads
 _model_card_cache = {}
 def clear_model_card_cache():
     global _model_card_cache
@@ -164,23 +162,53 @@ def search_model_card_content(model_id: str, version: str, regex_pattern: str) -
         if cache_key in _model_card_cache:
             cached_content = _model_card_cache[cache_key]
             pattern = re.compile(regex_pattern, re.IGNORECASE)
-            return any(pattern.search(content) for content in cached_content)
+            return any(pattern.search(content) for content in cached_content)     
+        pattern = re.compile(regex_pattern, re.IGNORECASE)
+        is_likely_filename = (
+            '.' in regex_pattern and
+            not any(char in regex_pattern for char in [' ', '\n', '\t']) and
+            len(regex_pattern) < 50
+        )
+        if is_likely_filename:
+            try:
+                s3_key = f"models/{model_id}/{version}/model.zip"
+                response = s3.head_object(Bucket=ap_arn, Key=s3_key)
+                file_size = response['ContentLength']
+                for tail_size in [32768, 65536, 131072]:  # 32KB, 64KB, 128KB
+                    try:
+                        range_start = max(0, file_size - tail_size)
+                        response = s3.get_object(Bucket=ap_arn, Key=s3_key, Range=f'bytes={range_start}-{file_size-1}')
+                        zip_tail = response['Body'].read()
+                        with zipfile.ZipFile(io.BytesIO(zip_tail), 'r') as zip_file:
+                            for file_info in zip_file.filelist:
+                                filename = file_info.filename.lower()
+                                if any(ext in filename for ext in ['.txt', '.json', '.md']):
+                                    if pattern.search(filename):
+                                        return True
+                        break
+                    except:
+                        continue
+                        
+            except:
+                pass
         zip_content = download_model(model_id, version, "full")
         if not zip_content:
             return False
-        pattern = re.compile(regex_pattern, re.IGNORECASE)
         cached_content = []
         with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
             for file_info in zip_file.filelist:
                 filename = file_info.filename.lower()
-                if any(ext in filename for ext in ['.txt', '.md', '.json', '.yaml', '.yml', '.py', '.js', '.ts', '.cfg', '.ini']):
+                if any(ext in filename for ext in ['.txt', '.json', '.md']):
+                    if pattern.search(filename):
+                        _model_card_cache[cache_key] = cached_content
+                        return True
                     try:
                         content = zip_file.read(file_info).decode('utf-8', errors='ignore')
                         cached_content.append(content)
                         if pattern.search(content):
                             _model_card_cache[cache_key] = cached_content
                             return True
-                    except:
+                    except Exception:
                         continue
         _model_card_cache[cache_key] = cached_content
         return False
@@ -239,7 +267,6 @@ def reset_registry() -> Dict[str, str]:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     try:
-        print("AWS S3 reset: Starting registry reset...")
         response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
         if 'Contents' in response:
             deleted_count = 0
@@ -248,7 +275,7 @@ def reset_registry() -> Dict[str, str]:
                 deleted_count += 1
             print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
         else:
-            print("AWS S3 reset: No objects found to delete")
+            print("AWS S3 reset successful: No objects found to delete")
         return {"message": "Reset done successfully"}
     except Exception as e:
         print(f"AWS S3 reset failed: {e}")
