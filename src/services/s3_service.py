@@ -2,8 +2,17 @@ import boto3
 import zipfile
 import io
 import re
+import json
+import os
+import urllib.request
+import urllib.error
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.credentials import get_credentials
+from botocore.session import Session
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 region = "us-east-1"
 access_point_name = "cs450-s3"
@@ -35,7 +44,6 @@ def parse_version(version_str: str) -> tuple:
     if not match:
         return None
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-    
 def version_matches_range(version_str: str, version_spec: str) -> bool:
     try:
         version = parse_version(version_str)
@@ -74,19 +82,13 @@ def version_matches_range(version_str: str, version_spec: str) -> bool:
         return False
     except Exception:
         return False
-        
 def validate_huggingface_structure(zip_content: bytes) -> Dict[str, Any]:
     try:
         with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
             file_list = zip_file.namelist()
             has_config = any('config.json' in f for f in file_list)
             has_weights = any(f.endswith(('.bin', '.safetensors')) for f in file_list)
-            return {
-                "valid": has_config and has_weights,
-                "has_config": has_config,
-                "has_weights": has_weights,
-                "files": file_list
-            }
+            return {"valid": has_config and has_weights, "has_config": has_config, "has_weights": has_weights, "files": file_list}
     except zipfile.BadZipFile:
         return {"valid": False, "error": "Invalid ZIP file"}
 
@@ -115,17 +117,9 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
     try:
         validation = validate_huggingface_structure(file_content)
         if not validation["valid"]:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}"
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}")
         s3_key = f"models/{model_id}/{version}/model.zip"
-        s3.put_object(
-            Bucket=ap_arn,
-            Key=s3_key,
-            Body=file_content,
-            ContentType='application/zip'
-        )
+        s3.put_object(Bucket=ap_arn, Key=s3_key, Body=file_content, ContentType='application/zip')
         print(f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}")
         return {"message": "Upload successful"}
     except Exception as e:
@@ -151,7 +145,6 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
-
 _model_card_cache = {}
 def clear_model_card_cache():
     global _model_card_cache
@@ -250,14 +243,8 @@ def list_models(name_regex: str = None, model_regex: str = None, version_range: 
                                     continue
                             except re.error as e:
                                 raise HTTPException(status_code=400, detail=f"Invalid model regex: {str(e)}")
-                        results.append({
-                            "name": model_name,
-                            "version": model_version
-                        })
-        return {
-            "models": results,
-            "next_token": response.get('NextContinuationToken')
-        }
+                        results.append({"name": model_name, "version": model_version})
+        return {"models": results, "next_token": response.get('NextContinuationToken')}
     except HTTPException:
         raise
     except Exception as e:
@@ -280,3 +267,135 @@ def reset_registry() -> Dict[str, str]:
     except Exception as e:
         print(f"AWS S3 reset failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset registry: {str(e)}")
+
+def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, Any]]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(model_zip_content), 'r') as zip_file:
+            config_files = [f for f in zip_file.namelist() if f.endswith('config.json') or f == 'config.json']
+            if not config_files:
+                return None
+            config_content = zip_file.read(config_files[0])
+            return json.loads(config_content.decode('utf-8'))
+    except Exception as e:
+        print(f"Error extracting config.json: {e}")
+        return None
+def parse_lineage_from_config(config: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    lineage_metadata = {"model_id": model_id, "base_model": None, "architecture": None, "transformers_version": None, "model_type": None}
+    base_model_fields = ["base_model_name_or_path", "_name_or_path", "parent_model", "pretrained_model_name_or_path"]
+    for field in base_model_fields:
+        if field in config:
+            lineage_metadata["base_model"] = config[field]
+            break
+    lineage_metadata["architecture"] = config.get("model_type")
+    lineage_metadata["model_type"] = config.get("model_type")
+    lineage_metadata["transformers_version"] = config.get("transformers_version")
+    lineage_metadata["architectures"] = config.get("architectures", [])
+    lineage_metadata["vocab_size"] = config.get("vocab_size")
+    lineage_metadata["hidden_size"] = config.get("hidden_size")
+    return lineage_metadata
+
+def get_model_lineage_from_config(model_id: str, version: str) -> Dict[str, Any]:
+    try:
+        model_content = download_model(model_id, version)
+        config = extract_config_from_model(model_content)
+        if not config:
+            return {"model_id": model_id, "error": "No config.json found in model"}
+        lineage_metadata = parse_lineage_from_config(config, model_id)
+        lineage_map = {}
+        if lineage_metadata.get("base_model"):
+            parent_model = lineage_metadata["base_model"]
+            lineage_map[parent_model] = [model_id]
+        return {"model_id": model_id, "lineage_metadata": lineage_metadata, "lineage_map": lineage_map, "config": config}
+    except Exception as e:
+        print(f"Error getting lineage from config: {e}")
+        return {"model_id": model_id, "error": str(e)}
+
+def sign_request(request):
+    credentials = get_credentials(Session())
+    auth = SigV4Auth(credentials, 'neptune-db', os.environ.get('AWS_REGION', 'us-east-1'))
+    auth.add_auth(request)
+    return dict(request.headers)
+
+def send_request(url, headers, data):
+    req = urllib.request.Request(url, data=data.encode('utf-8'), headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req) as response:
+            return response.read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        print(f"HTTP Error: {e.code} - {e.reason}")
+        print(e.read().decode('utf-8'))
+        raise
+
+def write_to_neptune(lineage_data):
+    neptune_endpoint = os.environ.get('NEPTUNE_ENDPOINT', '')
+    if not neptune_endpoint:
+        print("NEPTUNE_ENDPOINT not configured, skipping Neptune write")
+        return
+    endpoint = neptune_endpoint
+    clear_query = "g.V().drop()"
+    request = AWSRequest(method='POST', url=endpoint, data=json.dumps({'gremlin': clear_query}))
+    signed_headers = sign_request(request)
+    response = send_request(endpoint, signed_headers, json.dumps({'gremlin': clear_query}))
+    print(f"Clear database response: {response}")
+    verify_query = "g.V().count()"
+    request = AWSRequest(method='POST', url=endpoint, data=json.dumps({'gremlin': verify_query}))
+    signed_headers = sign_request(request)
+    response = send_request(endpoint, signed_headers, json.dumps({'gremlin': verify_query}))
+    print(f"Vertex count after clearing: {response}")
+    
+    def process_node(node, children):
+        query = f"g.V().has('lineage_node', 'node_name', '{node}').fold().coalesce(unfold(), addV('lineage_node').property('node_name', '{node}'))"
+        request = AWSRequest(method='POST', url=endpoint, data=json.dumps({'gremlin': query}))
+        signed_headers = sign_request(request)
+        response = send_request(endpoint, signed_headers, json.dumps({'gremlin': query}))
+        print(f"Add node response for {node}: {response}")
+        for child_node in children:
+            query = f"g.V().has('lineage_node', 'node_name', '{child_node}').fold().coalesce(unfold(), addV('lineage_node').property('node_name', '{child_node}'))"
+            request = AWSRequest(method='POST', url=endpoint, data=json.dumps({'gremlin': query}))
+            signed_headers = sign_request(request)
+            response = send_request(endpoint, signed_headers, json.dumps({'gremlin': query}))
+            print(f"Add child node response for {child_node}: {response}")
+            query = f"g.V().has('lineage_node', 'node_name', '{node}').as('a').V().has('lineage_node', 'node_name', '{child_node}').coalesce(inE('lineage_edge').where(outV().as('a')), addE('lineage_edge').from('a').property('edge_name', ' '))"
+            request = AWSRequest(method='POST', url=endpoint, data=json.dumps({'gremlin': query}))
+            signed_headers = sign_request(request)
+            response = send_request(endpoint, signed_headers, json.dumps({'gremlin': query}))
+            print(f"Add edge response for {node} -> {child_node}: {response}")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(process_node, node, children) for node, children in lineage_data.items()]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error in processing node: {str(e)}")
+
+def sync_model_lineage_to_neptune():
+    if not aws_available:
+        raise HTTPException(status_code=503, detail="AWS services not available")
+    try:
+        lineage_map = {}
+        response = list_models(limit=1000)
+        models = response.get("models", [])
+        print(f"Analyzing lineage for {len(models)} models from config.json")
+        for model in models:
+            model_id = model.get("Name")
+            version = model.get("Version", "1.0.0")
+            if not model_id:
+                continue
+            try:
+                lineage_info = get_model_lineage_from_config(model_id, version)
+                if lineage_info.get("lineage_map"):
+                    for parent, children in lineage_info["lineage_map"].items():
+                        if parent in lineage_map:
+                            lineage_map[parent].extend(children)
+                        else:
+                            lineage_map[parent] = children
+                    print(f"Extracted lineage for {model_id}: {lineage_info.get('lineage_metadata', {}).get('base_model')}")
+            except Exception as e:
+                print(f"Error processing model {model_id}: {e}")
+                continue
+        print(f"Built lineage map with {len(lineage_map)} relationships")
+        write_to_neptune(lineage_map)
+        return {"message": "Model lineage successfully synced to Neptune", "source": "config.json analysis", "relationships": len(lineage_map)}
+    except Exception as e:
+        print(f"Error syncing lineage: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync lineage: {str(e)}")

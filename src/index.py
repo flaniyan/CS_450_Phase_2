@@ -99,10 +99,35 @@ def frontend_admin(request: Request):
     return templates.TemplateResponse("admin.html", {"request": request})
 
 @app.get("/lineage")
-def frontend_lineage(request: Request):
+def frontend_lineage(request: Request, name: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("lineage.html", {"request": request})
+    lineage_data = None
+    if name:
+        try:
+            from .services.s3_service import get_model_lineage_from_config
+            result = get_model_lineage_from_config(name, "1.0.0")
+            lineage_data = {
+                "model_id": name,
+                "lineage_metadata": result.get("lineage_metadata", {}),
+                "lineage_map": result.get("lineage_map", {}),
+                "config": result.get("config", {}),
+                "error": result.get("error")
+            }
+        except Exception as e:
+            print(f"Lineage error: {e}")
+            lineage_data = {"model_id": name, "error": str(e)}
+    ctx = {"request": request, "name": name or "", "lineage": lineage_data}
+    return templates.TemplateResponse("lineage.html", ctx)
+
+@app.post("/lineage/sync-neptune")
+def frontend_sync_neptune():
+    try:
+        from .services.s3_service import sync_model_lineage_to_neptune
+        result = sync_model_lineage_to_neptune()
+        return {"message": "Sync successful", "details": result}
+    except Exception as e:
+        return {"error": f"Sync failed: {str(e)}"}
 
 @app.get("/size-cost")
 def frontend_size_cost(request: Request):
