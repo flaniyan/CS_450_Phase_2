@@ -49,15 +49,15 @@ def frontend_directory(request: Request, q: str | None = None, name_regex: str |
             version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
             if re.match(version_pattern, q.strip()):
                 effective_version_range = q.strip()
-                result = list_models(version_range=effective_version_range, limit=100)
+                result = list_models(version_range=effective_version_range, limit=1000)
             else:
                 escaped_query = re.escape(q)
                 search_regex = f".*{escaped_query}.*"
-                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=100)
+                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
         elif name_regex or model_regex:
-            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=100)
+            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
         else:
-            result = list_models(version_range=effective_version_range, limit=100)
+            result = list_models(version_range=effective_version_range, limit=1000)
         packages = result["models"]
     except Exception as e:
         print(f"Directory error: {e}")
