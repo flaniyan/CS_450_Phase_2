@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import os
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,19 +89,20 @@ def frontend_admin(request: Request):
     return templates.TemplateResponse("admin.html", {"request": request})
 
 @app.get("/lineage")
-def frontend_lineage(request: Request, name: str | None = None):
+def frontend_lineage(request: Request, name: str | None = None, version: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     lineage_data = None
     if name:
         try:
             from .services.s3_service import get_model_lineage_from_config
-            result = get_model_lineage_from_config(name, "1.0.0")
+            effective_version = version or "1.0.0"
+            result = get_model_lineage_from_config(name, effective_version)
             lineage_data = {"model_id": name, "lineage_metadata": result.get("lineage_metadata", {}), "lineage_map": result.get("lineage_map", {}), "config": result.get("config", {}), "error": result.get("error")}
         except Exception as e:
             print(f"Lineage error: {e}")
             lineage_data = {"model_id": name, "error": str(e)}
-    ctx = {"request": request, "name": name or "", "lineage": lineage_data}
+    ctx = {"request": request, "name": name or "", "version": version or "1.0.0", "lineage": lineage_data}
     return templates.TemplateResponse("lineage.html", ctx)
 
 @app.post("/lineage/sync-neptune")
@@ -114,14 +115,14 @@ def frontend_sync_neptune():
         return {"error": f"Sync failed: {str(e)}"}
 
 @app.get("/size-cost")
-def frontend_size_cost(request: Request, name: str | None = None):
+def frontend_size_cost(request: Request, name: str, version: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     size_data = None
     if name:
         try:
             from .services.s3_service import get_model_sizes
-            result = get_model_sizes(name, "1.0.0")
+            result = get_model_sizes(name, version)
             size_data = {"model_id": name, "full_size": result.get("full", 0), "weights_size": result.get("weights", 0), "datasets_size": result.get("datasets", 0), "weights_uncompressed": result.get("weights_uncompressed", 0), "datasets_uncompressed": result.get("datasets_uncompressed", 0), "error": result.get("error")}
         except Exception as e:
             print(f"Size cost error: {e}")
@@ -130,21 +131,36 @@ def frontend_size_cost(request: Request, name: str | None = None):
     return templates.TemplateResponse("size_cost.html", ctx)
 
 @app.get("/ingest")
-def frontend_ingest(request: Request):
+def frontend_ingest(request: Request, name: str | None = None, version: str = "main"):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("ingest.html", {"request": request})
+    result = None
+    if name:
+        try:
+            from .services.s3_service import model_ingestion
+            ingestion_result = model_ingestion(name, version)
+            result = {"message": "Ingest successful", "details": ingestion_result}
+        except HTTPException as e:
+            error_detail = e.detail
+            if isinstance(error_detail, dict) and "error" in error_detail:
+                result = {"error": error_detail.get("message", "Ingestion failed")}
+            else:
+                result = {"error": str(error_detail) if isinstance(error_detail, str) else "Ingestion failed"}
+        except Exception as e:
+            result = {"error": f"Ingest failed: {str(e)}"}
+    ctx = {"request": request, "name": name or "", "version": version, "result": result}
+    return templates.TemplateResponse("ingest.html", ctx)                
 
 @app.post("/upload")
-def frontend_upload_post(request: Request, file: UploadFile = File(...)):
+def frontend_upload_post(request: Request, file: UploadFile = File(...), model_id: str = None, version: str = None):
     if not file.filename or not file.filename.endswith('.zip'):
         return {"error": "Only ZIP files are supported"}
     try:
         filename = file.filename.replace('.zip', '')
-        model_id = filename
-        version = "1.0.0"
+        effective_model_id = model_id or filename
+        effective_version = version or "1.0.0"
         file_content = file.file.read()
-        result = upload_model(file_content, model_id, version)
+        result = upload_model(file_content, effective_model_id, effective_version)
         return {"message": "Upload successful", "details": result}
     except Exception as e:
         return {"error": f"Upload failed: {str(e)}"}

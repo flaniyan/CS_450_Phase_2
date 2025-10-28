@@ -4,10 +4,19 @@ import time
 import json
 import os
 import sys
+import zipfile
+import io
+import tempfile
+import glob
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from ..services.s3_service import download_model
+from ..acmecli.metrics import METRIC_FUNCTIONS
+from ..acmecli.types import MetricValue
+from ..acmecli.scoring import compute_net_score
 
 router = APIRouter()
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,13 +34,6 @@ class RateRequest(BaseModel):
     target: str
 
 def analyze_model_content(target: str) -> Dict[str, Any]:
-    import zipfile
-    import io
-    import tempfile
-    import os
-    from ..services.s3_service import download_model
-    from ..acmecli.metrics import METRIC_FUNCTIONS
-    from ..acmecli.types import MetricValue
     try:
         model_content = download_model(target, "1.0.0", "full")
         if not model_content:
@@ -52,13 +54,10 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
             return run_acme_metrics(meta, METRIC_FUNCTIONS)
     except Exception as e:
         print(f"Error analyzing model {target}: {e}")
-        import traceback
         traceback.print_exc()
         raise RuntimeError(f"Failed to analyze model {target}: {str(e)}")
 
 def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]:
-    import os
-    import glob
     meta = {
         "repo_files": set(),
         "readme_text": "",
@@ -89,8 +88,6 @@ def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]
     return meta
 
 def run_acme_metrics(meta: Dict[str, Any], metric_functions: Dict[str, Any]) -> Dict[str, Any]:
-    from ..acmecli.scoring import compute_net_score
-    from ..acmecli.types import MetricValue
     results = {}
     for metric_name, metric_func in metric_functions.items():
         try:

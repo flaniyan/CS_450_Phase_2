@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Model Ingestion</h1>
+  <p>Ingest a public HuggingFace model into the registry. The model must score at least 0.5 on each non-latency metric to be ingestible.</p>
+  
+  <form method="get" aria-label="Ingest model">
+    <label for="model_id">Model ID</label>
+    <input id="model_id" type="text" name="name" value="{{ name }}" placeholder="e.g., bert-base-uncased" aria-label="Model ID" required />
+    
+    <label for="version">Version</label>
+    <input id="version" type="text" name="version" value="{{ version }}" placeholder="main" aria-label="Version" required />
+    
+    <button class="btn" type="submit">Ingest Model</button>
+  </form>
+
+  {% if result %}
+    <div class="card">
+      {% if result.error %}
+        <h2 style="color: #e74c3c;">Ingestion Failed</h2>
+        <p>{{ result.error }}</p>
+      {% else %}
+        <h2 style="color: #27ae60;">Ingestion Successful</h2>
+        <p><strong>Model ID:</strong> {{ result.details.model_id }}</p>
+        <p><strong>Version:</strong> {{ result.details.version }}</p>
+        
+        {% if result.details.ingestible %}
+          <p style="color: #27ae60; font-weight: bold;">✓ Model is ingestible</p>
+        {% endif %}
+        
+        {% if result.details.metric_scores %}
+          <h3>Metric Scores</h3>
+          <ul>
+            {% for metric, score in result.details.metric_scores.items() %}
+              <li><strong>{{ metric }}:</strong> {{ '%.2f'|format(score) }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+

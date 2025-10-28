@@ -6,6 +6,8 @@ import json
 import os
 import urllib.request
 import urllib.error
+import requests
+import shutil
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
 from botocore.auth import SigV4Auth
@@ -13,6 +15,10 @@ from botocore.awsrequest import AWSRequest
 from botocore.credentials import get_credentials
 from botocore.session import Session
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from acmecli.types import MetricValue
+from acmecli.hf_handler import fetch_hf_metadata
+from ..services.rating import create_metadata_from_files, run_acme_metrics
+from ..acmecli.metrics import METRIC_FUNCTIONS
 
 region = "us-east-1"
 access_point_name = "cs450-s3"
@@ -419,4 +425,59 @@ def sync_model_lineage_to_neptune():
     except Exception as e:
         print(f"Error syncing lineage: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync lineage: {str(e)}")
+
+def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
+    api_url = f"https://huggingface.co/api/models/{model_id}"
+    response = requests.get(api_url, timeout=30)
+    if response.status_code != 200:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found on HuggingFace")
+    model_info = response.json()
+    files_to_download = []
+    for sibling in model_info.get("siblings", []):
+        if sibling.get("rfilename"):
+            files_to_download.append(sibling["rfilename"])
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for filename in files_to_download:
+            file_url = f"https://huggingface.co/{model_id}/resolve/{version}/{filename}"
+            file_response = requests.get(file_url, timeout=120, stream=True)
+            if file_response.status_code == 200:
+                zip_file.writestr(filename, file_response.content)
+    return output.getvalue()
+
+def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
+    if not aws_available:
+        raise HTTPException(status_code=503, detail="AWS services not available")
+    try:
+        zip_content = download_from_huggingface(model_id, version)
+        validation = validate_huggingface_structure(zip_content)
+        if not validation["valid"]:
+            raise HTTPException(status_code=400, detail=f"Invalid model structure. Missing: config.json={not validation.get('has_config')}, weights={not validation.get('has_weights')}")
+        temp_dir = os.path.join(os.getcwd(), f".tmp_ingest_{model_id}_{os.getpid()}")
+        try:
+            os.makedirs(temp_dir, exist_ok=True)
+            with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+            meta = create_metadata_from_files(temp_dir, model_id)
+            config = extract_config_from_model(zip_content)
+            if config:
+                meta["config"] = config
+            metric_results = run_acme_metrics(meta, METRIC_FUNCTIONS)
+        finally:
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+        REQUIRED_NON_LATENCY_METRICS = ['license', 'ramp_up', 'bus_factor', 'performance_claims', 'size', 'dataset_code', 'dataset_quality', 'code_quality', 'reproducibility', 'reviewedness', 'treescore']
+        failures = []
+        for metric_name in REQUIRED_NON_LATENCY_METRICS:
+            score = metric_results.get(metric_name, 0.0)
+            if score < 0.5:
+                failures.append(f"{metric_name}={score:.2f}")
+        if failures:
+            raise HTTPException(status_code=422, detail={"error": "INGESTIBILITY_FAILURE", "message": f"Model failed ingestibility requirements. Failed metrics: {', '.join(failures)}", "metric_scores": {m: metric_results.get(m, 0.0) for m in REQUIRED_NON_LATENCY_METRICS}, "required_threshold": 0.5})
+        upload_model(zip_content, model_id, version)
+        return {"message": "Model ingestion successful", "model_id": model_id, "version": version, "metric_scores": {m: metric_results.get(m, 0.0) for m in REQUIRED_NON_LATENCY_METRICS}, "ingestible": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to ingest model: {str(e)}")
 
