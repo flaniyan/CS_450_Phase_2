@@ -2,7 +2,7 @@ variable "artifacts_bucket" { type = string }
 variable "ddb_tables_arnmap" { type = map(string) }
 
 resource "aws_iam_policy" "group106_policy" {
-  name   = "group106_project_policy"
+  name = "group106_project_policy"
   policy = jsonencode({
     Version : "2012-10-17",
     Statement : [
@@ -24,7 +24,7 @@ resource "aws_iam_policy" "group106_policy" {
       },
       {
         Effect : "Allow",
-        Action : ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:UpdateItem","dynamodb:Query"],
+        Action : ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"],
         Resource : values(var.ddb_tables_arnmap)
       }
     ]

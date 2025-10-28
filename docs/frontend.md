@@ -19,5 +19,5 @@ Rendered with Jinja templates and served by FastAPI on the same port as the API.
 
 ```powershell
 . .venv/Scripts/Activate.ps1
-python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
+python -m uvicorn src.index:app --host 0.0.0.0 --port 8000 --reload
 ```

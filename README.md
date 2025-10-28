@@ -4,21 +4,41 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-- [Project Layout](#project-layout)
-- [CLI Entry Points](#cli-entry-points)
-- [Runtime Data Flow](#runtime-data-flow)
-- [Source Modules](#source-modules)
-  - [Top-Level Runner](#top-level-runner)
-  - [Handlers and Utilities](#handlers-and-utilities)
-  - [Scoring and Reporting](#scoring-and-reporting)
-  - [Metrics Registry](#metrics-registry)
-- [Metric Reference](#metric-reference)
-- [Testing and Tooling](#testing-and-tooling)
-- [Continuous Integration](#continuous-integration)
-- [Sample Inputs and Docs](#sample-inputs-and-docs)
-- [Extending the System](#extending-the-system)
-- [Operational Notes and Limitations](#operational-notes-and-limitations)
+- [ACME CLI Scoring Toolkit](#acme-cli-scoring-toolkit)
+  - [Table of Contents](#table-of-contents)
+  - [Quick Start](#quick-start)
+    - [Option 1: AWS Cloud Deployment (Production Ready)](#option-1-aws-cloud-deployment-production-ready)
+    - [Option 2: Local Development](#option-2-local-development)
+    - [Option 3: Docker (Development)](#option-3-docker-development)
+  - [Package Management API](#package-management-api)
+    - [📦 Package Operations](#-package-operations)
+    - [🔧 Testing and Development](#-testing-and-development)
+  - [AWS Infrastructure](#aws-infrastructure)
+    - [🏗️ Architecture Components](#️-architecture-components)
+    - [🚀 CI/CD Pipeline](#-cicd-pipeline)
+    - [📊 Current Deployment Status](#-current-deployment-status)
+  - [Project Layout](#project-layout)
+  - [CLI Entry Points](#cli-entry-points)
+  - [Runtime Data Flow](#runtime-data-flow)
+  - [Source Modules](#source-modules)
+    - [Top-Level Runner](#top-level-runner)
+    - [Handlers and Utilities](#handlers-and-utilities)
+    - [Scoring and Reporting](#scoring-and-reporting)
+    - [Metrics Registry](#metrics-registry)
+  - [Metric Reference](#metric-reference)
+  - [Testing and Tooling](#testing-and-tooling)
+  - [Continuous Integration](#continuous-integration)
+  - [Sample Inputs and Docs](#sample-inputs-and-docs)
+  - [Extending the System](#extending-the-system)
+  - [🚨 AWS Deployment Troubleshooting](#-aws-deployment-troubleshooting)
+    - [Common Issues and Quick Fixes](#common-issues-and-quick-fixes)
+      - [502 Bad Gateway / 503 Service Temporarily Unavailable](#502-bad-gateway--503-service-temporarily-unavailable)
+      - [CloudFront 403 Forbidden on Uploads](#cloudfront-403-forbidden-on-uploads)
+      - [ECS Task Memory Issues](#ecs-task-memory-issues)
+      - [Complete Service Reset (Nuclear Option)](#complete-service-reset-nuclear-option)
+    - [Monitoring Commands](#monitoring-commands)
+    - [Prevention Tips](#prevention-tips)
+  - [Operational Notes and Limitations](#operational-notes-and-limitations)
 
 ## Quick Start
 
@@ -332,6 +352,118 @@ Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementatio
 4. **Integrate into other programs**
    - Import `acmecli.cli`, ensure `import acmecli.metrics` runs to populate `REGISTRY`, and call `process_url` directly with custom handlers.
 
+## 🚨 AWS Deployment Troubleshooting
+
+### Common Issues and Quick Fixes
+
+#### 502 Bad Gateway / 503 Service Temporarily Unavailable
+
+**Symptoms:**
+
+- CloudFront or ALB returns 502/503 errors
+- Rating button fails with "502 Bad Gateway"
+- Health checks fail intermittently
+
+**Root Cause:**
+ECS tasks failing to start or becoming unhealthy due to:
+
+- Task deployment in progress
+- Target group draining issues
+- Memory/CPU resource constraints
+- Health check failures
+
+**Quick Fix Commands:**
+
+```bash
+# 1. Check ECS service status
+aws ecs describe-services --cluster validator-cluster --services validator-service --query 'services[0].deployments[0].{Status:status,RolloutState:rolloutState,RunningCount:runningCount,DesiredCount:desiredCount,PendingCount:pendingCount,FailedTasks:failedTasks}'
+
+# 2. Force a fresh deployment (RECOMMENDED FIX)
+aws ecs update-service --cluster validator-cluster --service validator-service --force-new-deployment
+
+# 3. Check target group health
+aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-1:838693051036:targetgroup/validator-tg-3000/69d9076ad203b619
+
+# 4. Test endpoints after deployment
+curl https://d6zjk2j65mgd4.cloudfront.net/health
+curl -X POST -H "Content-Type: application/json" -d '{"target":"gpt2"}' https://d6zjk2j65mgd4.cloudfront.net/api/registry/models/gpt2/rate
+```
+
+**When to Use Each Command:**
+
+- **Always start with step 2** (`--force-new-deployment`) - this resolves 90% of 502/503 issues
+- Use step 1 to verify the fix worked
+- Use step 3 if issues persist (check for draining targets)
+- Use step 4 to test functionality
+
+#### CloudFront 403 Forbidden on Uploads
+
+**Symptoms:**
+
+- Upload form returns "403 ERROR"
+- POST requests blocked by CloudFront
+
+**Quick Fix:**
+
+```bash
+# Update CloudFront distribution to allow POST methods
+aws cloudfront get-distribution-config --id E1234567890ABCD > current-config.json
+# Edit current-config.json to add POST, PUT, DELETE, OPTIONS to AllowedMethods
+aws cloudfront update-distribution --id E1234567890ABCD --distribution-config file://current-config.json
+```
+
+#### ECS Task Memory Issues
+
+**Symptoms:**
+
+- Tasks fail to start
+- "Out of memory" errors in CloudWatch logs
+
+**Quick Fix:**
+
+```bash
+# Increase memory allocation in task definition
+aws ecs describe-task-definition --task-definition validator-service:7 --query 'taskDefinition.{memory:memory,cpu:cpu}'
+# Update task definition with higher memory (e.g., 1024 MB)
+aws ecs update-service --cluster validator-cluster --service validator-service --task-definition validator-service:8
+```
+
+#### Complete Service Reset (Nuclear Option)
+
+**If all else fails:**
+
+```bash
+# 1. Stop the service
+aws ecs update-service --cluster validator-cluster --service validator-service --desired-count 0
+
+# 2. Wait for tasks to stop
+aws ecs wait services-stable --cluster validator-cluster --services validator-service
+
+# 3. Start the service
+aws ecs update-service --cluster validator-cluster --service validator-service --desired-count 1
+
+# 4. Force new deployment
+aws ecs update-service --cluster validator-cluster --service validator-service --force-new-deployment
+```
+
+### Monitoring Commands
+
+```bash
+# Check CloudWatch logs for errors
+aws logs describe-log-streams --log-group-name "/ecs/validator-service" --order-by LastEventTime --descending --max-items 1
+aws logs get-log-events --log-group-name "/ecs/validator-service" --log-stream-name "STREAM_NAME" --query 'events[-10:].message'
+
+# Monitor ECS service events
+aws ecs describe-services --cluster validator-cluster --services validator-service --query 'services[0].events[0:5]'
+```
+
+### Prevention Tips
+
+1. **Regular Health Checks**: Monitor `/health` endpoint regularly
+2. **Resource Monitoring**: Keep an eye on CloudWatch metrics for CPU/Memory usage
+3. **Deployment Windows**: Schedule deployments during low-traffic periods
+4. **Rollback Plan**: Always have the previous task definition ready for quick rollback
+
 ## Operational Notes and Limitations
 
 - Network access is required for live GitHub and Hugging Face scoring; consider injecting cached metadata when offline.
@@ -339,13 +471,6 @@ Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementatio
 - `REGISTRY` depends on metric modules being imported; custom consumers must import `acmecli.metrics` before invoking `process_url`.
 - NDJSON output currently omits `hf_downloads`, `cli`, and `logging_env` scores; extend `ReportRow` if these should be surfaced downstream.
 - The cache is in-memory and per-process; restart the CLI or run in parallel to clear state.
-
-### Temp file encryption (validator)
-
-- The validator stores the uploaded ZIP **only as KMS-encrypted bytes** with per-job data keys.
-- Decryption happens in-memory for extraction; no plaintext ZIP is written to disk.
-- Extracted files go to the existing `TemporaryDirectory()` and are deleted automatically; encrypted sidecars are deleted in `finally` and on SIGTERM.
-- Required env: `KMS_KEY_ID`, `AWS_REGION`.
   #   C D   P i p e l i n e   T e s t   -   1 0 / 2 2 / 2 0 2 5   1 4 : 2 1 : 2 0 
    
    
