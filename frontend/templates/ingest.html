@@ -4,7 +4,7 @@
   <h1>Model Ingestion</h1>
   <p>Ingest a public HuggingFace model into the registry. The model must score at least 0.5 on each non-latency metric to be ingestible.</p>
   
-  <form method="get" aria-label="Ingest model">
+  <form method="post" action="/ingest" aria-label="Ingest model">
     <label for="model_id">Model ID</label>
     <input id="model_id" type="text" name="name" value="{{ name }}" placeholder="e.g., bert-base-uncased" aria-label="Model ID" required />
     
@@ -19,6 +19,10 @@
       {% if result.error %}
         <h2 style="color: #e74c3c;">Ingestion Failed</h2>
         <p>{{ result.error }}</p>
+        {% if result.details %}
+          <p><strong>Model ID:</strong> {{ result.details.model_id }}</p>
+          <p><strong>Version:</strong> {{ result.details.version }}</p>
+        {% endif %}
       {% else %}
         <h2 style="color: #27ae60;">Ingestion Successful</h2>
         <p><strong>Model ID:</strong> {{ result.details.model_id }}</p>
@@ -27,15 +31,50 @@
         {% if result.details.ingestible %}
           <p style="color: #27ae60; font-weight: bold;">✓ Model is ingestible</p>
         {% endif %}
-        
-        {% if result.details.metric_scores %}
-          <h3>Metric Scores</h3>
-          <ul>
+      {% endif %}
+      
+      {% if result.details and result.details.metric_scores %}
+          <h3>Metric Requirements (All metrics must score ≥ 0.5)</h3>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 15px;">
             {% for metric, score in result.details.metric_scores.items() %}
-              <li><strong>{{ metric }}:</strong> {{ '%.2f'|format(score) }}</li>
+              {% if score >= 0.5 %}
+                <div style="padding: 10px; border: 1px solid #27ae60; border-radius: 5px; background-color: #d4edda;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>{{ metric.replace('_', ' ').title() }}</strong>
+                    <span style="color: #27ae60;">
+                      {{ '%.2f'|format(score) }} ✓
+                    </span>
+                  </div>
+                </div>
+              {% else %}
+                <div style="padding: 10px; border: 1px solid #e74c3c; border-radius: 5px; background-color: #f8d7da;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>{{ metric.replace('_', ' ').title() }}</strong>
+                    <span style="color: #e74c3c;">
+                      {{ '%.2f'|format(score) }} ✗
+                    </span>
+                  </div>
+                </div>
+              {% endif %}
             {% endfor %}
+          </div>
+          
+          <h4 style="margin-top: 20px;">Summary</h4>
+          <ul style="list-style: none; padding: 0;">
+            {% set passed = namespace(count=0) %}
+            {% for metric, score in result.details.metric_scores.items() %}
+              {% if score >= 0.5 %}
+                {% set passed.count = passed.count + 1 %}
+              {% endif %}
+            {% endfor %}
+            <li><strong>Passed:</strong> {{ passed.count }}/{{ result.details.metric_scores|length }} metrics</li>
+            <li><strong>Required:</strong> All 11 metrics must pass (≥ 0.5)</li>
+            {% if result.details.ingestible %}
+              <li style="color: #27ae60; font-weight: bold;">✓ All requirements met - Model is ingestible</li>
+            {% else %}
+              <li style="color: #e74c3c; font-weight: bold;">✗ Model does not meet all requirements</li>
+            {% endif %}
           </ul>
-        {% endif %}
       {% endif %}
     </div>
   {% endif %}

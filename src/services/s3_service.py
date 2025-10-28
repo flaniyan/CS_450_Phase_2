@@ -8,6 +8,7 @@ import urllib.request
 import urllib.error
 import requests
 import shutil
+import tempfile
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
 from botocore.auth import SigV4Auth
@@ -15,9 +16,8 @@ from botocore.awsrequest import AWSRequest
 from botocore.credentials import get_credentials
 from botocore.session import Session
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from acmecli.types import MetricValue
-from acmecli.hf_handler import fetch_hf_metadata
-from ..services.rating import create_metadata_from_files, run_acme_metrics
+from ..acmecli.types import MetricValue
+from ..acmecli.hf_handler import fetch_hf_metadata
 from ..acmecli.metrics import METRIC_FUNCTIONS
 
 region = "us-east-1"
@@ -306,7 +306,7 @@ def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, An
         print(f"Error extracting config.json: {e}")
         return None
 def parse_lineage_from_config(config: Dict[str, Any], model_id: str) -> Dict[str, Any]:
-    lineage_metadata = {"model_id": model_id, "base_model": None, "architecture": None, "transformers_version": None, "model_type": None}
+    lineage_metadata = {"model_id": model_id, "base_model": None, "architecture": None, "transformers_version": None, "model_type": None, "architectures": [], "vocab_size": None, "hidden_size": None}
     base_model_fields = ["base_model_name_or_path", "_name_or_path", "parent_model", "pretrained_model_name_or_path"]
     for field in base_model_fields:
         if field in config:
@@ -315,7 +315,7 @@ def parse_lineage_from_config(config: Dict[str, Any], model_id: str) -> Dict[str
     lineage_metadata["architecture"] = config.get("model_type")
     lineage_metadata["model_type"] = config.get("model_type")
     lineage_metadata["transformers_version"] = config.get("transformers_version")
-    lineage_metadata["architectures"] = config.get("architectures", [])
+    lineage_metadata["architectures"] = config.get("architectures") or []
     lineage_metadata["vocab_size"] = config.get("vocab_size")
     lineage_metadata["hidden_size"] = config.get("hidden_size")
     return lineage_metadata
@@ -426,58 +426,141 @@ def sync_model_lineage_to_neptune():
         print(f"Error syncing lineage: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync lineage: {str(e)}")
 
+def download_file(url: str, timeout: int = 120) -> bytes | None:
+    try:
+        response = requests.get(url, timeout=timeout)
+        if response.status_code == 200:
+            return response.content
+    except Exception:
+        return None
+    return None
+
 def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
-    api_url = f"https://huggingface.co/api/models/{model_id}"
+    clean_model_id = model_id
+    if model_id.startswith("https://huggingface.co/"):
+        clean_model_id = model_id.replace("https://huggingface.co/", "")
+    elif model_id.startswith("http://huggingface.co/"):
+        clean_model_id = model_id.replace("http://huggingface.co/", "")
+    api_url = f"https://huggingface.co/api/models/{clean_model_id}"
     response = requests.get(api_url, timeout=30)
     if response.status_code != 200:
-        raise HTTPException(status_code=404, detail=f"Model {model_id} not found on HuggingFace")
+        raise HTTPException(status_code=404, detail=f"Model {clean_model_id} not found on HuggingFace")
     model_info = response.json()
-    files_to_download = []
+    
+    all_files = []
     for sibling in model_info.get("siblings", []):
         if sibling.get("rfilename"):
-            files_to_download.append(sibling["rfilename"])
+            all_files.append(sibling["rfilename"])
+    
+    essential_files = []
+    for filename in all_files:
+        if filename.endswith(('.json', '.md', '.txt', '.yml', '.yaml')):
+            essential_files.append(filename)
+        elif filename.startswith('README') or filename.startswith('readme'):
+            essential_files.append(filename)
+        elif filename == 'config.json' or filename == 'LICENSE' or filename == 'license' or filename == 'LICENCE' or filename == 'licence':
+            essential_files.append(filename)
+    
+    urls_to_download = [(f"https://huggingface.co/{clean_model_id}/resolve/{version}/{filename}", filename) for filename in essential_files]
+    
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for filename in files_to_download:
-            file_url = f"https://huggingface.co/{model_id}/resolve/{version}/{filename}"
-            file_response = requests.get(file_url, timeout=120, stream=True)
-            if file_response.status_code == 200:
-                zip_file.writestr(filename, file_response.content)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(download_file, url[0], 120): url[1] for url in urls_to_download}
+            for future in as_completed(futures):
+                filename = futures[future]
+                result = future.result()
+                if result:
+                    zip_file.writestr(filename, result)
     return output.getvalue()
 
 def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
+    from ..services.rating import create_metadata_from_files, run_acme_metrics
+    import time
+    import tempfile
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available")
     try:
+        start_time = time.time()
+        
         zip_content = download_from_huggingface(model_id, version)
+        download_time = time.time() - start_time
+        print(f"[INGEST] Downloaded in {download_time:.2f}s")
+        
         validation = validate_huggingface_structure(zip_content)
-        if not validation["valid"]:
-            raise HTTPException(status_code=400, detail=f"Invalid model structure. Missing: config.json={not validation.get('has_config')}, weights={not validation.get('has_weights')}")
-        temp_dir = os.path.join(os.getcwd(), f".tmp_ingest_{model_id}_{os.getpid()}")
+        if not validation.get('has_config'):
+            raise HTTPException(status_code=400, detail=f"Invalid model structure. Missing: config.json={not validation.get('has_config')}")
+        
+        safe_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").replace("/", "_").replace(":", "_").replace("\\", "_").replace("?", "_").replace("*", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
+        temp_dir = tempfile.mkdtemp(prefix=f"ingest_{safe_model_id}_{os.getpid()}_")
         try:
             os.makedirs(temp_dir, exist_ok=True)
             with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
+            
             meta = create_metadata_from_files(temp_dir, model_id)
             config = extract_config_from_model(zip_content)
             if config:
                 meta["config"] = config
-            metric_results = run_acme_metrics(meta, METRIC_FUNCTIONS)
+            
+            meta["contributors"] = {}
+            meta["pushed_at"] = None
+            meta["github_url"] = ""
+            meta["parents"] = []
+            meta["license"] = meta.get("license_text", "")[:100].lower() if meta.get("license_text") else ""
+            
+            print(f"[INGEST] Computing metrics...")
+            metrics_start = time.time()
+            
+            from ..acmecli.metrics.license_metric import LicenseMetric
+            from ..acmecli.metrics.ramp_up_metric import RampUpMetric
+            from ..acmecli.metrics.bus_factor_metric import BusFactorMetric
+            from ..acmecli.metrics.performance_claims_metric import PerformanceClaimsMetric
+            from ..acmecli.metrics.size_metric import SizeMetric
+            from ..acmecli.metrics.dataset_and_code_metric import DatasetAndCodeMetric
+            from ..acmecli.metrics.dataset_quality_metric import DatasetQualityMetric
+            from ..acmecli.metrics.code_quality_metric import CodeQualityMetric
+            from ..acmecli.metrics.reproducibility_metric import ReproducibilityMetric
+            from ..acmecli.metrics.reviewedness_metric import ReviewednessMetric
+            from ..acmecli.metrics.treescore_metric import TreescoreMetric
+            
+            quick_metrics = {'license': LicenseMetric().score, 'ramp_up_time': RampUpMetric().score, 'bus_factor': BusFactorMetric().score, 'performance_claims': PerformanceClaimsMetric().score, 'size_score': SizeMetric().score, 'dataset_and_code_score': DatasetAndCodeMetric().score, 'dataset_quality': DatasetQualityMetric().score, 'code_quality': CodeQualityMetric().score, 'Reproducibility': ReproducibilityMetric().score, 'Reviewedness': ReviewednessMetric().score, 'Treescore': TreescoreMetric().score}
+            metric_results = run_acme_metrics(meta, quick_metrics)
+            metrics_time = time.time() - metrics_start
+            print(f"[INGEST] Computed metrics in {metrics_time:.2f}s")
         finally:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
+        
         REQUIRED_NON_LATENCY_METRICS = ['license', 'ramp_up', 'bus_factor', 'performance_claims', 'size', 'dataset_code', 'dataset_quality', 'code_quality', 'reproducibility', 'reviewedness', 'treescore']
         failures = []
+        metric_scores_dict = {}
         for metric_name in REQUIRED_NON_LATENCY_METRICS:
-            score = metric_results.get(metric_name, 0.0)
+            result = metric_results.get(metric_name)
+            score = 0.0
+            if result is None:
+                failures.append(f"{metric_name}=MISSING")
+                metric_scores_dict[metric_name] = 0.0
+                continue
+            elif hasattr(result, 'value'):
+                score = float(result.value) if result.value is not None else 0.0
+            elif isinstance(result, (int, float)):
+                score = float(result)
+            else:
+                score = 0.0
+            metric_scores_dict[metric_name] = score
             if score < 0.5:
                 failures.append(f"{metric_name}={score:.2f}")
         if failures:
-            raise HTTPException(status_code=422, detail={"error": "INGESTIBILITY_FAILURE", "message": f"Model failed ingestibility requirements. Failed metrics: {', '.join(failures)}", "metric_scores": {m: metric_results.get(m, 0.0) for m in REQUIRED_NON_LATENCY_METRICS}, "required_threshold": 0.5})
+            print(f"[INGEST] Failed: {', '.join(failures)}")
+            msg = f"Model failed ingestibility requirements. Failed metrics: {', '.join(failures)}"
+            raise HTTPException(status_code=422, detail={"error": "INGESTIBILITY_FAILURE", "message": msg, "metric_scores": metric_scores_dict, "required_threshold": 0.5})
+        
         upload_model(zip_content, model_id, version)
-        return {"message": "Model ingestion successful", "model_id": model_id, "version": version, "metric_scores": {m: metric_results.get(m, 0.0) for m in REQUIRED_NON_LATENCY_METRICS}, "ingestible": True}
+        total_time = time.time() - start_time
+        print(f"[INGEST] Success in {total_time:.2f}s")
+        return {"message": "Model ingestion successful", "model_id": model_id, "version": version, "metric_scores": metric_scores_dict, "ingestible": True}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to ingest model: {str(e)}")
-

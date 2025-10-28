@@ -131,9 +131,19 @@ def frontend_size_cost(request: Request, name: str, version: str | None = None):
     return templates.TemplateResponse("size_cost.html", ctx)
 
 @app.get("/ingest")
-def frontend_ingest(request: Request, name: str | None = None, version: str = "main"):
+def frontend_ingest_get(request: Request, name: str | None = None, version: str = "main"):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    ctx = {"request": request, "name": name or "", "version": version, "result": None}
+    return templates.TemplateResponse("ingest.html", ctx)
+
+@app.post("/ingest")
+async def frontend_ingest_post(request: Request):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    form = await request.form()
+    name = form.get("name")
+    version = form.get("version", "main")
     result = None
     if name:
         try:
@@ -143,9 +153,9 @@ def frontend_ingest(request: Request, name: str | None = None, version: str = "m
         except HTTPException as e:
             error_detail = e.detail
             if isinstance(error_detail, dict) and "error" in error_detail:
-                result = {"error": error_detail.get("message", "Ingestion failed")}
+                result = {"error": error_detail.get("message", "Ingestion failed"), "details": {"metric_scores": error_detail.get("metric_scores"), "model_id": name, "version": version, "ingestible": False}}
             else:
-                result = {"error": str(error_detail) if isinstance(error_detail, str) else "Ingestion failed"}
+                result = {"error": str(error_detail) if isinstance(error_detail, str) else "Ingestion failed", "details": {"model_id": name, "version": version, "ingestible": False}}
         except Exception as e:
             result = {"error": f"Ingest failed: {str(e)}"}
     ctx = {"request": request, "name": name or "", "version": version, "result": result}
