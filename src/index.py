@@ -115,14 +115,15 @@ def frontend_sync_neptune():
         return {"error": f"Sync failed: {str(e)}"}
 
 @app.get("/size-cost")
-def frontend_size_cost(request: Request, name: str, version: str | None = None):
+def frontend_size_cost(request: Request, name: str | None = None, version: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
     size_data = None
     if name:
         try:
             from .services.s3_service import get_model_sizes
-            result = get_model_sizes(name, version)
+            effective_version = version or "1.0.0"
+            result = get_model_sizes(name, effective_version)
             size_data = {"model_id": name, "full_size": result.get("full", 0), "weights_size": result.get("weights", 0), "datasets_size": result.get("datasets", 0), "weights_uncompressed": result.get("weights_uncompressed", 0), "datasets_uncompressed": result.get("datasets_uncompressed", 0), "error": result.get("error")}
         except Exception as e:
             print(f"Size cost error: {e}")

@@ -102,6 +102,7 @@ def get_model_sizes(model_id: str, version: str) -> Dict[str, Any]:
     if not aws_available:
         return {"full": 0, "weights": 0, "datasets": 0, "error": "AWS services not available"}
     try:
+        from botocore.exceptions import ClientError
         s3_key = f"models/{model_id}/{version}/model.zip"
         response = s3.head_object(Bucket=ap_arn, Key=s3_key)
         full_size = response['ContentLength']
@@ -115,6 +116,11 @@ def get_model_sizes(model_id: str, version: str) -> Dict[str, Any]:
             weights_uncompressed = sum(zip_file.getinfo(f).file_size for f in weight_files)
             datasets_uncompressed = sum(zip_file.getinfo(f).file_size for f in dataset_files)
         return {"full": full_size, "weights": weights_size, "datasets": datasets_size, "weights_uncompressed": weights_uncompressed, "datasets_uncompressed": datasets_uncompressed, "model_id": model_id, "version": version}
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+        if error_code == '404':
+            return {"full": 0, "weights": 0, "datasets": 0, "error": f"Model '{model_id}' not found in registry. Upload it first using the Upload or Ingest page."}
+        return {"full": 0, "weights": 0, "datasets": 0, "error": str(e)}
     except Exception as e:
         print(f"Error getting model sizes: {e}")
         return {"full": 0, "weights": 0, "datasets": 0, "error": str(e)}
