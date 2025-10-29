@@ -275,7 +275,7 @@ def frontend_reset():
 def main():
     """Main entry point for the application."""
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
 
 if __name__ == "__main__":
     main()
