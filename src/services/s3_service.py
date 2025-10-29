@@ -311,6 +311,7 @@ def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, An
     except Exception as e:
         print(f"Error extracting config.json: {e}")
         return None
+        
 def parse_lineage_from_config(config: Dict[str, Any], model_id: str) -> Dict[str, Any]:
     lineage_metadata = {"model_id": model_id, "base_model": None, "architecture": None, "transformers_version": None, "model_type": None, "architectures": [], "vocab_size": None, "hidden_size": None}
     base_model_fields = ["base_model_name_or_path", "_name_or_path", "parent_model", "pretrained_model_name_or_path"]
