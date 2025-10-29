@@ -158,3 +158,6 @@ infra/envs/dev/terraform.tfvars
 
 # Cache busting files
 .cache-bust
+
+# personal file
+docs/terraform_change_log.md
