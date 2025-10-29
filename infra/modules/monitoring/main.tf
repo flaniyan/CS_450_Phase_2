@@ -6,7 +6,7 @@ variable "validator_service_url" { type = string }
 resource "aws_kms_key" "main_key" {
   description             = "KMS key for ACME project encryption"
   deletion_window_in_days = 7
-  
+
   tags = {
     Name        = "acme-main-key"
     Environment = "dev"
@@ -22,9 +22,9 @@ resource "aws_kms_alias" "main_key_alias" {
 # Secrets Manager for JWT secret
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name = "acme-jwt-secret"
-  
+
   kms_key_id = aws_kms_key.main_key.arn
-  
+
   tags = {
     Name        = "acme-jwt-secret"
     Environment = "dev"
@@ -35,10 +35,10 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
   secret_id = aws_secretsmanager_secret.jwt_secret.id
   secret_string = jsonencode({
-    jwt_secret = "your-super-secret-jwt-key-change-this-in-production"
-    jwt_algorithm = "HS256"
+    jwt_secret           = "your-super-secret-jwt-key-change-this-in-production"
+    jwt_algorithm        = "HS256"
     jwt_expiration_hours = 10
-    jwt_max_uses = 1000
+    jwt_max_uses         = 1000
   })
 }
 
@@ -53,12 +53,12 @@ resource "aws_cloudwatch_metric_alarm" "validator_high_cpu" {
   statistic           = "Average"
   threshold           = "80"
   alarm_description   = "This metric monitors validator service CPU utilization"
-  
+
   dimensions = {
     ServiceName = "validator-service"
     ClusterName = "validator-cluster"
   }
-  
+
   tags = {
     Name        = "validator-high-cpu"
     Environment = "dev"
@@ -76,12 +76,12 @@ resource "aws_cloudwatch_metric_alarm" "validator_high_memory" {
   statistic           = "Average"
   threshold           = "80"
   alarm_description   = "This metric monitors validator service memory utilization"
-  
+
   dimensions = {
     ServiceName = "validator-service"
     ClusterName = "validator-cluster"
   }
-  
+
   tags = {
     Name        = "validator-high-memory"
     Environment = "dev"
@@ -99,13 +99,13 @@ resource "aws_cloudwatch_metric_alarm" "validator_task_count" {
   statistic           = "Average"
   threshold           = "1"
   alarm_description   = "This metric monitors validator service task count"
-  
+
   dimensions = {
     ServiceName = "validator-service"
     ClusterName = "validator-cluster"
   }
 
-  
+
   tags = {
     Name        = "validator-task-count"
     Environment = "dev"

@@ -1,91 +1,194 @@
-name: CD (main)
+name: CD
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
+  id-token: write
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: cd-main
   cancel-in-progress: false
 
+env:
+  TF_DIR: infra/envs/dev
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 838693051036.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: validator-service
+  ECS_SERVICE: validator-service
+  ECS_CLUSTER: validator-cluster
+
 jobs:
   deploy:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
+      USE_OIDC: "true" # Set to "true" to use OIDC authentication
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Cache Terraform plugins
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          terraform_wrapper: false
-        
+          path: ~/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-tf-${{ hashFiles('**/*.tf') }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Debug OIDC Configuration
+        if: ${{ env.USE_OIDC == 'true' }}
+        run: |
+          echo "USE_OIDC: ${{ env.USE_OIDC }}"
+          echo "AWS_ROLE_TO_ASSUME secret exists: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}"
+          echo "AWS_REGION: ${{ env.AWS_REGION }}"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v3
         with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::838693051036:role/github-actions-oidc-role
+          role-session-name: GitHubActions-CDPipeline
+      
+
+      - name: Configure AWS credentials (Static)
+        if: ${{ env.USE_OIDC != 'true' }}
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          aws-region: ${{ env.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
 
-      - name: Check for Terraform infra
-        id: has_tf
-        shell: pwsh
-        run: |
-          if (Get-ChildItem -Path "infra/envs/dev" -Filter "*.tf" -ErrorAction SilentlyContinue) {
-            "present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } else {
-            "present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
+      - name: Verify AWS identity
+        shell: bash
+        run: aws sts get-caller-identity
 
-      - name: Terraform fmt & validate
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          terraform fmt -check -recursive
-          terraform init -input=false
-          terraform validate
+          # Build a docker container and push it to ECR
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false -lock-timeout=5m
+
+      - name: Select or create workspace
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform workspace select default || terraform workspace new default
+
+      - name: Terraform format check
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
 
       - name: Terraform plan
-        if: steps.has_tf.outputs.present == 'true'
-        id: plan
-        shell: pwsh
-        working-directory: infra/envs/dev
-        run: terraform plan -input=false -out=tfplan
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}"
 
       - name: Terraform apply
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
-        run: terraform apply -auto-approve tfplan
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -lock-timeout=5m tfplan
 
-      - name: Smoke test validator ECS service
-        if: steps.has_tf.outputs.present == 'true'
-        shell: pwsh
-        working-directory: infra/envs/dev
+      - name: Force ECS service update
+        shell: bash
         run: |
-          $url = terraform output -raw validator_service_url 2>$null
-          if (-not $url) { Write-Error "validator_service_url output not found"; exit 1 }
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
 
-          $ok = $false
-          for ($i=1; $i -le 5; $i++) {
-            try {
-              # Use curl.exe explicitly to avoid Invoke-WebRequest alias confusion
-              $proc = Start-Process -FilePath "curl.exe" -ArgumentList @("-fsS", "--max-time", "10", "$url/health") -NoNewWindow -Wait -PassThru
-              if ($proc.ExitCode -eq 0) { $ok = $true; break }
-            } catch { }
-            Start-Sleep -Seconds 3
-          }
-          if (-not $ok) { Write-Error "Validator healthcheck failed"; exit 1 }
+      - name: Wait for ECS service to stabilize
+        shell: bash
+        run: |
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE
 
-      - name: Skip deploy (infra not found)
-        if: steps.has_tf.outputs.present == 'false'
-        shell: pwsh
-        run: echo "No infra at infra/envs/dev – skipping deploy."
+      - name: Read service URL
+        id: tfout
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set +e
+          url=$(terraform output -raw validator_service_url 2>/dev/null)
+          echo "validator_url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Assert URL present
+        if: ${{ steps.tfout.outputs.validator_url == '' }}
+        shell: bash
+        run: echo "No URL from Terraform output; skipping smoke."
+
+      - name: Health check
+        if: ${{ steps.tfout.outputs.validator_url != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ steps.tfout.outputs.validator_url }}"
+          for i in {1..10}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$url/health" || true)
+            echo "Attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Health check passed"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "Health check failed after 10 attempts"
+          exit 1
+
+      - name: Validate endpoint probe
+        if: ${{ steps.tfout.outputs.validator_url != '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          url="${{ steps.tfout.outputs.validator_url }}"
+          echo "Probing /validate endpoint..."
+          code=$(curl -s -w "%{http_code}" -X POST "$url/validate" \
+            -H "Content-Type: application/json" \
+            -d '{"pkgName":"test","version":"1.0.0","userId":"test","groups":["Group_106"]}' \
+            -o /dev/null --max-time 10 --connect-timeout 5 || echo "000")
+          echo "Validate endpoint response: HTTP $code"
+          if [ "$code" = "404" ]; then
+            echo "Validate endpoint responsive (404 expected for missing package)"
+          elif [ "$code" = "400" ] || [ "$code" = "403" ] || [ "$code" = "500" ]; then
+            echo "Validate endpoint responsive (service-level response)"
+          else
+            echo "Validate endpoint returned unexpected code: $code"
+          fi

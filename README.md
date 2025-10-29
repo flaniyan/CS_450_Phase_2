@@ -21,40 +21,32 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### Option 1: AWS Cloud Deployment (Production Ready)
 
-1. **Ensure Docker Desktop is running**
-   
-2. **Build and run with Docker Compose**
-   ```bash
-   cd Dev-ACME
-   docker-compose up
-   ```
-   
-3. **Or build and run manually**
-   ```bash
-   cd Dev-ACME
-   docker build -t acme-api .
-   docker run -p 3000:3000 acme-api
-   ```
+The application is deployed on AWS with the following URLs:
 
-4. **Access the application**
-   - Frontend home: `http://localhost:3000/`
-   - API health: `http://localhost:3000/health`
-   - API hello: `http://localhost:3000/api/hello`
-   - API rate endpoint: `POST http://localhost:3000/api/registry/models/{modelId}/rate`
-   - Frontend pages: `/directory`, `/rate`, `/upload`, `/admin`
+**🌐 Production URLs:**
+- **Main Website**: `https://d6zjk2j65mgd4.cloudfront.net/`
+- **Package Directory**: `https://d6zjk2j65mgd4.cloudfront.net/directory`
+- **Upload Packages**: `https://d6zjk2j65mgd4.cloudfront.net/upload` *(Note: CloudFront POST requests need configuration fix)*
+- **Rate Packages**: `https://d6zjk2j65mgd4.cloudfront.net/rate`
+- **Admin Panel**: `https://d6zjk2j65mgd4.cloudfront.net/admin`
 
-5. **Stop the container**
-   ```bash
-   docker-compose down
-   ```
+**🔧 Direct AWS URLs (Bypass CloudFront):**
+- **Direct Upload**: `http://validator-lb-727503296.us-east-1.elb.amazonaws.com/upload`
+- **Direct Directory**: `http://validator-lb-727503296.us-east-1.elb.amazonaws.com/directory`
 
-**Note:** When Uvicorn starts, it displays `http://0.0.0.0:3000` (listening on all interfaces). Access it at `http://localhost:3000` in your browser.
+**📡 API Endpoints:**
+- **Health Check**: `https://d6zjk2j65mgd4.cloudfront.net/health`
+- **API Hello**: `https://d6zjk2j65mgd4.cloudfront.net/api/hello`
+- **List Packages**: `GET https://d6zjk2j65mgd4.cloudfront.net/api/packages`
+- **Upload Package**: `POST https://d6zjk2j65mgd4.cloudfront.net/api/packages/models/{model_id}/versions/{version}/upload`
+- **Download Package**: `GET https://d6zjk2j65mgd4.cloudfront.net/api/packages/models/{model_id}/versions/{version}/download`
+- **Reset Registry**: `POST https://d6zjk2j65mgd4.cloudfront.net/api/packages/reset`
 
-### Option 2: Local Development (Without Docker)
+### Option 2: Local Development
 
-1. **Environment**
+1. **Environment Setup**
    ```bash
    py -3.12 -m venv .venv
    .venv\Scripts\activate
@@ -63,34 +55,141 @@ ACME CLI ingests lists of model repository URLs, pulls rich metadata from GitHub
    
 2. **Install dependencies and project**
    ```bash
-   python run.py install
+   ./run install
    ```
-   Installs requirements from `requirements.txt` followed by an editable install of the package under `src/`.
    
-3. **Run the test suite**
+3. **Run the application locally**
    ```bash
-   python run.py test
+   python -m src.index
    ```
-   Prints a coverage summary along with the pass count extracted from pytest output.
    
-4. **Run unified API + Frontend (single server)**
-   ```powershell
-   # From repository root
-   . .venv/Scripts/Activate.ps1
-   pip install -r requirements.txt
-   python -m uvicorn src.index:app --host 0.0.0.0 --port 3000 --reload
+   **Or using the Unix runner:**
+   ```bash
+   ./run install  # Install dependencies
+   python -m src.index  # Run the application
    ```
-   - Access at: `http://localhost:3000`
+
+4. **Access the local application**
+   - Frontend home: `http://localhost:3000/`
+   - Package Directory: `http://localhost:3000/directory`
+   - Upload Packages: `http://localhost:3000/upload`
+   - Rate Packages: `http://localhost:3000/rate`
+   - Admin Panel: `http://localhost:3000/admin`
    - API health: `http://localhost:3000/health`
    - API hello: `http://localhost:3000/api/hello`
-   - Frontend pages: `/`, `/directory`, `/rate`, `/upload`, `/admin`
 
-5. **Score repositories**
+### Option 3: Docker (Development)
+
+1. **Ensure Docker Desktop is running**
+   
+2. **Build and run with Docker Compose**
    ```bash
-   python run.py score urls.txt
+   docker-compose up
    ```
-   - Passing no arguments defaults to `urls.txt`.
-   - NDJSON is written to stdout; redirect to a file to persist results: `python run.py > reports.ndjson`.
+   
+3. **Or build and run manually**
+   ```bash
+   docker build -t validator-api .
+   docker run -p 3000:3000 validator-api
+   ```
+
+4. **Stop the container**
+   ```bash
+   docker-compose down
+   ```
+
+**Note:** When Uvicorn starts, it displays `http://0.0.0.0:3000` (listening on all interfaces). Access it at `http://localhost:3000` in your browser.
+
+## Package Management API
+
+The application provides a comprehensive package management system with the following capabilities:
+
+### 📦 Package Operations
+
+**Upload Packages:**
+- **Frontend**: Use the web interface at `/upload` to upload ZIP files containing HuggingFace models
+- **API**: `POST /api/packages/models/{model_id}/versions/{version}/upload`
+- **Supported formats**: ZIP files containing HuggingFace model structure (config.json, pytorch_model.bin, tokenizer files, etc.)
+- **Features**: Automatic model validation, S3 storage, version management
+
+**List Packages:**
+- **Frontend**: Browse packages at `/directory` with search functionality
+- **API**: `GET /api/packages?limit=100&name_regex=pattern&version_range=1.0.0-2.0.0`
+- **Features**: Pagination, regex filtering, version range filtering
+
+**Download Packages:**
+- **API**: `GET /api/packages/models/{model_id}/versions/{version}/download?component=full`
+- **Components**: `full` (complete model), `weights` (model weights only), `datasets` (datasets only)
+- **Features**: Streaming download, component extraction
+
+**Reset Registry:**
+- **API**: `POST /api/packages/reset`
+- **Purpose**: Clear all packages from the registry (admin function)
+
+### 🔧 Testing and Development
+
+**Run the test suite:**
+```bash
+./run test
+```
+Prints a coverage summary along with the pass count extracted from pytest output.
+
+**Score repositories:**
+```bash
+./run score urls.txt
+```
+- Passing no arguments defaults to `urls.txt`.
+- NDJSON is written to stdout; redirect to a file to persist results: `./run score urls.txt > reports.ndjson`.
+
+## AWS Infrastructure
+
+The application is deployed on AWS using the following services:
+
+### 🏗️ Architecture Components
+
+- **ECS Fargate**: Containerized FastAPI application running on AWS managed containers
+- **Application Load Balancer (ALB)**: Routes traffic to ECS tasks with health checks
+- **CloudFront CDN**: Global content delivery with HTTPS and caching
+- **S3 Bucket**: Package storage with Access Point for secure access
+- **DynamoDB**: Metadata storage for packages and user data
+- **ECR**: Container registry for Docker images
+- **IAM**: Role-based access control for AWS services
+
+### 🚀 CI/CD Pipeline
+
+The project includes a complete CI/CD pipeline:
+
+**Continuous Integration (CI):**
+- Automated testing on pull requests
+- Code quality checks and linting
+- Smoke testing on main branch
+
+**Continuous Deployment (CD):**
+- Automatic Docker image build and push to ECR
+- Infrastructure updates via Terraform
+- ECS service deployment with health checks
+- Rollback capability on deployment failures
+
+See [CD_SETUP_GUIDE.md](CD_SETUP_GUIDE.md) for configuration instructions.
+
+### 📊 Current Deployment Status
+
+**✅ Working Features:**
+- Package upload via localhost and direct AWS URLs
+- Package listing and directory browsing
+- Package download and streaming
+- Health checks and API endpoints
+- Frontend web interface
+
+**⚠️ Known Issues:**
+- CloudFront POST requests blocked (403 error) - needs AllowedMethods configuration update
+- Use direct AWS URLs for uploads until CloudFront is fixed
+
+**🔧 Infrastructure Files:**
+- `AWS_SETUP_GUIDE.md`: Complete AWS infrastructure documentation
+- `AWS_IMPLEMENTATION_SUMMARY.md`: Current deployment status and issues
+- `docker-compose.yml`: Local development with Docker
+- `Dockerfile`: Container configuration for AWS deployment
 
 ## Project Layout
 
@@ -211,6 +310,110 @@ Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementatio
 4. **Integrate into other programs**
    - Import `acmecli.cli`, ensure `import acmecli.metrics` runs to populate `REGISTRY`, and call `process_url` directly with custom handlers.
 
+## 🚨 AWS Deployment Troubleshooting
+
+### Common Issues and Quick Fixes
+
+#### 502 Bad Gateway / 503 Service Temporarily Unavailable
+
+**Symptoms:**
+- CloudFront or ALB returns 502/503 errors
+- Rating button fails with "502 Bad Gateway"
+- Health checks fail intermittently
+
+**Root Cause:**
+ECS tasks failing to start or becoming unhealthy due to:
+- Task deployment in progress
+- Target group draining issues
+- Memory/CPU resource constraints
+- Health check failures
+
+**Quick Fix Commands:**
+
+```bash
+# 1. Check ECS service status
+aws ecs describe-services --cluster validator-cluster --services validator-service --query 'services[0].deployments[0].{Status:status,RolloutState:rolloutState,RunningCount:runningCount,DesiredCount:desiredCount,PendingCount:pendingCount,FailedTasks:failedTasks}'
+
+# 2. Force a fresh deployment (RECOMMENDED FIX)
+aws ecs update-service --cluster validator-cluster --service validator-service --force-new-deployment
+
+# 3. Check target group health
+aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-1:838693051036:targetgroup/validator-tg-3000/69d9076ad203b619
+
+# 4. Test endpoints after deployment
+curl https://d6zjk2j65mgd4.cloudfront.net/health
+curl -X POST -H "Content-Type: application/json" -d '{"target":"gpt2"}' https://d6zjk2j65mgd4.cloudfront.net/api/registry/models/gpt2/rate
+```
+
+**When to Use Each Command:**
+- **Always start with step 2** (`--force-new-deployment`) - this resolves 90% of 502/503 issues
+- Use step 1 to verify the fix worked
+- Use step 3 if issues persist (check for draining targets)
+- Use step 4 to test functionality
+
+#### CloudFront 403 Forbidden on Uploads
+
+**Symptoms:**
+- Upload form returns "403 ERROR"
+- POST requests blocked by CloudFront
+
+**Quick Fix:**
+```bash
+# Update CloudFront distribution to allow POST methods
+aws cloudfront get-distribution-config --id E1234567890ABCD > current-config.json
+# Edit current-config.json to add POST, PUT, DELETE, OPTIONS to AllowedMethods
+aws cloudfront update-distribution --id E1234567890ABCD --distribution-config file://current-config.json
+```
+
+#### ECS Task Memory Issues
+
+**Symptoms:**
+- Tasks fail to start
+- "Out of memory" errors in CloudWatch logs
+
+**Quick Fix:**
+```bash
+# Increase memory allocation in task definition
+aws ecs describe-task-definition --task-definition validator-service:7 --query 'taskDefinition.{memory:memory,cpu:cpu}'
+# Update task definition with higher memory (e.g., 1024 MB)
+aws ecs update-service --cluster validator-cluster --service validator-service --task-definition validator-service:8
+```
+
+#### Complete Service Reset (Nuclear Option)
+
+**If all else fails:**
+```bash
+# 1. Stop the service
+aws ecs update-service --cluster validator-cluster --service validator-service --desired-count 0
+
+# 2. Wait for tasks to stop
+aws ecs wait services-stable --cluster validator-cluster --services validator-service
+
+# 3. Start the service
+aws ecs update-service --cluster validator-cluster --service validator-service --desired-count 1
+
+# 4. Force new deployment
+aws ecs update-service --cluster validator-cluster --service validator-service --force-new-deployment
+```
+
+### Monitoring Commands
+
+```bash
+# Check CloudWatch logs for errors
+aws logs describe-log-streams --log-group-name "/ecs/validator-service" --order-by LastEventTime --descending --max-items 1
+aws logs get-log-events --log-group-name "/ecs/validator-service" --log-stream-name "STREAM_NAME" --query 'events[-10:].message'
+
+# Monitor ECS service events
+aws ecs describe-services --cluster validator-cluster --services validator-service --query 'services[0].events[0:5]'
+```
+
+### Prevention Tips
+
+1. **Regular Health Checks**: Monitor `/health` endpoint regularly
+2. **Resource Monitoring**: Keep an eye on CloudWatch metrics for CPU/Memory usage
+3. **Deployment Windows**: Schedule deployments during low-traffic periods
+4. **Rollback Plan**: Always have the previous task definition ready for quick rollback
+
 ## Operational Notes and Limitations
 
 - Network access is required for live GitHub and Hugging Face scoring; consider injecting cached metadata when offline.
@@ -218,3 +421,6 @@ Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementatio
 - `REGISTRY` depends on metric modules being imported; custom consumers must import `acmecli.metrics` before invoking `process_url`.
 - NDJSON output currently omits `hf_downloads`, `cli`, and `logging_env` scores; extend `ReportRow` if these should be surfaced downstream.
 - The cache is in-memory and per-process; restart the CLI or run in parallel to clear state.
+#   C D   P i p e l i n e   T e s t   -   1 0 / 2 2 / 2 0 2 5   1 4 : 2 1 : 2 0 
+ 
+ 

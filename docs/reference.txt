@@ -1,0 +1,4 @@
+https://www.youtube.com/watch?v=-gvgBWI0yQs -> Uploading, deleting, and listing files in AWS s3
+https://www.youtube.com/watch?v=7r2z3Qn3Qz8 -> In depth s3
+https://www.youtube.com/watch?v=5q7FtT_DyME -> Intro to s3
+https://www.youtube.com/watch?v=qbLc5a9jdXo -> REST API Crash course
