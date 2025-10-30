@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import os
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -195,17 +195,7 @@ def frontend_rate(request: Request, name: str | None = None):
     rating = None
     if name:
         row = run_scorer(name)
-        rating = {
-            "NetScore": (alias(row, "net_score", "NetScore", "netScore") or 0.0),
-            "RampUp": (alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0),
-            "Correctness": (alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0),
-            "BusFactor": (alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0),
-            "ResponsiveMaintainer": (alias(row, "pull_requests", "PullRequests", "score_pull_requests") or 0.0),
-            "LicenseScore": (alias(row, "license", "License", "score_license") or 0.0),
-            "Reproducibility": (alias(row, "reproducibility", "Reproducibility", "score_reproducibility") or 0.0),
-            "Reviewedness": (alias(row, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0),
-            "Treescore": (alias(row, "treescore", "Treescore", "score_treescore") or 0.0),
-        }
+        rating = {"NetScore": (alias(row, "net_score", "NetScore", "netScore") or 0.0), "RampUp": (alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0), "Correctness": (alias(row, "code_quality", "CodeQuality", "score_code_quality") or 0.0), "BusFactor": (alias(row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0), "ResponsiveMaintainer": (alias(row, "pull_requests", "PullRequests", "score_pull_requests") or 0.0), "LicenseScore": (alias(row, "license", "License", "score_license") or 0.0), "Reproducibility": (alias(row, "reproducibility", "Reproducibility", "score_reproducibility") or 0.0), "Reviewedness": (alias(row, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0), "Treescore": (alias(row, "treescore", "Treescore", "score_treescore") or 0.0)}
     ctx = {"request": request, "name": name or "", "rating": rating}
     return templates.TemplateResponse("rate.html", ctx)
 
@@ -222,33 +212,89 @@ def frontend_admin(request: Request):
     return templates.TemplateResponse("admin.html", {"request": request})
 
 @app.get("/lineage")
-def frontend_lineage(request: Request):
+def frontend_lineage(request: Request, name: str | None = None, version: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("lineage.html", {"request": request})
+    lineage_data = None
+    if name:
+        try:
+            from .services.s3_service import get_model_lineage_from_config
+            effective_version = version or "1.0.0"
+            result = get_model_lineage_from_config(name, effective_version)
+            lineage_data = {"model_id": name, "lineage_metadata": result.get("lineage_metadata", {}), "lineage_map": result.get("lineage_map", {}), "config": result.get("config", {}), "error": result.get("error")}
+        except Exception as e:
+            print(f"Lineage error: {e}")
+            lineage_data = {"model_id": name, "error": str(e)}
+    ctx = {"request": request, "name": name or "", "version": version or "1.0.0", "lineage": lineage_data}
+    return templates.TemplateResponse("lineage.html", ctx)
+
+@app.post("/lineage/sync-neptune")
+def frontend_sync_neptune():
+    try:
+        from .services.s3_service import sync_model_lineage_to_neptune
+        result = sync_model_lineage_to_neptune()
+        return {"message": "Sync successful", "details": result}
+    except Exception as e:
+        return {"error": f"Sync failed: {str(e)}"}
 
 @app.get("/size-cost")
-def frontend_size_cost(request: Request):
+def frontend_size_cost(request: Request, name: str | None = None, version: str | None = None):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("size_cost.html", {"request": request})
+    size_data = None
+    if name:
+        try:
+            from .services.s3_service import get_model_sizes
+            effective_version = version or "1.0.0"
+            result = get_model_sizes(name, effective_version)
+            size_data = {"model_id": name, "full_size": result.get("full", 0), "weights_size": result.get("weights", 0), "datasets_size": result.get("datasets", 0), "weights_uncompressed": result.get("weights_uncompressed", 0), "datasets_uncompressed": result.get("datasets_uncompressed", 0), "error": result.get("error")}
+        except Exception as e:
+            print(f"Size cost error: {e}")
+            size_data = {"model_id": name, "error": str(e)}
+    ctx = {"request": request, "name": name or "", "size_data": size_data}
+    return templates.TemplateResponse("size_cost.html", ctx)
 
 @app.get("/ingest")
-def frontend_ingest(request: Request):
+def frontend_ingest_get(request: Request, name: str | None = None, version: str = "main"):
     if not templates:
         return {"message": "Frontend not found. Ensure frontend/templates exists."}
-    return templates.TemplateResponse("ingest.html", {"request": request})
+    ctx = {"request": request, "name": name or "", "version": version, "result": None}
+    return templates.TemplateResponse("ingest.html", ctx)
+
+@app.post("/ingest")
+async def frontend_ingest_post(request: Request):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    form = await request.form()
+    name = form.get("name")
+    version = form.get("version", "main")
+    result = None
+    if name:
+        try:
+            from .services.s3_service import model_ingestion
+            ingestion_result = model_ingestion(name, version)
+            result = {"message": "Ingest successful", "details": ingestion_result}
+        except HTTPException as e:
+            error_detail = e.detail
+            if isinstance(error_detail, dict) and "error" in error_detail:
+                result = {"error": error_detail.get("message", "Ingestion failed"), "details": {"metric_scores": error_detail.get("metric_scores"), "model_id": name, "version": version, "ingestible": False}}
+            else:
+                result = {"error": str(error_detail) if isinstance(error_detail, str) else "Ingestion failed", "details": {"model_id": name, "version": version, "ingestible": False}}
+        except Exception as e:
+            result = {"error": f"Ingest failed: {str(e)}"}
+    ctx = {"request": request, "name": name or "", "version": version, "result": result}
+    return templates.TemplateResponse("ingest.html", ctx)                
 
 @app.post("/upload")
-def frontend_upload_post(request: Request, file: UploadFile = File(...)):
+def frontend_upload_post(request: Request, file: UploadFile = File(...), model_id: str = None, version: str = None):
     if not file.filename or not file.filename.endswith('.zip'):
         return {"error": "Only ZIP files are supported"}
     try:
         filename = file.filename.replace('.zip', '')
-        model_id = filename
-        version = "1.0.0"
+        effective_model_id = model_id or filename
+        effective_version = version or "1.0.0"
         file_content = file.file.read()
-        result = upload_model(file_content, model_id, version)
+        result = upload_model(file_content, effective_model_id, effective_version)
         return {"message": "Upload successful", "details": result}
     except Exception as e:
         return {"error": f"Upload failed: {str(e)}"}

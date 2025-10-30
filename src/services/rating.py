@@ -4,10 +4,19 @@ import time
 import json
 import os
 import sys
+import zipfile
+import io
+import tempfile
+import glob
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from ..services.s3_service import download_model
+from ..acmecli.metrics import METRIC_FUNCTIONS
+from ..acmecli.types import MetricValue
+from ..acmecli.scoring import compute_net_score
 
 router = APIRouter()
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,13 +34,6 @@ class RateRequest(BaseModel):
     target: str
 
 def analyze_model_content(target: str) -> Dict[str, Any]:
-    import zipfile
-    import io
-    import tempfile
-    import os
-    from ..services.s3_service import download_model
-    from ..acmecli.metrics import METRIC_FUNCTIONS
-    from ..acmecli.types import MetricValue
     try:
         model_content = download_model(target, "1.0.0", "full")
         if not model_content:
@@ -52,13 +54,10 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
             return run_acme_metrics(meta, METRIC_FUNCTIONS)
     except Exception as e:
         print(f"Error analyzing model {target}: {e}")
-        import traceback
         traceback.print_exc()
         raise RuntimeError(f"Failed to analyze model {target}: {str(e)}")
 
 def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]:
-    import os
-    import glob
     meta = {
         "repo_files": set(),
         "readme_text": "",
@@ -89,8 +88,6 @@ def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]
     return meta
 
 def run_acme_metrics(meta: Dict[str, Any], metric_functions: Dict[str, Any]) -> Dict[str, Any]:
-    from ..acmecli.scoring import compute_net_score
-    from ..acmecli.types import MetricValue
     results = {}
     for metric_name, metric_func in metric_functions.items():
         try:
@@ -103,6 +100,9 @@ def run_acme_metrics(meta: Dict[str, Any], metric_functions: Dict[str, Any]) -> 
                     results[metric_name] = metric_value
                 elif isinstance(metric_value, (int, float)):
                     results[metric_name] = MetricValue(metric_name, float(metric_value), 0)
+                elif isinstance(metric_value, dict) and metric_name == "size_score":
+                    avg_score = sum(metric_value.values()) / len(metric_value) if metric_value else 0.0
+                    results[metric_name] = MetricValue(metric_name, avg_score, 0)
                 else:
                     print(f"Unexpected metric result type for {metric_name}: {type(metric_value)}")
                     results[metric_name] = MetricValue(metric_name, 0.0, 0)
@@ -110,30 +110,25 @@ def run_acme_metrics(meta: Dict[str, Any], metric_functions: Dict[str, Any]) -> 
             print(f"Error running metric {metric_name}: {e}")
             results[metric_name] = MetricValue(metric_name, 0.0, 0)
     net_score, net_score_latency = compute_net_score(results)
-    scores = {
-        "net_score": net_score,
-        "aggregation_latency": net_score_latency / 1000.0
-    }
-    metric_mapping = {
-        "ramp_up": "ramp_up",
-        "license": "license",
-        "bus_factor": "bus_factor",
-        "code_quality": "code_quality",
-        "reproducibility": "reproducibility",
-        "reviewedness": "reviewedness",
-        "treescore": "treescore",
-        "dependencies": "pull_requests",
-        "pull_requests": "pull_requests"
-    }
+    scores = {"net_score": net_score, "aggregation_latency": net_score_latency / 1000.0}
+    metric_mapping = {"ramp_up_time": "ramp_up", "license": "license", "bus_factor": "bus_factor", "performance_claims": "performance_claims", "size_score": "size", "Treescore": "treescore", "Reviewedness": "reviewedness", "dataset_and_code_score": "dataset_code", "dataset_quality": "dataset_quality", "code_quality": "code_quality", "Reproducibility": "reproducibility", "dependencies": "pull_requests", "pull_requests": "pull_requests"}
     for metric_name, output_name in metric_mapping.items():
         if metric_name in results:
             metric_value = results[metric_name]
             if hasattr(metric_value, 'value'):
-                scores[output_name] = metric_value.value
+                val = metric_value.value
+                if isinstance(val, dict) and len(val) > 0:
+                    scores[output_name] = float(sum(val.values()) / len(val))
+                else:
+                    scores[output_name] = float(val) if val is not None else 0.0
+            elif isinstance(metric_value, dict) and len(metric_value) > 0:
+                scores[output_name] = float(sum(metric_value.values()) / len(metric_value))
             elif isinstance(metric_value, (int, float)):
                 scores[output_name] = float(metric_value)
             else:
                 scores[output_name] = 0.0
+        else:
+            scores[output_name] = 0.0
     return scores
 
 

@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>Size Cost Calculator</h1>
+  
+  <form method="get" aria-label="Get model size cost">
+    <input type="text" name="name" value="{{ name }}" placeholder="Enter model name" aria-label="Model name" required />
+    <button class="btn" type="submit">Get Size Cost</button>
+  </form>
+
+  {% if size_data %}
+    {% if size_data.error %}
+      <div class="card error">
+        <h2>Error</h2>
+        <p>{{ size_data.error }}</p>
+      </div>
+    {% else %}
+      <div class="card" style="text-align: center;">
+        <h2>Model Size Breakdown</h2>
+        <p><strong>Model ID:</strong> {{ size_data.model_id }}</p>
+        
+        {% macro format_size(bytes) %}
+          {% if bytes >= 1073741824 %}
+            {{ "%.2f"|format(bytes / 1073741824) }} GB
+          {% elif bytes >= 1048576 %}
+            {{ "%.2f"|format(bytes / 1048576) }} MB
+          {% elif bytes >= 1024 %}
+            {{ "%.2f"|format(bytes / 1024) }} KB
+          {% else %}
+            {{ bytes }} bytes
+          {% endif %}
+        {% endmacro %}
+        
+        <div class="size-grid">
+          <div class="size-card">
+            <h3>Full Model</h3>
+            <p class="size-value">{{ format_size(size_data.full_size) }}</p>
+            <p class="size-note">Compressed ZIP</p>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=full" class="btn">Download Full</a>
+          </div>
+          
+          <div class="size-card">
+            <h3>Weights Only</h3>
+            <p class="size-value">{{ format_size(size_data.weights_size) }}</p>
+            <p class="size-note">Compressed: {{ format_size(size_data.weights_size) }}</p>
+            <p class="size-note">Uncompressed: {{ format_size(size_data.weights_uncompressed) }}</p>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=weights" class="btn">Download Weights</a>
+          </div>
+          
+          <div class="size-card">
+            <h3>Datasets Only</h3>
+            <p class="size-value">{{ format_size(size_data.datasets_size) }}</p>
+            <p class="size-note">Compressed: {{ format_size(size_data.datasets_size) }}</p>
+            <p class="size-note">Uncompressed: {{ format_size(size_data.datasets_uncompressed) }}</p>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=datasets" class="btn">Download Datasets</a>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+</section>
+
+<style>
+.size-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin: 20px auto;
+  max-width: 1200px;
+}
+
+.size-card {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.size-card h3 {
+  margin: 0 0 10px 0;
+  color: #495057;
+}
+
+.size-value {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #007bff;
+  margin: 10px 0;
+}
+
+.size-note {
+  font-size: 0.85em;
+  color: #6c757d;
+  margin: 5px 0;
+}
+
+.size-card .btn {
+  display: block;
+  margin-top: 15px;
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 0.75em;
+}
+
+.size-breakdown {
+  margin-top: 30px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.size-breakdown ul {
+  list-style: none;
+  padding: 0;
+}
+
+.size-breakdown li {
+  padding: 10px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.size-breakdown li:last-child {
+  border-bottom: none;
+}
+</style>
+{% endblock %}
+
