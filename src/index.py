@@ -285,6 +285,100 @@ async def check_model_license(id: str, request: Request):
     except Exception as e:
         return {"error": f"Failed to check license: {str(e)}"}, 500
 
+@app.post("/artifact/model/{id}/upload")
+async def upload_artifact_model(id: str, request: Request, file: UploadFile = File(...), version: str = None):
+    """Upload a file for a specific model artifact"""
+    try:
+        if not file.filename or not file.filename.endswith('.zip'):
+            return {"error": "Only ZIP files are supported"}, 400
+        
+        effective_version = version or "1.0.0"
+        file_content = await file.read()
+        result = upload_model(file_content, id, effective_version)
+        return {"message": "Upload successful", "details": result, "model_id": id, "version": effective_version}
+    except Exception as e:
+        return {"error": f"Upload failed: {str(e)}"}, 500
+
+@app.get("/artifact/model/{id}/download")
+def download_artifact_model(id: str, version: str = "1.0.0", component: str = "full"):
+    """Download a specific model artifact"""
+    try:
+        file_content = download_model(id, version, component)
+        if file_content:
+            return Response(
+                content=file_content, 
+                media_type="application/zip", 
+                headers={"Content-Disposition": f"attachment; filename={id}_{version}_{component}.zip"}
+            )
+        else:
+            return {"error": f"Failed to download {id} v{version}"}, 404
+    except Exception as e:
+        return {"error": f"Download failed: {str(e)}"}, 500
+
+@app.get("/artifact/ingest")
+def get_artifact_ingest(name: str = None, version: str = "main"):
+    """Get artifact ingestion status or initiate ingestion"""
+    try:
+        if name:
+            # If name provided, try to ingest
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
+        else:
+            return {"message": "Provide name parameter to ingest artifact"}
+    except Exception as e:
+        return {"error": f"Ingest failed: {str(e)}"}, 500
+
+@app.post("/artifact/ingest")
+async def post_artifact_ingest(request: Request):
+    """Initiate artifact ingestion via POST"""
+    try:
+        form = await request.form()
+        name = form.get("name")
+        version = form.get("version", "main")
+        
+        if not name:
+            body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+            name = body.get("name") or body.get("model_id")
+            version = body.get("version", version)
+        
+        if name:
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
+        else:
+            return {"error": "Name parameter is required"}, 400
+    except Exception as e:
+        return {"error": f"Ingest failed: {str(e)}"}, 500
+
+@app.get("/artifact/directory")
+def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: str = None, version_range: str = None, version: str = None):
+    """Get artifact directory listing"""
+    try:
+        effective_version_range = version_range or version
+        if q:
+            import re
+            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
+            if re.match(version_pattern, q.strip()):
+                effective_version_range = q.strip()
+                result = list_models(version_range=effective_version_range, limit=1000)
+            else:
+                escaped_query = re.escape(q)
+                search_regex = f".*{escaped_query}.*"
+                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
+        elif name_regex or model_regex:
+            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
+        else:
+            result = list_models(version_range=effective_version_range, limit=1000)
+        
+        return {
+            "artifacts": result.get("models", []),
+            "total": len(result.get("models", [])),
+            "next_token": result.get("next_token")
+        }
+    except Exception as e:
+        return {"error": f"Failed to get directory: {str(e)}"}, 500
+
 app.include_router(api_router, prefix="/api")
 
 ROOT = Path(__file__).resolve().parents[1]
