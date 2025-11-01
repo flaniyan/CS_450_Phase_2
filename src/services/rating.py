@@ -35,12 +35,16 @@ class RateRequest(BaseModel):
 
 def analyze_model_content(target: str) -> Dict[str, Any]:
     try:
+        from ..services.s3_service import download_model, extract_config_from_model
         model_content = download_model(target, "1.0.0", "full")
         if not model_content:
             for version in ["1.0", "latest", "main"]:
-                model_content = download_model(target, version, "full")
-                if model_content:
-                    break
+                try:
+                    model_content = download_model(target, version, "full")
+                    if model_content:
+                        break
+                except:
+                    continue
         if not model_content:
             raise ValueError(f"No model content found for {target}. Cannot compute metrics without model data.")
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -50,8 +54,28 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
             meta = create_metadata_from_files(temp_dir, target)
+            config = extract_config_from_model(model_content)
+            if config:
+                meta["config"] = config
+            meta["contributors"] = {}
+            meta["pushed_at"] = None
+            meta["github_url"] = ""
+            meta["parents"] = []
+            meta["license"] = meta.get("license_text", "")[:100].lower() if meta.get("license_text") else ""
+            from ..acmecli.metrics.license_metric import LicenseMetric
+            from ..acmecli.metrics.ramp_up_metric import RampUpMetric
+            from ..acmecli.metrics.bus_factor_metric import BusFactorMetric
+            from ..acmecli.metrics.performance_claims_metric import PerformanceClaimsMetric
+            from ..acmecli.metrics.size_metric import SizeMetric
+            from ..acmecli.metrics.dataset_and_code_metric import DatasetAndCodeMetric
+            from ..acmecli.metrics.dataset_quality_metric import DatasetQualityMetric
+            from ..acmecli.metrics.code_quality_metric import CodeQualityMetric
+            from ..acmecli.metrics.reproducibility_metric import ReproducibilityMetric
+            from ..acmecli.metrics.reviewedness_metric import ReviewednessMetric
+            from ..acmecli.metrics.treescore_metric import TreescoreMetric
+            quick_metrics = {'license': LicenseMetric().score, 'ramp_up_time': RampUpMetric().score, 'bus_factor': BusFactorMetric().score, 'performance_claims': PerformanceClaimsMetric().score, 'size_score': SizeMetric().score, 'dataset_and_code_score': DatasetAndCodeMetric().score, 'dataset_quality': DatasetQualityMetric().score, 'code_quality': CodeQualityMetric().score, 'Reproducibility': ReproducibilityMetric().score, 'Reviewedness': ReviewednessMetric().score, 'Treescore': TreescoreMetric().score}
             print(f"Running ACME metrics for {target} with {len(meta['repo_files'])} files")
-            return run_acme_metrics(meta, METRIC_FUNCTIONS)
+            return run_acme_metrics(meta, quick_metrics)
     except Exception as e:
         print(f"Error analyzing model {target}: {e}")
         traceback.print_exc()
