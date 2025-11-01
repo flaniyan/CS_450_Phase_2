@@ -81,7 +81,50 @@ class GitHubHandler:
                 meta["readme_text"] = ""
         else:
             meta["readme_text"] = ""
-
+        try:
+            prs_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=30&sort=updated"
+            prs_data = self._get_json(prs_url)
+            prs = []
+            if isinstance(prs_data, list):
+                for pr in prs_data[:30]:
+                    pr_info = {"merged": pr.get("merged", False), "approved": False, "review_count": 0, "additions": pr.get("additions", 0), "files": []}
+                    pr_number = pr.get("number")
+                    if pr_number:
+                        reviews_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+                        reviews = self._get_json(reviews_url)
+                        if isinstance(reviews, list):
+                            approved_reviews = [r for r in reviews if r.get("state") == "APPROVED"]
+                            pr_info["review_count"] = len(reviews)
+                            pr_info["approved"] = len(approved_reviews) > 0
+                        files_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
+                        files_data = self._get_json(files_url)
+                        if isinstance(files_data, list):
+                            pr_info["files"] = [{"filename": f.get("filename", ""), "additions": f.get("additions", 0)} for f in files_data]
+                    prs.append(pr_info)
+            meta["github"] = {"prs": prs}
+            commits_url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=30"
+            commits_data = self._get_json(commits_url)
+            direct_commits = []
+            if isinstance(commits_data, list):
+                for commit in commits_data[:30]:
+                    commit_info = {"additions": 0, "files": []}
+                    commit_sha = commit.get("sha")
+                    if commit_sha:
+                        commit_detail_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}"
+                        commit_detail = self._get_json(commit_detail_url)
+                        if isinstance(commit_detail, dict):
+                            stats = commit_detail.get("stats", {})
+                            commit_info["additions"] = stats.get("additions", 0)
+                            files = commit_detail.get("files", [])
+                            commit_info["files"] = [{"filename": f.get("filename", ""), "additions": f.get("additions", 0)} for f in files]
+                    direct_commits.append(commit_info)
+            if "github" not in meta:
+                meta["github"] = {}
+            meta["github"]["direct_commits"] = direct_commits
+        except Exception as pr_error:
+            logging.warning("Failed to fetch PR/commit data for %s: %s", url, pr_error)
+            if "github" not in meta:
+                meta["github"] = {"prs": [], "direct_commits": []}
         return meta
 
 

@@ -525,7 +525,6 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             config = extract_config_from_model(zip_content)
             if config:
                 meta["config"] = config
-            
             meta["contributors"] = {}
             meta["pushed_at"] = None
             meta["github_url"] = ""
@@ -537,6 +536,62 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             meta["has_pages"] = False
             meta["language"] = "python"
             meta["open_issues_count"] = 0
+            meta["github"] = {}
+            try:
+                from ..acmecli.hf_handler import fetch_hf_metadata
+                clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+                hf_url = f"https://huggingface.co/{clean_model_id}"
+                hf_meta = fetch_hf_metadata(hf_url)
+                if hf_meta:
+                    meta["stars"] = hf_meta.get("likes", 0)
+                    meta["downloads"] = hf_meta.get("downloads", 0)
+                    if hf_meta.get("modelId"):
+                        meta["full_name"] = hf_meta.get("modelId", model_id)
+                    card_data = hf_meta.get("cardData", {})
+                    if isinstance(card_data, dict):
+                        readme_text = card_data.get("---", "")
+                        if isinstance(readme_text, str) and not meta.get("readme_text"):
+                            meta["readme_text"] = readme_text
+                        repo_url = None
+                        for key, value in card_data.items():
+                            if isinstance(value, str) and "github.com" in value.lower():
+                                import re
+                                github_match = re.search(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', value)
+                                if github_match:
+                                    repo_url = github_match.group(0)
+                                    break
+                        if not repo_url and meta.get("readme_text"):
+                            readme = meta["readme_text"]
+                            import re
+                            github_matches = re.findall(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', readme)
+                            if github_matches:
+                                repo_url = github_matches[0]
+                        if repo_url:
+                            meta["github_url"] = repo_url
+                            from ..acmecli.github_handler import fetch_github_metadata
+                            gh_meta = fetch_github_metadata(repo_url)
+                            if gh_meta:
+                                meta["contributors"] = gh_meta.get("contributors", {})
+                                meta["stars"] = gh_meta.get("stars", meta["stars"])
+                                meta["forks"] = gh_meta.get("forks", 0)
+                                meta["full_name"] = gh_meta.get("full_name", meta["full_name"])
+                                meta["pushed_at"] = gh_meta.get("pushed_at")
+                                meta["has_wiki"] = gh_meta.get("has_wiki", False)
+                                meta["has_pages"] = gh_meta.get("has_pages", False)
+                                meta["language"] = gh_meta.get("language", "python")
+                                meta["open_issues_count"] = gh_meta.get("open_issues_count", 0)
+                                if gh_meta.get("readme_text") and not meta.get("readme_text"):
+                                    meta["readme_text"] = gh_meta.get("readme_text", "")
+                                if gh_meta.get("github"):
+                                    meta["github"] = gh_meta.get("github", {})
+                if config:
+                    base_model = config.get("_name_or_path") or config.get("base_model_name_or_path") or config.get("pretrained_model_name_or_path")
+                    if base_model:
+                        parent_id = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+                        if parent_id != clean_model_id:
+                            meta["parents"] = [{"score": 0.5, "id": parent_id}]
+            except Exception as gh_error:
+                print(f"[INGEST] Warning: Could not fetch GitHub metadata: {gh_error}")
             license_text_content = meta.get("license_text", "")
             if license_text_content:
                 meta["license"] = license_text_content[:100].lower()

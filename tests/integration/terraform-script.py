@@ -38,8 +38,43 @@ def upload_test_model():
         traceback.print_exc()
         return None
 
+def ingest_test_model():
+    """Ingest a test model from HuggingFace"""
+    try:
+        model_id = os.getenv("INGEST_MODEL_ID", DEFAULT_TEST_MODEL)
+        version = os.getenv("INGEST_MODEL_VERSION", "main")
+        url = f"{BASE_URL}artifact/ingest"
+        data = {"name": model_id, "version": version}
+        print(f"Ingesting model {model_id} v{version} from HuggingFace...")
+        r = requests.post(url, data=data, timeout=300)
+        print(f"Ingest response status: {r.status_code}")
+        if r.status_code == 200:
+            try:
+                response_data = r.json()
+                if isinstance(response_data, list) and len(response_data) > 0 and "error" in response_data[0]:
+                    print(f"Ingest failed: {response_data[0].get('error')}")
+                    return None
+                elif isinstance(response_data, dict) and "error" in response_data:
+                    print(f"Ingest failed: {response_data.get('error')}")
+                    return None
+                print(f"Ingest response: {r.text[:200]}...")
+                clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").replace("/", "_")
+                return clean_model_id, version
+            except:
+                print(f"Ingest response (non-JSON): {r.text[:200]}...")
+                clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").replace("/", "_")
+                return clean_model_id, version
+        else:
+            print(f"Ingest failed with status {r.status_code}: {r.text[:200]}...")
+        return None
+    except Exception as e:
+        print(f"Failed to ingest test model: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def get_real_models():
-    """Fetch real models from S3 via API, or upload one if none exist"""
+    """Fetch real models from S3 via API, or upload/ingest one if none exist"""
     try:
         url = f"{BASE_URL}artifact/directory"
         r = requests.get(url, timeout=10)
@@ -52,17 +87,27 @@ def get_real_models():
                 model_version = model.get("version")
                 if model_name and model_version:
                     return model_name, model_version
-        print("No models found in directory, uploading a test model...")
+        print("No models found in directory, trying to upload or ingest a test model...")
         uploaded = upload_test_model()
         if uploaded:
             model_id, version = uploaded
             if model_id and version:
                 print(f"Successfully uploaded test model: {model_id} v{version}")
                 return model_id, version
-        print("ERROR: Failed to get or upload a real model. Cannot proceed without real S3 resources.")
+        print("Upload failed or no file specified, trying ingest from HuggingFace...")
+        ingested = ingest_test_model()
+        if ingested:
+            model_id, version = ingested
+            if model_id and version:
+                print(f"Successfully ingested test model: {model_id} v{version}")
+                return model_id, version
+        print("ERROR: Failed to get, upload, or ingest a real model. Cannot proceed without real S3 resources.")
+        print("Set UPLOAD_FILE_PATH environment variable or ensure models exist in S3.")
         return None, None
     except Exception as e:
         print(f"Failed to fetch real models: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None
 
 def test_endpoint(endpoint, method="GET", data=None, files=None):
