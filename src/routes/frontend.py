@@ -166,6 +166,23 @@ def register_routes(app):
                 return {"error": f"Failed to download {model_id} v{version}"}
         except Exception as e:
             return {"error": f"Download failed: {str(e)}"}
+    @app.get("/license-check")
+    def license_check_get(request: Request, model_id: str | None = None, github_url: str | None = None, use_case: str = "fine-tune+inference", result: str | None = None):
+        try:
+            if not templates:
+                return {"message": "Frontend not found. Ensure frontend/templates exists."}
+            result_data = None
+            error_msg = None
+            if result:
+                try:
+                    import json
+                    result_data = json.loads(result)
+                except:
+                    error_msg = "Failed to parse result"
+            ctx = {"request": request, "model_id": model_id or "", "github_url": github_url or "", "use_case": use_case, "result": result_data, "error": error_msg}
+            return templates.TemplateResponse("license-check.html", ctx)
+        except Exception as e:
+            return {"error": f"Failed to get license check page: {str(e)}"}, 500
     @app.post("/admin/reset")
     def reset():
         try:
