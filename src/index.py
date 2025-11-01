@@ -353,6 +353,20 @@ async def check_model_license(id: str, request: Request):
     except Exception as e:
         return {"error": f"Failed to check license: {str(e)}"}, 500
 
+@app.post("/upload")
+async def upload_file(request: Request, file: UploadFile = File(...), model_id: str = None, version: str = None):
+    try:
+        if not file.filename or not file.filename.endswith('.zip'):
+            return {"error": "Only ZIP files are supported"}, 400
+        filename = file.filename.replace('.zip', '')
+        effective_model_id = model_id or filename
+        effective_version = version or "1.0.0"
+        file_content = await file.read()
+        result = upload_model(file_content, effective_model_id, effective_version)
+        return {"message": "Upload successful", "details": result}
+    except Exception as e:
+        return {"error": f"Upload failed: {str(e)}"}, 500
+
 @app.post("/artifact/model/{id}/upload")
 async def upload_artifact_model(id: str, request: Request, file: UploadFile = File(...), version: str = None):
     try:
