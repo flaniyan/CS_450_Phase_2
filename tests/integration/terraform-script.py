@@ -7,25 +7,26 @@ BASE_URL = "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/"
 DEFAULT_UPLOAD_FILE = r"C:\Users\mdali\Downloads\hugging-face-model_1.0.0_full_1.0.0_full.zip"
 
 def upload_test_model():
-    """Upload a test model using DEFAULT_UPLOAD_FILE"""
+    """Upload a test model using DEFAULT_UPLOAD_FILE via /artifact/model/{id}/upload"""
     if not os.path.exists(DEFAULT_UPLOAD_FILE):
         print(f"Upload file not found: {DEFAULT_UPLOAD_FILE}")
         return None
     try:
-        url = f"{BASE_URL}upload"
+        filename = os.path.basename(DEFAULT_UPLOAD_FILE).replace('.zip', '').replace('_', '-')
+        model_id = filename.split('-')[0] if '-' in filename else filename[:20]
+        url = f"{BASE_URL}artifact/model/{model_id}/upload"
         with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
             file_content = f.read()
         files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
-        print(f"Uploading {DEFAULT_UPLOAD_FILE}...")
+        print(f"Uploading {DEFAULT_UPLOAD_FILE} to /artifact/model/{model_id}/upload...")
         r = requests.post(url, files=files, timeout=30)
         print(f"Upload response status: {r.status_code}")
         print(f"Upload response: {r.text}")
         if r.status_code == 200:
             data = r.json()
-            model_id = data.get("model_id")
+            returned_model_id = data.get("model_id") or model_id
             version = data.get("version", "1.0.0")
-            if model_id:
-                return model_id, version
+            return returned_model_id, version
         else:
             print(f"Upload failed with status {r.status_code}: {r.text}")
         return None
@@ -124,7 +125,8 @@ endpoints = [
     (f"/artifact/model/{real_model_id}/rate", "GET"),
     (f"/artifact/model/{real_model_id}/lineage", "GET"),
     (f"/artifact/model/{real_model_id}/license-check", "POST"),
-    ("/upload", "POST"),
+    ("/upload", "GET"),
+    ("/artifact/model/{real_model_id}/upload", "POST"),
     (f"/artifact/model/{real_model_id}/download", "GET"),
     ("/artifact/ingest", "GET"),
     ("/artifact/ingest", "POST"),
@@ -147,7 +149,7 @@ for endpoint, method in endpoints:
         data = {"user": {"name": "ece30861defaultadminuser", "is_admin": True}, "secret": {"password": "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"}}
     elif endpoint == "/artifact/ingest" and method == "POST":
         data = {"name": real_model_id, "version": real_version}
-    elif endpoint == "/upload" and method == "POST":
+    elif f"/artifact/model/{real_model_id}/upload" == endpoint and method == "POST":
         if os.path.exists(DEFAULT_UPLOAD_FILE):
             with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
                 file_content = f.read()
