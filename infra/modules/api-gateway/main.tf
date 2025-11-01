@@ -308,6 +308,24 @@ resource "aws_api_gateway_resource" "artifact_byregex" {
 
 # ===== METHODS AND INTEGRATIONS =====
 
+# GET /artifact
+resource "aws_api_gateway_method" "artifact_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_resource.artifact.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "artifact_get" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact.id
+  http_method = aws_api_gateway_method.artifact_get.http_method
+
+  integration_http_method = "GET"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/artifact"
+}
+
 # GET /health
 resource "aws_api_gateway_method" "health_get" {
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
@@ -1383,6 +1401,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration_response.root_get_200,
     aws_api_gateway_integration.health_get,
     aws_api_gateway_integration.health_components_get,
+    aws_api_gateway_integration.artifact_get,
     aws_api_gateway_integration.artifacts_post,
     aws_api_gateway_integration.reset_delete,
     aws_api_gateway_integration.authenticate_put,
@@ -1458,6 +1477,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       # Methods
       aws_api_gateway_method.health_get.id,
       aws_api_gateway_method.health_components_get.id,
+      aws_api_gateway_method.artifact_get.id,
       aws_api_gateway_method.artifacts_post.id,
       aws_api_gateway_method.reset_delete.id,
       aws_api_gateway_method.authenticate_put.id,
@@ -1472,6 +1492,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_method.rate_options.id,
       aws_api_gateway_method.upload_options.id,
       aws_api_gateway_method.artifact_type_post.id,
+      aws_api_gateway_method.artifact_get.id,
+      aws_api_gateway_method.artifact_type_get.id,
       aws_api_gateway_method.artifact_type_id_get.id,
       aws_api_gateway_method.artifact_type_id_put.id,
       aws_api_gateway_method.artifact_type_id_delete.id,
@@ -1492,6 +1514,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_integration.root_get.id,
       aws_api_gateway_integration.health_get.id,
       aws_api_gateway_integration.health_components_get.id,
+      aws_api_gateway_integration.artifact_get.id,
       aws_api_gateway_integration.artifacts_post.id,
       aws_api_gateway_integration.reset_delete.id,
       aws_api_gateway_integration.authenticate_put.id,
