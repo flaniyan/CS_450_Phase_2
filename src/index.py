@@ -250,43 +250,29 @@ def get_artifact(artifact_type: str, id: str):
         if artifact_type == "model":
             version = None
             found = False
-            common_versions = ["1.0.0", "main", "latest"]
-            for v in common_versions:
-                try:
-                    s3_key = f"models/{id}/{v}/model.zip"
-                    s3.head_object(Bucket=ap_arn, Key=s3_key)
-                    version = v
-                    found = True
-                    break
-                except ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code', '')
-                    if error_code == 'NoSuchKey' or error_code == '404':
-                        continue
-                    else:
-                        print(f"Unexpected error checking {s3_key}: {error_code}")
+            import re
+            try:
+                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                if result.get("models"):
+                    for model in result["models"]:
+                        v = model["version"]
+                        try:
+                            s3_key = f"models/{id}/{v}/model.zip"
+                            s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            version = v
+                            found = True
+                            break
+                        except ClientError as e:
+                            error_code = e.response.get('Error', {}).get('Code', '')
+                            if error_code == 'NoSuchKey' or error_code == '404':
+                                continue
+                            else:
+                                print(f"Unexpected error checking {s3_key}: {error_code}")
+            except Exception as e:
+                print(f"Error calling list_models: {e}")
             if not found:
-                try:
-                    result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                    if result.get("models"):
-                        versions_to_try = [model["version"] for model in result["models"]]
-                        for v in versions_to_try:
-                            try:
-                                s3_key = f"models/{id}/{v}/model.zip"
-                                s3.head_object(Bucket=ap_arn, Key=s3_key)
-                                version = v
-                                found = True
-                                break
-                            except ClientError as e:
-                                error_code = e.response.get('Error', {}).get('Code', '')
-                                if error_code == 'NoSuchKey' or error_code == '404':
-                                    continue
-                                else:
-                                    print(f"Unexpected error checking {s3_key}: {error_code}")
-                except Exception as e:
-                    print(f"Error calling list_models: {e}")
-            if not found:
-                versions_final_check = ["1.0.0", "main", "latest"]
-                for v in versions_final_check:
+                common_versions = ["1.0.0", "main", "latest"]
+                for v in common_versions:
                     try:
                         s3_key = f"models/{id}/{v}/model.zip"
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -295,9 +281,10 @@ def get_artifact(artifact_type: str, id: str):
                         break
                     except ClientError as e:
                         error_code = e.response.get('Error', {}).get('Code', '')
-                        if error_code != 'NoSuchKey' and error_code != '404':
-                            print(f"Final check error for {s3_key}: {error_code}")
-                        continue
+                        if error_code == 'NoSuchKey' or error_code == '404':
+                            continue
+                        else:
+                            print(f"Unexpected error checking {s3_key}: {error_code}")
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             model = {"name": id, "version": version}
@@ -617,6 +604,18 @@ async def upload_artifact_model(request: Request, file: UploadFile = File(...), 
         error_msg = f"Upload failed: {str(e)}"
         print(f"Upload error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/artifact/model/{id}/upload-url")
+def get_upload_url(id: str, version: str = "1.0.0", expires_in: int = 3600):
+    """Get presigned S3 URL for direct upload (bypasses API Gateway 10MB limit)"""
+    try:
+        from .services.s3_service import get_presigned_upload_url
+        result = get_presigned_upload_url(id, version, expires_in)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
 @app.post("/artifact/model/{id}/upload")
 async def upload_artifact_model_by_id(id: str, request: Request, file: UploadFile = File(...), version: str = None):
