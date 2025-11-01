@@ -149,6 +149,105 @@ def get_artifacts():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get artifacts: {str(e)}")
 
+@app.get("/artifact/byName/{name}")
+def get_artifact_by_name(name: str):
+    try:
+        from .services.s3_service import list_models
+        import re
+        escaped_name = re.escape(name)
+        name_pattern = f"^{escaped_name}$"
+        result = list_models(name_regex=name_pattern, limit=1000)
+        artifacts = []
+        for model in result.get("models", []):
+            artifacts.append({"name": model["name"], "id": model.get("id", model["name"]), "type": "model"})
+        return artifacts
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": f"Failed to get artifact by name: {str(e)}"}, 500
+
+@app.post("/artifact/byRegEx")
+async def search_artifacts_by_regex(request: Request):
+    try:
+        from .services.s3_service import list_models
+        body = {}
+        if request.headers.get("content-type") == "application/json":
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        if isinstance(body, list) and len(body) > 0:
+            search_criteria = body[0]
+        elif isinstance(body, dict):
+            search_criteria = body
+        else:
+            raise HTTPException(status_code=400, detail="Invalid request body format")
+        regex_pattern = search_criteria.get("regex")
+        if not regex_pattern:
+            raise HTTPException(status_code=400, detail="regex field is required")
+        result = list_models(name_regex=regex_pattern, model_regex=regex_pattern, limit=1000)
+        artifacts = []
+        for model in result.get("models", []):
+            artifacts.append({"name": model["name"], "id": model.get("id", model["name"]), "type": "model"})
+        return artifacts
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": f"Failed to search artifacts: {str(e)}"}, 500
+
+@app.get("/artifact/ingest")
+def get_artifact_ingest(name: str = None, version: str = "main"):
+    try:
+        if name:
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
+        else:
+            return {"message": "Provide name parameter to ingest artifact"}
+    except Exception as e:
+        return {"error": f"Ingest failed: {str(e)}"}, 500
+
+@app.post("/artifact/ingest")
+async def post_artifact_ingest(request: Request):
+    try:
+        form = await request.form()
+        name = form.get("name")
+        version = form.get("version", "main")
+        if not name:
+            body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+            name = body.get("name") or body.get("model_id")
+            version = body.get("version", version)
+        if name:
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
+        else:
+            return {"error": "Name parameter is required"}, 400
+    except Exception as e:
+        return {"error": f"Ingest failed: {str(e)}"}, 500
+
+@app.get("/artifact/directory")
+def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: str = None, version_range: str = None, version: str = None):
+    try:
+        effective_version_range = version_range or version
+        if q:
+            import re
+            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
+            if re.match(version_pattern, q.strip()):
+                effective_version_range = q.strip()
+                result = list_models(version_range=effective_version_range, limit=1000)
+            else:
+                escaped_query = re.escape(q)
+                search_regex = f".*{escaped_query}.*"
+                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
+        elif name_regex or model_regex:
+            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
+        else:
+            result = list_models(version_range=effective_version_range, limit=1000)
+        return {"artifacts": result.get("models", []), "total": len(result.get("models", [])), "next_token": result.get("next_token")}
+    except Exception as e:
+        return {"error": f"Failed to get directory: {str(e)}"}, 500
+
 @app.get("/artifact/{artifact_type}")
 def get_artifacts_by_type(artifact_type: str):
     try:
@@ -202,52 +301,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         raise
     except Exception as e:
         return {"error": f"Failed to create artifact: {str(e)}"}, 500
-
-@app.get("/artifact/byName/{name}")
-def get_artifact_by_name(name: str):
-    try:
-        from .services.s3_service import list_models
-        import re
-        escaped_name = re.escape(name)
-        name_pattern = f"^{escaped_name}$"
-        result = list_models(name_regex=name_pattern, limit=1000)
-        artifacts = []
-        for model in result.get("models", []):
-            artifacts.append({"name": model["name"], "id": model.get("id", model["name"]), "type": "model"})
-        return artifacts
-    except HTTPException:
-        raise
-    except Exception as e:
-        return {"error": f"Failed to get artifact by name: {str(e)}"}, 500
-
-@app.post("/artifact/byRegEx")
-async def search_artifacts_by_regex(request: Request):
-    try:
-        from .services.s3_service import list_models
-        body = {}
-        if request.headers.get("content-type") == "application/json":
-            body = await request.json()
-        else:
-            form = await request.form()
-            body = dict(form)
-        if isinstance(body, list) and len(body) > 0:
-            search_criteria = body[0]
-        elif isinstance(body, dict):
-            search_criteria = body
-        else:
-            raise HTTPException(status_code=400, detail="Invalid request body format")
-        regex_pattern = search_criteria.get("regex")
-        if not regex_pattern:
-            raise HTTPException(status_code=400, detail="regex field is required")
-        result = list_models(name_regex=regex_pattern, model_regex=regex_pattern, limit=1000)
-        artifacts = []
-        for model in result.get("models", []):
-            artifacts.append({"name": model["name"], "id": model.get("id", model["name"]), "type": "model"})
-        return artifacts
-    except HTTPException:
-        raise
-    except Exception as e:
-        return {"error": f"Failed to search artifacts: {str(e)}"}, 500
 
 @app.put("/artifact/{artifact_type}/{id}")
 async def update_artifact(artifact_type: str, id: str, request: Request):
@@ -542,59 +595,6 @@ def download_artifact_model(id: str, version: str = "1.0.0", component: str = "f
             raise HTTPException(status_code=404, detail=f"Failed to download {id} v{version}")
     except Exception as e:
         return {"error": f"Download failed: {str(e)}"}, 500
-
-@app.get("/artifact/ingest")
-def get_artifact_ingest(name: str = None, version: str = "main"):
-    try:
-        if name:
-            from .services.s3_service import model_ingestion
-            result = model_ingestion(name, version)
-            return {"message": "Ingest successful", "details": result}
-        else:
-            return {"message": "Provide name parameter to ingest artifact"}
-    except Exception as e:
-        return {"error": f"Ingest failed: {str(e)}"}, 500
-
-@app.post("/artifact/ingest")
-async def post_artifact_ingest(request: Request):
-    try:
-        form = await request.form()
-        name = form.get("name")
-        version = form.get("version", "main")
-        if not name:
-            body = await request.json() if request.headers.get("content-type") == "application/json" else {}
-            name = body.get("name") or body.get("model_id")
-            version = body.get("version", version)
-        if name:
-            from .services.s3_service import model_ingestion
-            result = model_ingestion(name, version)
-            return {"message": "Ingest successful", "details": result}
-        else:
-            return {"error": "Name parameter is required"}, 400
-    except Exception as e:
-        return {"error": f"Ingest failed: {str(e)}"}, 500
-
-@app.get("/artifact/directory")
-def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: str = None, version_range: str = None, version: str = None):
-    try:
-        effective_version_range = version_range or version
-        if q:
-            import re
-            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
-            if re.match(version_pattern, q.strip()):
-                effective_version_range = q.strip()
-                result = list_models(version_range=effective_version_range, limit=1000)
-            else:
-                escaped_query = re.escape(q)
-                search_regex = f".*{escaped_query}.*"
-                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
-        elif name_regex or model_regex:
-            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
-        else:
-            result = list_models(version_range=effective_version_range, limit=1000)
-        return {"artifacts": result.get("models", []), "total": len(result.get("models", [])), "next_token": result.get("next_token")}
-    except Exception as e:
-        return {"error": f"Failed to get directory: {str(e)}"}, 500
 
 @app.get("/admin")
 def get_admin(request: Request):
