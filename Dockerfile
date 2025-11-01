@@ -26,5 +26,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV PYTHONUNBUFFERED=1
 
-# Command to run the application
-CMD ["uvicorn", "src.index:app", "--host", "0.0.0.0", "--port", "3000"]
+# Command to run the application (wrapped entrypoint to attach JWT middleware)
+CMD ["uvicorn", "src.entrypoint:app", "--host", "0.0.0.0", "--port", "3000"]
