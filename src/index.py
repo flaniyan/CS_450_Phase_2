@@ -104,14 +104,14 @@ def get_artifact(artifact_type: str, id: str):
         from .services.s3_service import list_models, s3, ap_arn
         from botocore.exceptions import ClientError
         if artifact_type == "model":
+            version = None
+            found = False
             versions_to_try = []
             result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
             if result.get("models"):
                 versions_to_try = [model["version"] for model in result["models"]]
             if not versions_to_try:
                 versions_to_try = ["1.0.0", "main", "latest"]
-            version = None
-            found = False
             for v in versions_to_try:
                 try:
                     s3_key = f"models/{id}/{v}/model.zip"
@@ -124,6 +124,20 @@ def get_artifact(artifact_type: str, id: str):
                     if error_code != 'NoSuchKey' and error_code != '404':
                         raise
                     continue
+            if not found:
+                versions_to_try = ["1.0.0", "main", "latest"]
+                for v in versions_to_try:
+                    try:
+                        s3_key = f"models/{id}/{v}/model.zip"
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        version = v
+                        found = True
+                        break
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code != 'NoSuchKey' and error_code != '404':
+                            raise
+                        continue
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             model = {"name": id, "version": version}
