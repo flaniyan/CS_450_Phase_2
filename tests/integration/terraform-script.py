@@ -66,7 +66,12 @@ def get_real_models():
 def test_endpoint(endpoint, method="GET", data=None, files=None):
     """Test an endpoint and return the result"""
     try:
-        url = f"{BASE_URL}{endpoint}"
+        if BASE_URL.endswith("/") and endpoint.startswith("/"):
+            url = f"{BASE_URL.rstrip('/')}{endpoint}"
+        elif not BASE_URL.endswith("/") and not endpoint.startswith("/"):
+            url = f"{BASE_URL}/{endpoint}"
+        else:
+            url = f"{BASE_URL}{endpoint}"
         print(f"\n[TEST] {method} {endpoint}")
         print(f"URL: {url}")
         
@@ -107,6 +112,10 @@ print(f"Using real model ID: {real_model_id}, version: {real_version}")
 artifact_type = "model"
 model_name = real_model_id
 
+# Debug: Print the endpoints to verify f-strings are evaluated
+print(f"DEBUG: real_model_id = {real_model_id!r}")
+print(f"DEBUG: Testing endpoint will be: /artifact/model/{real_model_id}/upload")
+
 # Test all endpoints from index.py with real values
 endpoints = [
     ("/health", "GET"),
@@ -125,8 +134,8 @@ endpoints = [
     (f"/artifact/model/{real_model_id}/rate", "GET"),
     (f"/artifact/model/{real_model_id}/lineage", "GET"),
     (f"/artifact/model/{real_model_id}/license-check", "POST"),
-    ("/upload", "GET"),
-    ("/artifact/model/{real_model_id}/upload", "POST"),
+    ("/upload", "POST"),
+    (f"/artifact/model/{real_model_id}/upload", "POST"),
     (f"/artifact/model/{real_model_id}/download", "GET"),
     ("/artifact/ingest", "GET"),
     ("/artifact/ingest", "POST"),
@@ -149,7 +158,12 @@ for endpoint, method in endpoints:
         data = {"user": {"name": "ece30861defaultadminuser", "is_admin": True}, "secret": {"password": "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"}}
     elif endpoint == "/artifact/ingest" and method == "POST":
         data = {"name": real_model_id, "version": real_version}
-    elif f"/artifact/model/{real_model_id}/upload" == endpoint and method == "POST":
+    elif endpoint == "/upload" and method == "POST":
+        if os.path.exists(DEFAULT_UPLOAD_FILE):
+            with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
+                file_content = f.read()
+            files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
+    elif endpoint == f"/artifact/model/{real_model_id}/upload" and method == "POST":
         if os.path.exists(DEFAULT_UPLOAD_FILE):
             with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
                 file_content = f.read()

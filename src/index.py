@@ -113,13 +113,13 @@ def get_artifact(artifact_type: str, id: str):
                 except Exception:
                     return {"metadata": {"name": model["name"], "id": id, "type": artifact_type}, "data": {"version": model["version"]}}
             else:
-                return {"error": f"Artifact '{id}' not found"}, 404
+                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
         else:
             return {"metadata": {"id": id, "type": artifact_type}, "data": {}}
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": f"Failed to get artifact: {str(e)}"}, 500
+        raise HTTPException(status_code=500, detail=f"Failed to get artifact: {str(e)}")
 
 @app.post("/artifact/{artifact_type}")
 async def create_artifact_by_type(artifact_type: str, request: Request):
@@ -201,14 +201,14 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1)
             if not result.get("models"):
-                return {"error": f"Artifact '{id}' not found"}, 404
+                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
         metadata = body.get("metadata", {})
         data = body.get("data", {})
         return {"id": id, "type": artifact_type, "status": "updated", "message": "Artifact updated successfully", "metadata": metadata if metadata else None, "data": data if data else None}
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": f"Failed to update artifact: {str(e)}"}, 500
+        raise HTTPException(status_code=500, detail=f"Failed to update artifact: {str(e)}")
 
 @app.delete("/artifact/{artifact_type}/{id}")
 def delete_artifact(artifact_type: str, id: str):
@@ -221,7 +221,7 @@ def delete_artifact(artifact_type: str, id: str):
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1000)
             if not result.get("models"):
-                return {"error": f"Artifact '{id}' not found"}, 404
+                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             from .services.s3_service import s3, ap_arn
             deleted_count = 0
             for model in result["models"]:
@@ -235,13 +235,13 @@ def delete_artifact(artifact_type: str, id: str):
             if deleted_count > 0:
                 return {"id": id, "type": artifact_type, "status": "deleted", "message": f"Artifact deleted successfully ({deleted_count} version(s) removed)"}
             else:
-                return {"error": f"Failed to delete artifact '{id}'"}, 500
+                raise HTTPException(status_code=500, detail=f"Failed to delete artifact '{id}'")
         else:
             return {"id": id, "type": artifact_type, "status": "deleted", "message": "Artifact deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": f"Failed to delete artifact: {str(e)}"}, 500
+        raise HTTPException(status_code=500, detail=f"Failed to delete artifact: {str(e)}")
 
 @app.get("/artifact/{artifact_type}/{id}/cost")
 def get_artifact_cost(artifact_type: str, id: str, dependency: bool = False):
@@ -249,7 +249,7 @@ def get_artifact_cost(artifact_type: str, id: str, dependency: bool = False):
         if artifact_type == "model":
             sizes = get_model_sizes(id, "1.0.0")
             if "error" in sizes:
-                return {"error": sizes["error"]}, 404
+                raise HTTPException(status_code=404, detail=sizes["error"])
             total_size_mb = sizes.get("full", 0) / (1024 * 1024)
             result = {id: {"total_cost": round(total_size_mb, 2)}}
             if dependency:
@@ -272,7 +272,7 @@ def get_artifact_audit(artifact_type: str, id: str):
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1)
             if not result.get("models"):
-                return {"error": f"Artifact '{id}' not found"}, 404
+                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             try:
                 from .services.s3_service import s3, ap_arn
                 model = result["models"][0]
@@ -304,7 +304,7 @@ def get_model_lineage(id: str):
     try:
         result = get_model_lineage_from_config(id, "1.0.0")
         if "error" in result:
-            return {"error": result["error"]}, 404
+            raise HTTPException(status_code=404, detail=result["error"])
         lineage_map = result.get("lineage_map", {})
         nodes = []
         edges = []
@@ -328,7 +328,7 @@ async def check_model_license(id: str, request: Request):
         name_pattern = f"^{escaped_name}$"
         result = list_models(name_regex=name_pattern, limit=1)
         if not result.get("models"):
-            return {"error": f"Model '{id}' not found"}, 404
+            raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
         model = result["models"][0]
         version = model["version"]
 
@@ -408,7 +408,7 @@ def download_artifact_model(id: str, version: str = "1.0.0", component: str = "f
                 headers={"Content-Disposition": f"attachment; filename={id}_{version}_{component}.zip"}
             )
         else:
-            return {"error": f"Failed to download {id} v{version}"}, 404
+            raise HTTPException(status_code=404, detail=f"Failed to download {id} v{version}")
     except Exception as e:
         return {"error": f"Download failed: {str(e)}"}, 500
 
