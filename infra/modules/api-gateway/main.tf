@@ -197,40 +197,6 @@ resource "aws_api_gateway_resource" "artifact" {
   path_part   = "artifact"
 }
 
-# /artifact/byName/{name}
-resource "aws_api_gateway_resource" "artifact_byname" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.artifact.id
-  path_part   = "byName"
-}
-
-resource "aws_api_gateway_resource" "artifact_byname_name" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.artifact_byname.id
-  path_part   = "{name}"
-}
-
-# /artifact/byRegEx
-resource "aws_api_gateway_resource" "artifact_byregex" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.artifact.id
-  path_part   = "byRegEx"
-}
-
-# /artifact/ingest
-resource "aws_api_gateway_resource" "artifact_ingest" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.artifact.id
-  path_part   = "ingest"
-}
-
-# /artifact/directory
-resource "aws_api_gateway_resource" "artifact_directory" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.artifact.id
-  path_part   = "directory"
-}
-
 # /artifact/{artifact_type}
 resource "aws_api_gateway_resource" "artifact_type" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
@@ -306,26 +272,41 @@ resource "aws_api_gateway_resource" "artifact_model_id_download" {
   path_part   = "download"
 }
 
+# /artifact/ingest
+resource "aws_api_gateway_resource" "artifact_ingest" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.artifact.id
+  path_part   = "ingest"
+}
+
+# /artifact/directory
+resource "aws_api_gateway_resource" "artifact_directory" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.artifact.id
+  path_part   = "directory"
+}
+
+# /artifact/byName/{name}
+resource "aws_api_gateway_resource" "artifact_byname" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.artifact.id
+  path_part   = "byName"
+}
+
+resource "aws_api_gateway_resource" "artifact_byname_name" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.artifact_byname.id
+  path_part   = "{name}"
+}
+
+# /artifact/byRegEx
+resource "aws_api_gateway_resource" "artifact_byregex" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.artifact.id
+  path_part   = "byRegEx"
+}
 
 # ===== METHODS AND INTEGRATIONS =====
-
-# GET /artifact
-resource "aws_api_gateway_method" "artifact_get" {
-  rest_api_id   = aws_api_gateway_rest_api.main_api.id
-  resource_id   = aws_api_gateway_resource.artifact.id
-  http_method   = "GET"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "artifact_get" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  resource_id = aws_api_gateway_resource.artifact.id
-  http_method = aws_api_gateway_method.artifact_get.http_method
-
-  integration_http_method = "GET"
-  type                    = "HTTP_PROXY"
-  uri                     = "${var.validator_service_url}/artifact"
-}
 
 # GET /health
 resource "aws_api_gateway_method" "health_get" {
@@ -1415,8 +1396,6 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.directory_options,
     aws_api_gateway_integration.rate_options,
     aws_api_gateway_integration.upload_options,
-    aws_api_gateway_integration.artifact_get,
-    aws_api_gateway_integration.artifact_type_get,
     aws_api_gateway_integration.artifact_type_post,
     aws_api_gateway_integration.artifact_type_id_get,
     aws_api_gateway_integration.artifact_type_id_put,
@@ -1438,6 +1417,104 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration_response.authenticate_options_200,
     aws_api_gateway_integration_response.artifact_byregex_options_200,
   ]
+
+  triggers = {
+    redeployment = sha1(jsonencode([
+      timestamp(),  # Force redeployment when any change is made
+      # Resources
+      aws_api_gateway_resource.health.id,
+      aws_api_gateway_resource.health_components.id,
+      aws_api_gateway_resource.artifacts.id,
+      aws_api_gateway_resource.reset.id,
+      aws_api_gateway_resource.authenticate.id,
+      aws_api_gateway_resource.tracks.id,
+      aws_api_gateway_resource.admin.id,
+      aws_api_gateway_resource.directory.id,
+      aws_api_gateway_resource.rate.id,
+      aws_api_gateway_resource.upload.id,
+      aws_api_gateway_resource.lineage.id,
+      aws_api_gateway_resource.size_cost.id,
+      aws_api_gateway_resource.ingest.id,
+      aws_api_gateway_resource.download.id,
+      aws_api_gateway_resource.download_model_id.id,
+      aws_api_gateway_resource.download_model_id_version.id,
+      aws_api_gateway_resource.artifact.id,
+      aws_api_gateway_resource.artifact_type.id,
+      aws_api_gateway_resource.artifact_type_id.id,
+      aws_api_gateway_resource.artifact_type_id_cost.id,
+      aws_api_gateway_resource.artifact_type_id_audit.id,
+      aws_api_gateway_resource.artifact_model.id,
+      aws_api_gateway_resource.artifact_model_id.id,
+      aws_api_gateway_resource.artifact_model_id_rate.id,
+      aws_api_gateway_resource.artifact_model_id_lineage.id,
+      aws_api_gateway_resource.artifact_model_id_license_check.id,
+      aws_api_gateway_resource.artifact_model_id_upload.id,
+      aws_api_gateway_resource.artifact_model_id_download.id,
+      aws_api_gateway_resource.artifact_ingest.id,
+      aws_api_gateway_resource.artifact_directory.id,
+      aws_api_gateway_resource.artifact_byname.id,
+      aws_api_gateway_resource.artifact_byname_name.id,
+      aws_api_gateway_resource.artifact_byregex.id,
+      # Methods
+      aws_api_gateway_method.health_get.id,
+      aws_api_gateway_method.health_components_get.id,
+      aws_api_gateway_method.artifacts_post.id,
+      aws_api_gateway_method.reset_delete.id,
+      aws_api_gateway_method.authenticate_put.id,
+      aws_api_gateway_method.tracks_get.id,
+      aws_api_gateway_method.admin_get.id,
+      aws_api_gateway_method.directory_get.id,
+      aws_api_gateway_method.rate_get.id,
+      aws_api_gateway_method.upload_get.id,
+      aws_api_gateway_method.upload_post.id,
+      aws_api_gateway_method.admin_options.id,
+      aws_api_gateway_method.directory_options.id,
+      aws_api_gateway_method.rate_options.id,
+      aws_api_gateway_method.upload_options.id,
+      aws_api_gateway_method.artifact_type_post.id,
+      aws_api_gateway_method.artifact_type_id_get.id,
+      aws_api_gateway_method.artifact_type_id_put.id,
+      aws_api_gateway_method.artifact_type_id_delete.id,
+      aws_api_gateway_method.artifact_type_id_cost_get.id,
+      aws_api_gateway_method.artifact_type_id_audit_get.id,
+      aws_api_gateway_method.artifact_model_id_rate_get.id,
+      aws_api_gateway_method.artifact_model_id_lineage_get.id,
+      aws_api_gateway_method.artifact_model_id_license_check_post.id,
+      aws_api_gateway_method.artifact_model_id_upload_post.id,
+      aws_api_gateway_method.artifact_model_id_download_get.id,
+      aws_api_gateway_method.artifact_ingest_get.id,
+      aws_api_gateway_method.artifact_ingest_post.id,
+      aws_api_gateway_method.artifact_directory_get.id,
+      aws_api_gateway_method.artifact_byname_name_get.id,
+      aws_api_gateway_method.artifact_byregex_post.id,
+      aws_api_gateway_method.root_get.id,
+      # Integrations
+      aws_api_gateway_integration.root_get.id,
+      aws_api_gateway_integration.health_get.id,
+      aws_api_gateway_integration.health_components_get.id,
+      aws_api_gateway_integration.artifacts_post.id,
+      aws_api_gateway_integration.reset_delete.id,
+      aws_api_gateway_integration.authenticate_put.id,
+      aws_api_gateway_integration.tracks_get.id,
+      aws_api_gateway_integration.artifact_type_get.id,
+      aws_api_gateway_integration.artifact_type_post.id,
+      aws_api_gateway_integration.artifact_type_id_get.id,
+      aws_api_gateway_integration.artifact_type_id_put.id,
+      aws_api_gateway_integration.artifact_type_id_delete.id,
+      aws_api_gateway_integration.artifact_type_id_cost_get.id,
+      aws_api_gateway_integration.artifact_type_id_audit_get.id,
+      aws_api_gateway_integration.artifact_model_id_rate_get.id,
+      aws_api_gateway_integration.artifact_model_id_lineage_get.id,
+      aws_api_gateway_integration.artifact_model_id_license_check_post.id,
+      aws_api_gateway_integration.artifact_model_id_upload_post.id,
+      aws_api_gateway_integration.artifact_model_id_download_get.id,
+      aws_api_gateway_integration.artifact_ingest_get.id,
+      aws_api_gateway_integration.artifact_ingest_post.id,
+      aws_api_gateway_integration.artifact_directory_get.id,
+      aws_api_gateway_integration.artifact_byname_name_get.id,
+      aws_api_gateway_integration.artifact_byregex_post.id,
+    ]))
+  }
 
   lifecycle {
     create_before_destroy = true
