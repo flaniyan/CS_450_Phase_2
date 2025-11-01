@@ -517,6 +517,9 @@ resource "aws_api_gateway_integration" "upload_post" {
   integration_http_method = "POST"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/upload"
+  
+  content_handling       = "CONVERT_TO_BINARY"
+  passthrough_behavior   = "WHEN_NO_MATCH"
 }
 
 # OPTIONS /admin
