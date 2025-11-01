@@ -527,56 +527,26 @@ def get_model_lineage(id: str):
 @app.post("/artifact/model/{id}/license-check")
 async def check_model_license(id: str, request: Request):
     try:
-        from .services.s3_service import list_models, search_model_card_content, s3, ap_arn
-        from botocore.exceptions import ClientError
+        from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+        if not isinstance(body, dict):
+            form = await request.form()
+            body = dict(form)
         github_url = body.get("github_url", "")
         if not github_url:
             raise HTTPException(status_code=400, detail="github_url is required")
-
-        import re
-        escaped_name = re.escape(id)
-        name_pattern = f"^{escaped_name}$"
-        result = list_models(name_regex=name_pattern, limit=1)
-        version = None
-        if result.get("models"):
-            version = result["models"][0]["version"]
-        else:
-            versions = ["1.0.0", "main", "latest"]
-            for v in versions:
-                try:
-                    s3_key = f"models/{id}/{v}/model.zip"
-                    s3.head_object(Bucket=ap_arn, Key=s3_key)
-                    version = v
-                    break
-                except ClientError:
-                    continue
-        if not version:
-            raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
-        s3_key = f"models/{id}/{version}/model.zip"
-        try:
-            s3.head_object(Bucket=ap_arn, Key=s3_key)
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
-            raise HTTPException(status_code=500, detail=f"Failed to check model: {str(e)}")
-
-        license_patterns = [
-            r'license["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
-            r'licenses?["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
-            r'"license"\s*:\s*"([^"]+)"'
-        ]
-
-        has_license_info = False
-        for pattern in license_patterns:
-            try:
-                if search_model_card_content(id, version, pattern):
-                    has_license_info = True
-                    break
-            except:
-                pass
-
-        return True
+        use_case = body.get("use_case", "fine-tune+inference")
+        model_license = extract_model_license(id)
+        github_license = extract_github_license(github_url)
+        compatibility_result = check_license_compatibility(model_license, github_license, use_case)
+        return {
+            "compatible": compatibility_result["compatible"],
+            "model_license": compatibility_result["model_license"],
+            "github_license": compatibility_result["github_license"],
+            "use_case": compatibility_result["use_case"],
+            "reason": compatibility_result["reason"],
+            "restrictions": compatibility_result["restrictions"]
+        }
     except HTTPException:
         raise
     except Exception as e:
