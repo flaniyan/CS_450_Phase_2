@@ -69,10 +69,25 @@ resource "aws_api_gateway_integration_response" "root_get_200" {
       version = "1.0.0"
       endpoints = {
         health = "/health"
+        health_components = "/health/components"
+        authenticate = "/authenticate"
         artifacts = "/artifacts"
+        reset = "/reset"
+        artifact_by_type_and_id = "/artifact/{artifact_type}/{id}"
+        artifact_by_type = "/artifact/{artifact_type}"
+        artifact_by_name = "/artifact/byName/{name}"
+        artifact_by_regex = "/artifact/byRegEx"
+        artifact_cost = "/artifact/{artifact_type}/{id}/cost"
+        artifact_audit = "/artifact/{artifact_type}/{id}/audit"
+        model_rate = "/artifact/model/{id}/rate"
+        model_lineage = "/artifact/model/{id}/lineage"
+        model_license_check = "/artifact/model/{id}/license-check"
+        model_download = "/artifact/model/{id}/download"
+        artifact_ingest = "/artifact/ingest"
+        artifact_directory = "/artifact/directory"
+        upload = "/upload"
         admin = "/admin"
         directory = "/directory"
-        upload = "/upload"
       }
     })
   }
@@ -1331,6 +1346,13 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
 # ===== API GATEWAY DEPLOYMENT =====
 
 resource "aws_api_gateway_deployment" "main_deployment" {
+  depends_on = [
+    aws_api_gateway_method.root_get,
+    aws_api_gateway_integration.root_get,
+    aws_api_gateway_method_response.root_get_200,
+    aws_api_gateway_integration_response.root_get_200,
+  ]
+  
   rest_api_id = aws_api_gateway_rest_api.main_api.id
 
   triggers = {
@@ -1431,10 +1453,6 @@ resource "aws_api_gateway_deployment" "main_deployment" {
   }
 
   depends_on = [
-    aws_api_gateway_method.root_get,
-    aws_api_gateway_integration.root_get,
-    aws_api_gateway_method_response.root_get_200,
-    aws_api_gateway_integration_response.root_get_200,
     aws_api_gateway_integration.health_get,
     aws_api_gateway_integration.health_components_get,
     aws_api_gateway_integration.artifacts_post,

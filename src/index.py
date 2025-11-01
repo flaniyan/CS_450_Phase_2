@@ -354,30 +354,27 @@ async def check_model_license(id: str, request: Request):
         return {"error": f"Failed to check license: {str(e)}"}, 500
 
 @app.post("/upload")
-async def upload_file(request: Request, file: UploadFile = File(...), model_id: str = None, version: str = None):
+async def upload_artifact_model(request: Request, file: UploadFile = File(...), model_id: str = None, version: str = None):
     try:
-        if not file.filename or not file.filename.endswith('.zip'):
-            return {"error": "Only ZIP files are supported"}, 400
-        filename = file.filename.replace('.zip', '')
-        effective_model_id = model_id or filename
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="File is required")
+        if not file.filename.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="Only ZIP files are supported")
+        filename = file.filename.replace('.zip', '').strip()
+        effective_model_id = model_id or filename if filename else "uploaded-model"
         effective_version = version or "1.0.0"
         file_content = await file.read()
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File content is empty")
         result = upload_model(file_content, effective_model_id, effective_version)
-        return {"message": "Upload successful", "details": result}
+        return {"message": "Upload successful", "details": result, "model_id": effective_model_id, "version": effective_version}
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": f"Upload failed: {str(e)}"}, 500
-
-@app.post("/artifact/model/{id}/upload")
-async def upload_artifact_model(id: str, request: Request, file: UploadFile = File(...), version: str = None):
-    try:
-        if not file.filename or not file.filename.endswith('.zip'):
-            return {"error": "Only ZIP files are supported"}, 400
-        effective_version = version or "1.0.0"
-        file_content = await file.read()
-        result = upload_model(file_content, id, effective_version)
-        return {"message": "Upload successful", "details": result, "model_id": id, "version": effective_version}
-    except Exception as e:
-        return {"error": f"Upload failed: {str(e)}"}, 500
+        import traceback
+        error_msg = f"Upload failed: {str(e)}"
+        print(f"Upload error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/artifact/model/{id}/download")
 def download_artifact_model(id: str, version: str = "1.0.0", component: str = "full"):
