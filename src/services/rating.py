@@ -35,8 +35,12 @@ class RateRequest(BaseModel):
 
 def analyze_model_content(target: str) -> Dict[str, Any]:
     try:
-        from ..services.s3_service import download_model, extract_config_from_model
-        model_content = download_model(target, "1.0.0", "full")
+        from ..services.s3_service import download_model, extract_config_from_model, download_from_huggingface
+        model_content = None
+        try:
+            model_content = download_model(target, "1.0.0", "full")
+        except:
+            pass
         if not model_content:
             for version in ["1.0", "latest", "main"]:
                 try:
@@ -45,15 +49,27 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
                         break
                 except:
                     continue
+        clean_model_id = target
+        downloaded_from_hf = False
         if not model_content:
-            raise ValueError(f"No model content found for {target}. Cannot compute metrics without model data.")
+            try:
+                if target.startswith("https://huggingface.co/"):
+                    clean_model_id = target.replace("https://huggingface.co/", "")
+                elif target.startswith("http://huggingface.co/"):
+                    clean_model_id = target.replace("http://huggingface.co/", "")
+                if clean_model_id != target:
+                    model_content = download_from_huggingface(clean_model_id, "main")
+                    downloaded_from_hf = True
+            except Exception as hf_error:
+                raise ValueError(f"No model content found for {target} in S3 or HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}")
+        effective_model_id = clean_model_id if clean_model_id != target else target
         with tempfile.TemporaryDirectory() as temp_dir:
-            zip_path = os.path.join(temp_dir, f"{target}.zip")
+            zip_path = os.path.join(temp_dir, f"{effective_model_id}.zip")
             with open(zip_path, 'wb') as f:
                 f.write(model_content)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
-            meta = create_metadata_from_files(temp_dir, target)
+            meta = create_metadata_from_files(temp_dir, effective_model_id)
             config = extract_config_from_model(model_content)
             if config:
                 meta["config"] = config
@@ -61,7 +77,20 @@ def analyze_model_content(target: str) -> Dict[str, Any]:
             meta["pushed_at"] = None
             meta["github_url"] = ""
             meta["parents"] = []
-            meta["license"] = meta.get("license_text", "")[:100].lower() if meta.get("license_text") else ""
+            meta["full_name"] = target
+            meta["stars"] = 0
+            meta["forks"] = 0
+            meta["has_wiki"] = False
+            meta["has_pages"] = False
+            meta["language"] = "python"
+            meta["open_issues_count"] = 0
+            license_text_content = meta.get("license_text", "")
+            if license_text_content:
+                meta["license"] = license_text_content[:100].lower()
+            else:
+                meta["license"] = ""
+            if not meta.get("readme_text"):
+                print(f"[RATE] Warning: No README text found for {target}")
             from ..acmecli.metrics.license_metric import LicenseMetric
             from ..acmecli.metrics.ramp_up_metric import RampUpMetric
             from ..acmecli.metrics.bus_factor_metric import BusFactorMetric
@@ -95,11 +124,18 @@ def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]
             file_path = os.path.relpath(os.path.join(root, file), temp_dir)
             meta["repo_files"].add(file_path.replace("\\", "/"))
     readme_files = glob.glob(os.path.join(temp_dir, "**", "*readme*"), recursive=True)
+    if not readme_files:
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "**", "README*"), recursive=True))
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "**", "readme*"), recursive=True))
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "README*"), recursive=False))
     for readme_file in readme_files:
         try:
             with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
-                meta["readme_text"] += f.read() + "\n"
-        except:
+                content = f.read()
+                if content:
+                    meta["readme_text"] += content + "\n"
+        except Exception as e:
+            print(f"Warning: Could not read README file {readme_file}: {e}")
             pass
     license_files = glob.glob(os.path.join(temp_dir, "**", "*license*"), recursive=True)
     license_files.extend(glob.glob(os.path.join(temp_dir, "**", "*licence*"), recursive=True))
