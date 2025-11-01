@@ -1346,14 +1346,49 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
 # ===== API GATEWAY DEPLOYMENT =====
 
 resource "aws_api_gateway_deployment" "main_deployment" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+
   depends_on = [
     aws_api_gateway_method.root_get,
     aws_api_gateway_integration.root_get,
     aws_api_gateway_method_response.root_get_200,
     aws_api_gateway_integration_response.root_get_200,
+    aws_api_gateway_integration.health_get,
+    aws_api_gateway_integration.health_components_get,
+    aws_api_gateway_integration.artifacts_post,
+    aws_api_gateway_integration.reset_delete,
+    aws_api_gateway_integration.authenticate_put,
+    aws_api_gateway_integration.tracks_get,
+    aws_api_gateway_integration.admin_get,
+    aws_api_gateway_integration.directory_get,
+    aws_api_gateway_integration.rate_get,
+    aws_api_gateway_integration.upload_get,
+    aws_api_gateway_integration.upload_post,
+    aws_api_gateway_integration.admin_options,
+    aws_api_gateway_integration.directory_options,
+    aws_api_gateway_integration.rate_options,
+    aws_api_gateway_integration.upload_options,
+    aws_api_gateway_integration.artifact_type_post,
+    aws_api_gateway_integration.artifact_type_id_get,
+    aws_api_gateway_integration.artifact_type_id_put,
+    aws_api_gateway_integration.artifact_type_id_delete,
+    aws_api_gateway_integration.artifact_type_id_cost_get,
+    aws_api_gateway_integration.artifact_type_id_audit_get,
+    aws_api_gateway_integration.artifact_model_id_rate_get,
+    aws_api_gateway_integration.artifact_model_id_lineage_get,
+    aws_api_gateway_integration.artifact_model_id_license_check_post,
+    aws_api_gateway_integration.artifact_model_id_upload_post,
+    aws_api_gateway_integration.artifact_model_id_download_get,
+    aws_api_gateway_integration.artifact_ingest_get,
+    aws_api_gateway_integration.artifact_ingest_post,
+    aws_api_gateway_integration.artifact_directory_get,
+    aws_api_gateway_integration.artifact_byname_name_get,
+    aws_api_gateway_integration.artifact_byregex_post,
+    aws_api_gateway_integration_response.artifacts_options_200,
+    aws_api_gateway_integration_response.artifact_type_options_200,
+    aws_api_gateway_integration_response.authenticate_options_200,
+    aws_api_gateway_integration_response.artifact_byregex_options_200,
   ]
-  
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
 
   triggers = {
     redeployment = sha1(jsonencode([
@@ -1451,44 +1486,6 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_integration.artifact_byregex_post.id,
     ]))
   }
-
-  depends_on = [
-    aws_api_gateway_integration.health_get,
-    aws_api_gateway_integration.health_components_get,
-    aws_api_gateway_integration.artifacts_post,
-    aws_api_gateway_integration.reset_delete,
-    aws_api_gateway_integration.authenticate_put,
-    aws_api_gateway_integration.tracks_get,
-    aws_api_gateway_integration.admin_get,
-    aws_api_gateway_integration.directory_get,
-    aws_api_gateway_integration.rate_get,
-    aws_api_gateway_integration.upload_get,
-    aws_api_gateway_integration.upload_post,
-    aws_api_gateway_integration.admin_options,
-    aws_api_gateway_integration.directory_options,
-    aws_api_gateway_integration.rate_options,
-    aws_api_gateway_integration.upload_options,
-    aws_api_gateway_integration.artifact_type_post,
-    aws_api_gateway_integration.artifact_type_id_get,
-    aws_api_gateway_integration.artifact_type_id_put,
-    aws_api_gateway_integration.artifact_type_id_delete,
-    aws_api_gateway_integration.artifact_type_id_cost_get,
-    aws_api_gateway_integration.artifact_type_id_audit_get,
-    aws_api_gateway_integration.artifact_model_id_rate_get,
-    aws_api_gateway_integration.artifact_model_id_lineage_get,
-    aws_api_gateway_integration.artifact_model_id_license_check_post,
-    aws_api_gateway_integration.artifact_model_id_upload_post,
-    aws_api_gateway_integration.artifact_model_id_download_get,
-    aws_api_gateway_integration.artifact_ingest_get,
-    aws_api_gateway_integration.artifact_ingest_post,
-    aws_api_gateway_integration.artifact_directory_get,
-    aws_api_gateway_integration.artifact_byname_name_get,
-    aws_api_gateway_integration.artifact_byregex_post,
-    aws_api_gateway_integration_response.artifacts_options_200,
-    aws_api_gateway_integration_response.artifact_type_options_200,
-    aws_api_gateway_integration_response.authenticate_options_200,
-    aws_api_gateway_integration_response.artifact_byregex_options_200,
-  ]
 
   lifecycle {
     create_before_destroy = true
