@@ -150,7 +150,7 @@ async def search_artifacts_by_regex(request: Request):
         regex_pattern = search_criteria.get("regex")
         if not regex_pattern:
             raise HTTPException(status_code=400, detail="regex field is required")
-        result = list_models(name_regex=regex_pattern, model_regex=regex_pattern, limit=1000)
+        result = list_models(name_regex=regex_pattern, limit=1000)
         artifacts = []
         for model in result.get("models", []):
             artifacts.append({"name": model["name"], "id": model.get("id", model["name"]), "type": "model"})
