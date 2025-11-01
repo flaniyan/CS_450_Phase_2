@@ -1331,13 +1331,6 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
 # ===== API GATEWAY DEPLOYMENT =====
 
 resource "aws_api_gateway_deployment" "main_deployment" {
-  depends_on = [
-    aws_api_gateway_method.root_get,
-    aws_api_gateway_integration.root_get,
-    aws_api_gateway_method_response.root_get_200,
-    aws_api_gateway_integration_response.root_get_200,
-  ]
-  
   rest_api_id = aws_api_gateway_rest_api.main_api.id
 
   triggers = {
@@ -1438,6 +1431,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
   }
 
   depends_on = [
+    aws_api_gateway_method.root_get,
+    aws_api_gateway_integration.root_get,
+    aws_api_gateway_method_response.root_get_200,
+    aws_api_gateway_integration_response.root_get_200,
     aws_api_gateway_integration.health_get,
     aws_api_gateway_integration.health_components_get,
     aws_api_gateway_integration.artifacts_post,
