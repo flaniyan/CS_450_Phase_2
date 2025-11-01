@@ -3,13 +3,15 @@ import sys
 import os
 import json
 
-BASE_URL = "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/"
-DEFAULT_UPLOAD_FILE = r"C:\Users\mdali\Downloads\hugging-face-model_1.0.0_full_1.0.0_full.zip"
+BASE_URL = os.getenv("API_GATEWAY_URL", "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/")
+DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", "")
+DEFAULT_TEST_MODEL = os.getenv("TEST_MODEL_ID", "MiniMaxAI/MiniMax-M2")
 
 def upload_test_model():
     """Upload a test model using DEFAULT_UPLOAD_FILE via /artifact/model/{id}/upload"""
-    if not os.path.exists(DEFAULT_UPLOAD_FILE):
-        print(f"Upload file not found: {DEFAULT_UPLOAD_FILE}")
+    if not DEFAULT_UPLOAD_FILE or not os.path.exists(DEFAULT_UPLOAD_FILE):
+        if DEFAULT_UPLOAD_FILE:
+            print(f"Upload file not found: {DEFAULT_UPLOAD_FILE}")
         return None
     try:
         filename = os.path.basename(DEFAULT_UPLOAD_FILE).replace('.zip', '').replace('_', '-')
@@ -160,7 +162,9 @@ for endpoint, method in endpoints:
     elif endpoint == "/authenticate" and method == "PUT":
         data = {"user": {"name": "ece30861defaultadminuser", "is_admin": True}, "secret": {"password": "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"}}
     elif endpoint == "/artifact/ingest" and method == "POST":
-        data = {"name": real_model_id, "version": real_version}
+        ingest_model_id = os.getenv("INGEST_MODEL_ID", DEFAULT_TEST_MODEL)
+        ingest_version = os.getenv("INGEST_MODEL_VERSION", "main")
+        data = {"name": ingest_model_id, "version": ingest_version}
     elif endpoint == "/upload" and method == "POST":
         if os.path.exists(DEFAULT_UPLOAD_FILE):
             with open(DEFAULT_UPLOAD_FILE, 'rb') as f:

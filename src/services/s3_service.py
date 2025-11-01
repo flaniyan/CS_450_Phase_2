@@ -20,8 +20,8 @@ from ..acmecli.types import MetricValue
 from ..acmecli.hf_handler import fetch_hf_metadata
 from ..acmecli.metrics import METRIC_FUNCTIONS
 
-region = "us-east-1"
-access_point_name = "cs450-s3"
+region = os.getenv("AWS_REGION", "us-east-1")
+access_point_name = os.getenv("S3_ACCESS_POINT_NAME", "cs450-s3")
 
 # Initialize AWS clients with error handling for development
 try:
@@ -39,8 +39,11 @@ except Exception as e:
     # AWS not available - set dummy values for development
     print(f"AWS initialization failed: {e}")
     sts = None
-    account_id = "838693051036"  # Use the actual account ID from the URL
-    ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    account_id = os.getenv("AWS_ACCOUNT_ID", "")
+    if account_id:
+        ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    else:
+        ap_arn = None
     s3 = None
     aws_available = False
 
@@ -511,7 +514,20 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             meta["pushed_at"] = None
             meta["github_url"] = ""
             meta["parents"] = []
-            meta["license"] = meta.get("license_text", "")[:100].lower() if meta.get("license_text") else ""
+            meta["full_name"] = model_id
+            meta["stars"] = 0
+            meta["forks"] = 0
+            meta["has_wiki"] = False
+            meta["has_pages"] = False
+            meta["language"] = "python"
+            meta["open_issues_count"] = 0
+            license_text_content = meta.get("license_text", "")
+            if license_text_content:
+                meta["license"] = license_text_content[:100].lower()
+            else:
+                meta["license"] = ""
+            if not meta.get("readme_text"):
+                print(f"[INGEST] Warning: No README text found for {model_id}")
             
             print(f"[INGEST] Computing metrics...")
             metrics_start = time.time()
