@@ -255,9 +255,10 @@ def get_artifact(artifact_type: str, id: str):
                 result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                 if result.get("models"):
                     for model in result["models"]:
+                        model_name = model.get("name") or model.get("id") or id
                         v = model["version"]
                         try:
-                            s3_key = f"models/{id}/{v}/model.zip"
+                            s3_key = f"models/{model_name}/{v}/model.zip"
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             version = v
                             found = True
@@ -265,7 +266,14 @@ def get_artifact(artifact_type: str, id: str):
                         except ClientError as e:
                             error_code = e.response.get('Error', {}).get('Code', '')
                             if error_code == 'NoSuchKey' or error_code == '404':
-                                continue
+                                try:
+                                    s3_key_alt = f"models/{id}/{v}/model.zip"
+                                    s3.head_object(Bucket=ap_arn, Key=s3_key_alt)
+                                    version = v
+                                    found = True
+                                    break
+                                except ClientError:
+                                    continue
                             else:
                                 print(f"Unexpected error checking {s3_key}: {error_code}")
             except Exception as e:
