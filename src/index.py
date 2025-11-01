@@ -503,7 +503,8 @@ def get_artifact_audit(artifact_type: str, id: str):
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str):
     try:
-        rating = run_scorer(id)
+        from .services.rating import analyze_model_content, alias
+        rating = analyze_model_content(id)
         return {"name": id, "net_score": alias(rating, "net_score", "NetScore", "netScore") or 0.0, "ramp_up_time": alias(rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0, "bus_factor": alias(rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor") or 0.0, "performance_claims": alias(rating, "performance_claims", "PerformanceClaims", "score_performance_claims") or 0.0, "license": alias(rating, "license", "License", "score_license") or 0.0, "dataset_and_code_score": alias(rating, "dataset_code", "DatasetCode", "score_available_dataset_and_code") or 0.0, "dataset_quality": alias(rating, "dataset_quality", "DatasetQuality", "score_dataset_quality") or 0.0, "code_quality": alias(rating, "code_quality", "CodeQuality", "score_code_quality") or 0.0, "reproducibility": alias(rating, "reproducibility", "Reproducibility", "score_reproducibility") or 0.0, "reviewedness": alias(rating, "reviewedness", "Reviewedness", "score_reviewedness") or 0.0, "tree_score": alias(rating, "treescore", "Treescore", "score_treescore") or 0.0}
     except Exception as e:
         return {"error": f"Failed to get model rate: {str(e)}"}, 500
