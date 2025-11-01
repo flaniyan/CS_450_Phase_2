@@ -23,6 +23,61 @@ resource "aws_api_gateway_rest_api" "main_api" {
 
 # ===== ROOT LEVEL RESOURCES =====
 
+# GET / (root path)
+resource "aws_api_gateway_method" "root_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_rest_api.main_api.root_resource_id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "root_get" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
+  http_method = aws_api_gateway_method.root_get.http_method
+
+  type = "MOCK"
+  request_templates = {
+    "application/json" = jsonencode({ statusCode = 200 })
+  }
+}
+
+resource "aws_api_gateway_method_response" "root_get_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
+  http_method = aws_api_gateway_method.root_get.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Content-Type" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "root_get_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
+  http_method = aws_api_gateway_method.root_get.http_method
+  status_code = aws_api_gateway_method_response.root_get_200.status_code
+
+  response_parameters = {
+    "method.response.header.Content-Type" = "'application/json'"
+  }
+
+  response_templates = {
+    "application/json" = jsonencode({
+      message = "ACME Registry API"
+      version = "1.0.0"
+      endpoints = {
+        health = "/health"
+        artifacts = "/artifacts"
+        admin = "/admin"
+        directory = "/directory"
+        upload = "/upload"
+      }
+    })
+  }
+}
+
 resource "aws_api_gateway_resource" "health" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
@@ -1273,6 +1328,13 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
 # ===== API GATEWAY DEPLOYMENT =====
 
 resource "aws_api_gateway_deployment" "main_deployment" {
+  depends_on = [
+    aws_api_gateway_method.root_get,
+    aws_api_gateway_integration.root_get,
+    aws_api_gateway_method_response.root_get_200,
+    aws_api_gateway_integration_response.root_get_200,
+  ]
+  
   rest_api_id = aws_api_gateway_rest_api.main_api.id
 
   triggers = {
@@ -1344,7 +1406,9 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_method.artifact_directory_get.id,
       aws_api_gateway_method.artifact_byname_name_get.id,
       aws_api_gateway_method.artifact_byregex_post.id,
+      aws_api_gateway_method.root_get.id,
       # Integrations
+      aws_api_gateway_integration.root_get.id,
       aws_api_gateway_integration.health_get.id,
       aws_api_gateway_integration.health_components_get.id,
       aws_api_gateway_integration.artifacts_post.id,
