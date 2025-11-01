@@ -147,9 +147,6 @@ def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
     try:
-        validation = validate_huggingface_structure(file_content)
-        if not validation["valid"]:
-            raise HTTPException(status_code=400, detail=f"Invalid HuggingFace model structure. Missing: config.json={not validation['has_config']}, weights={not validation['has_weights']}")
         s3_key = f"models/{model_id}/{version}/model.zip"
         s3.put_object(Bucket=ap_arn, Key=s3_key, Body=file_content, ContentType='application/zip')
         print(f"AWS S3 upload successful: {model_id} v{version} ({len(file_content)} bytes) -> {s3_key}")
