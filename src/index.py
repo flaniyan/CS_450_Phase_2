@@ -376,6 +376,27 @@ async def upload_artifact_model(request: Request, file: UploadFile = File(...), 
         print(f"Upload error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
+@app.post("/artifact/model/{id}/upload")
+async def upload_artifact_model_by_id(id: str, request: Request, file: UploadFile = File(...), version: str = None):
+    try:
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="File is required")
+        if not file.filename.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="Only ZIP files are supported")
+        effective_version = version or "1.0.0"
+        file_content = await file.read()
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File content is empty")
+        result = upload_model(file_content, id, effective_version)
+        return {"message": "Upload successful", "details": result, "model_id": id, "version": effective_version}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_msg = f"Upload failed: {str(e)}"
+        print(f"Upload error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
+
 @app.get("/artifact/model/{id}/download")
 def download_artifact_model(id: str, version: str = "1.0.0", component: str = "full"):
     try:
