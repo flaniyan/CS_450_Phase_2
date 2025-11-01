@@ -118,13 +118,16 @@ print(f"DEBUG: Testing endpoint will be: /artifact/model/{real_model_id}/upload"
 
 # Test all endpoints from index.py with real values
 endpoints = [
+    ("/", "GET"),
     ("/health", "GET"),
     ("/health/components", "GET"),
     ("/authenticate", "PUT"),
     ("/artifacts", "POST"),
     ("/reset", "DELETE"),
-    (f"/artifact/{artifact_type}/{real_model_id}", "GET"),
+    ("/artifact", "GET"),
+    (f"/artifact/{artifact_type}", "GET"),
     (f"/artifact/{artifact_type}", "POST"),
+    (f"/artifact/{artifact_type}/{real_model_id}", "GET"),
     (f"/artifact/byName/{model_name}", "GET"),
     ("/artifact/byRegEx", "POST"),
     (f"/artifact/{artifact_type}/{real_model_id}", "PUT"),
@@ -140,6 +143,7 @@ endpoints = [
     ("/artifact/ingest", "GET"),
     ("/artifact/ingest", "POST"),
     ("/artifact/directory", "GET"),
+    ("/admin", "GET"),
 ]
 
 results = []

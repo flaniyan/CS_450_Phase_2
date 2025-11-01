@@ -27,6 +27,10 @@ class AuthRequest(BaseModel):
 app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+@app.get("/")
+def root():
+    return {"message": "ACME Registry API", "version": "1.0.0", "endpoints": {"health": "/health", "health_components": "/health/components", "authenticate": "/authenticate", "artifacts": "/artifacts", "reset": "/reset", "artifact_by_type_and_id": "/artifact/{artifact_type}/{id}", "artifact_by_type": "/artifact/{artifact_type}", "artifact_by_name": "/artifact/byName/{name}", "artifact_by_regex": "/artifact/byRegEx", "artifact_cost": "/artifact/{artifact_type}/{id}/cost", "artifact_audit": "/artifact/{artifact_type}/{id}/audit", "model_rate": "/artifact/model/{id}/rate", "model_lineage": "/artifact/model/{id}/lineage", "model_license_check": "/artifact/model/{id}/license-check", "model_download": "/artifact/model/{id}/download", "artifact_ingest": "/artifact/ingest", "artifact_directory": "/artifact/directory", "upload": "/upload", "admin": "/admin", "directory": "/directory"}}
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -97,29 +101,74 @@ def reset_system():
 @app.get("/artifact/{artifact_type}/{id}")
 def get_artifact(artifact_type: str, id: str):
     try:
-        from .services.s3_service import list_models
+        from .services.s3_service import list_models, s3, ap_arn
         from botocore.exceptions import ClientError
         if artifact_type == "model":
-            import re
-            escaped_name = re.escape(id)
-            name_pattern = f"^{escaped_name}$"
-            result = list_models(name_regex=name_pattern, limit=1000)
+            versions_to_try = []
+            result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
             if result.get("models"):
-                model = result["models"][0]
+                versions_to_try = [model["version"] for model in result["models"]]
+            if not versions_to_try:
+                versions_to_try = ["1.0.0", "main", "latest"]
+            version = None
+            found = False
+            for v in versions_to_try:
                 try:
-                    from .services.s3_service import s3
-                    s3_key = f"models/{id}/{model['version']}/model.zip"
-                    return {"metadata": {"name": model["name"], "id": id, "type": artifact_type}, "data": {"version": model["version"], "url": f"https://huggingface.co/{id}"}}
-                except Exception:
-                    return {"metadata": {"name": model["name"], "id": id, "type": artifact_type}, "data": {"version": model["version"]}}
-            else:
+                    s3_key = f"models/{id}/{v}/model.zip"
+                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                    version = v
+                    found = True
+                    break
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    if error_code != 'NoSuchKey' and error_code != '404':
+                        raise
+                    continue
+            if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
+            model = {"name": id, "version": version}
+            return {"metadata": {"name": model["name"], "id": id, "type": artifact_type}, "data": {"version": version, "url": f"https://huggingface.co/{id}"}}
         else:
-            return {"metadata": {"id": id, "type": artifact_type}, "data": {}}
+            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get artifact: {str(e)}")
+
+@app.get("/artifact")
+def get_artifacts():
+    try:
+        from .services.s3_service import list_models
+        result = list_models(limit=1000)
+        artifacts = []
+        for model in result.get("models", []):
+            artifacts.append({"metadata": {"name": model["name"], "id": model["name"], "type": "model"}, "data": {"version": model["version"]}})
+        return {"artifacts": artifacts, "total": len(artifacts), "next_token": result.get("next_token")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get artifacts: {str(e)}")
+
+@app.get("/artifact/{artifact_type}")
+def get_artifacts_by_type(artifact_type: str):
+    try:
+        from .services.s3_service import list_models
+        if artifact_type == "model":
+            result = list_models(limit=1000)
+            artifacts = []
+            for model in result.get("models", []):
+                artifacts.append({"metadata": {"name": model["name"], "id": model["name"], "type": artifact_type}, "data": {"version": model["version"]}})
+            return {"artifacts": artifacts, "total": len(artifacts), "next_token": result.get("next_token")}
+        else:
+            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get artifacts by type: {str(e)}")
+
+@app.options("/artifact/{artifact_type}")
+def options_artifact_type(artifact_type: str):
+    return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS, POST", "Access-Control-Allow-Headers": "*"})
 
 @app.post("/artifact/{artifact_type}")
 async def create_artifact_by_type(artifact_type: str, request: Request):
@@ -134,11 +183,21 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 result = model_ingestion(model_id, version)
                 return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url}}
             else:
-                model_id = url.split("/")[-1] if url else f"{artifact_type}-new"
-                return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url}}
+                if not url:
+                    raise HTTPException(status_code=400, detail="URL is required for non-HuggingFace models")
+                from .services.s3_service import list_models
+                import re
+                model_id = url.split("/")[-1] if "/" in url else url
+                escaped_name = re.escape(model_id)
+                name_pattern = f"^{escaped_name}$"
+                result = list_models(name_regex=name_pattern, limit=1)
+                if result.get("models"):
+                    version = result["models"][0].get("version", "1.0.0")
+                    return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url, "version": version}}
+                else:
+                    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found. Use HuggingFace URL or upload model first.")
         else:
-            artifact_id = url.split("/")[-1] if url else f"{artifact_type}-new"
-            return {"metadata": {"name": artifact_id, "id": artifact_id, "type": artifact_type}, "data": {"url": url}}
+            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
     except HTTPException:
         raise
     except Exception as e:
@@ -193,15 +252,46 @@ async def search_artifacts_by_regex(request: Request):
 @app.put("/artifact/{artifact_type}/{id}")
 async def update_artifact(artifact_type: str, id: str, request: Request):
     try:
-        from .services.s3_service import list_models
+        from .services.s3_service import s3, ap_arn
+        from botocore.exceptions import ClientError
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         if artifact_type == "model":
-            import re
-            escaped_name = re.escape(id)
-            name_pattern = f"^{escaped_name}$"
-            result = list_models(name_regex=name_pattern, limit=1)
-            if not result.get("models"):
+            versions = ["1.0.0", "main", "latest"]
+            found = False
+            version = None
+            for v in versions:
+                try:
+                    s3_key = f"models/{id}/{v}/model.zip"
+                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                    version = v
+                    found = True
+                    break
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    if error_code != 'NoSuchKey' and error_code != '404':
+                        raise
+                    continue
+            if not found:
+                from .services.s3_service import list_models
+                import re
+                escaped_name = re.escape(id)
+                name_pattern = f"^{escaped_name}$"
+                result = list_models(name_regex=name_pattern, limit=1)
+                if result.get("models"):
+                    version = result["models"][0].get("version", "1.0.0")
+                    try:
+                        s3_key = f"models/{id}/{version}/model.zip"
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        found = True
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code != 'NoSuchKey' and error_code != '404':
+                            raise
+                        pass
+            if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
+        if artifact_type == "model":
+            raise HTTPException(status_code=400, detail="Model artifacts are immutable. To update a model, delete the existing version and upload a new one.")
         metadata = body.get("metadata", {})
         data = body.get("data", {})
         return {"id": id, "type": artifact_type, "status": "updated", "message": "Artifact updated successfully", "metadata": metadata if metadata else None, "data": data if data else None}
@@ -214,28 +304,31 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
 def delete_artifact(artifact_type: str, id: str):
     try:
         from botocore.exceptions import ClientError
-        from .services.s3_service import list_models
+        from .services.s3_service import list_models, s3, ap_arn
         if artifact_type == "model":
             import re
             escaped_name = re.escape(id)
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1000)
-            if not result.get("models"):
-                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
-            from .services.s3_service import s3, ap_arn
+            versions_to_try = []
+            if result.get("models"):
+                versions_to_try = [model["version"] for model in result["models"]]
+            else:
+                versions_to_try = ["1.0.0", "main", "latest"]
             deleted_count = 0
-            for model in result["models"]:
-                version = model["version"]
+            for version in versions_to_try:
                 s3_key = f"models/{id}/{version}/model.zip"
                 try:
+                    s3.head_object(Bucket=ap_arn, Key=s3_key)
                     s3.delete_object(Bucket=ap_arn, Key=s3_key)
                     deleted_count += 1
                 except ClientError as e:
-                    pass
+                    if e.response['Error']['Code'] != 'NoSuchKey':
+                        pass
             if deleted_count > 0:
                 return {"id": id, "type": artifact_type, "status": "deleted", "message": f"Artifact deleted successfully ({deleted_count} version(s) removed)"}
             else:
-                raise HTTPException(status_code=500, detail=f"Failed to delete artifact '{id}'")
+                raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
         else:
             return {"id": id, "type": artifact_type, "status": "deleted", "message": "Artifact deleted successfully"}
     except HTTPException:
@@ -264,32 +357,48 @@ def get_artifact_cost(artifact_type: str, id: str, dependency: bool = False):
 @app.get("/artifact/{artifact_type}/{id}/audit")
 def get_artifact_audit(artifact_type: str, id: str):
     try:
-        from .services.s3_service import list_models
+        from .services.s3_service import list_models, s3, ap_arn
+        from botocore.exceptions import ClientError
         from datetime import datetime
         if artifact_type == "model":
             import re
             escaped_name = re.escape(id)
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1)
-            if not result.get("models"):
+            version = None
+            if result.get("models"):
+                version = result["models"][0]["version"]
+            else:
+                versions = ["1.0.0", "main", "latest"]
+                for v in versions:
+                    try:
+                        s3_key = f"models/{id}/{v}/model.zip"
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        version = v
+                        break
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code != 'NoSuchKey' and error_code != '404':
+                            raise
+                        continue
+            if not version:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
+            s3_key = f"models/{id}/{version}/model.zip"
             try:
-                from .services.s3_service import s3, ap_arn
-                model = result["models"][0]
-                version = model["version"]
-                s3_key = f"models/{id}/{version}/model.zip"
                 obj = s3.head_object(Bucket=ap_arn, Key=s3_key)
                 last_modified = obj.get('LastModified', datetime.now()).isoformat()
                 audit_log = [{"user": {"name": "system", "is_admin": False}, "date": last_modified, "artifact": {"name": id, "id": id, "type": artifact_type}, "action": "CREATE"}]
                 return audit_log
-            except Exception as e:
-                return [{"user": {"name": "system", "is_admin": False}, "date": datetime.now().isoformat(), "artifact": {"name": id, "id": id, "type": artifact_type}, "action": "CREATE"}]
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
+                raise HTTPException(status_code=500, detail=f"Failed to get artifact audit: {str(e)}")
         else:
-            return [{"user": {"name": "system", "is_admin": False}, "date": datetime.now().isoformat(), "artifact": {"name": id, "id": id, "type": artifact_type}, "action": "CREATE"}]
+            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": f"Failed to get artifact audit: {str(e)}"}, 500
+        raise HTTPException(status_code=500, detail=f"Failed to get artifact audit: {str(e)}")
 
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str):
@@ -317,7 +426,8 @@ def get_model_lineage(id: str):
 @app.post("/artifact/model/{id}/license-check")
 async def check_model_license(id: str, request: Request):
     try:
-        from .services.s3_service import list_models, search_model_card_content
+        from .services.s3_service import list_models, search_model_card_content, s3, ap_arn
+        from botocore.exceptions import ClientError
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         github_url = body.get("github_url", "")
         if not github_url:
@@ -327,10 +437,31 @@ async def check_model_license(id: str, request: Request):
         escaped_name = re.escape(id)
         name_pattern = f"^{escaped_name}$"
         result = list_models(name_regex=name_pattern, limit=1)
-        if not result.get("models"):
+        version = None
+        if result.get("models"):
+            version = result["models"][0]["version"]
+        else:
+            versions = ["1.0.0", "main", "latest"]
+            for v in versions:
+                try:
+                    s3_key = f"models/{id}/{v}/model.zip"
+                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                    version = v
+                    break
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    if error_code != 'NoSuchKey' and error_code != '404':
+                        raise
+                    continue
+        if not version:
             raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
-        model = result["models"][0]
-        version = model["version"]
+        s3_key = f"models/{id}/{version}/model.zip"
+        try:
+            s3.head_object(Bucket=ap_arn, Key=s3_key)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
+            raise HTTPException(status_code=500, detail=f"Failed to check model: {str(e)}")
 
         license_patterns = [
             r'license["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
@@ -464,6 +595,22 @@ def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: s
         return {"artifacts": result.get("models", []), "total": len(result.get("models", [])), "next_token": result.get("next_token")}
     except Exception as e:
         return {"error": f"Failed to get directory: {str(e)}"}, 500
+
+@app.get("/admin")
+def get_admin(request: Request):
+    try:
+        if templates and TEMPLATES_DIR.exists():
+            return templates.TemplateResponse("admin.html", {"request": request})
+        else:
+            raise HTTPException(status_code=404, detail="Admin interface not available")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load admin: {str(e)}")
+
+@app.options("/admin")
+def options_admin():
+    return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*"})
 
 app.include_router(api_router, prefix="/api")
 
