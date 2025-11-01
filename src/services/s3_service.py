@@ -146,6 +146,22 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
     except zipfile.BadZipFile:
         raise ValueError("Invalid ZIP file")
 
+def get_presigned_upload_url(model_id: str, version: str, expires_in: int = 3600) -> Dict[str, str]:
+    """Generate presigned URL for direct S3 upload (bypasses API Gateway 10MB limit)"""
+    if not aws_available:
+        raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
+    try:
+        s3_key = f"models/{model_id}/{version}/model.zip"
+        url = s3.generate_presigned_url(
+            'put_object',
+            Params={'Bucket': ap_arn, 'Key': s3_key, 'ContentType': 'application/zip'},
+            ExpiresIn=expires_in
+        )
+        return {"upload_url": url, "model_id": model_id, "version": version, "s3_key": s3_key, "expires_in": expires_in}
+    except Exception as e:
+        print(f"AWS S3 presigned URL generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
+
 def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
     if not aws_available:
         raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
