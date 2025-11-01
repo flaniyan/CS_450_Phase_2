@@ -245,21 +245,46 @@ def get_artifact(artifact_type: str, id: str):
                     version = v
                     found = True
                     break
-                except ClientError:
-                    continue
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    if error_code == 'NoSuchKey' or error_code == '404':
+                        continue
+                    else:
+                        print(f"Unexpected error checking {s3_key}: {error_code}")
             if not found:
-                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                if result.get("models"):
-                    versions_to_try = [model["version"] for model in result["models"]]
-                    for v in versions_to_try:
-                        try:
-                            s3_key = f"models/{id}/{v}/model.zip"
-                            s3.head_object(Bucket=ap_arn, Key=s3_key)
-                            version = v
-                            found = True
-                            break
-                        except ClientError:
-                            continue
+                try:
+                    result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                    if result.get("models"):
+                        versions_to_try = [model["version"] for model in result["models"]]
+                        for v in versions_to_try:
+                            try:
+                                s3_key = f"models/{id}/{v}/model.zip"
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                version = v
+                                found = True
+                                break
+                            except ClientError as e:
+                                error_code = e.response.get('Error', {}).get('Code', '')
+                                if error_code == 'NoSuchKey' or error_code == '404':
+                                    continue
+                                else:
+                                    print(f"Unexpected error checking {s3_key}: {error_code}")
+                except Exception as e:
+                    print(f"Error calling list_models: {e}")
+            if not found:
+                versions_final_check = ["1.0.0", "main", "latest"]
+                for v in versions_final_check:
+                    try:
+                        s3_key = f"models/{id}/{v}/model.zip"
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        version = v
+                        found = True
+                        break
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code != 'NoSuchKey' and error_code != '404':
+                            print(f"Final check error for {s3_key}: {error_code}")
+                        continue
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             model = {"name": id, "version": version}
@@ -312,20 +337,39 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                     version = v
                     found = True
                     break
-                except ClientError:
-                    continue
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    if error_code == 'NoSuchKey' or error_code == '404':
+                        continue
             if not found:
-                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                if result.get("models"):
-                    versions_to_try = [model["version"] for model in result["models"]]
-                    for v in versions_to_try:
-                        try:
-                            s3_key = f"models/{id}/{v}/model.zip"
-                            s3.head_object(Bucket=ap_arn, Key=s3_key)
-                            version = v
-                            found = True
-                            break
-                        except ClientError:
+                try:
+                    result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                    if result.get("models"):
+                        versions_to_try = [model["version"] for model in result["models"]]
+                        for v in versions_to_try:
+                            try:
+                                s3_key = f"models/{id}/{v}/model.zip"
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                version = v
+                                found = True
+                                break
+                            except ClientError as e:
+                                error_code = e.response.get('Error', {}).get('Code', '')
+                                if error_code == 'NoSuchKey' or error_code == '404':
+                                    continue
+                except Exception:
+                    pass
+            if not found:
+                for v in ["1.0.0", "main", "latest"]:
+                    try:
+                        s3_key = f"models/{id}/{v}/model.zip"
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        version = v
+                        found = True
+                        break
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code == 'NoSuchKey' or error_code == '404':
                             continue
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
@@ -354,22 +398,36 @@ def delete_artifact(artifact_type: str, id: str):
                     deleted_count += 1
                 except ClientError as e:
                     error_code = e.response.get('Error', {}).get('Code', '')
-                    if error_code != 'NoSuchKey' and error_code != '404':
-                        pass
+                    if error_code == 'NoSuchKey' or error_code == '404':
+                        continue
             if deleted_count == 0:
-                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                if result.get("models"):
-                    versions_to_try = [model["version"] for model in result["models"]]
-                    for version in versions_to_try:
-                        s3_key = f"models/{id}/{version}/model.zip"
-                        try:
-                            s3.head_object(Bucket=ap_arn, Key=s3_key)
-                            s3.delete_object(Bucket=ap_arn, Key=s3_key)
-                            deleted_count += 1
-                        except ClientError as e:
-                            error_code = e.response.get('Error', {}).get('Code', '')
-                            if error_code != 'NoSuchKey' and error_code != '404':
-                                pass
+                try:
+                    result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                    if result.get("models"):
+                        versions_to_try = [model["version"] for model in result["models"]]
+                        for version in versions_to_try:
+                            s3_key = f"models/{id}/{version}/model.zip"
+                            try:
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                s3.delete_object(Bucket=ap_arn, Key=s3_key)
+                                deleted_count += 1
+                            except ClientError as e:
+                                error_code = e.response.get('Error', {}).get('Code', '')
+                                if error_code == 'NoSuchKey' or error_code == '404':
+                                    continue
+                except Exception:
+                    pass
+            if deleted_count == 0:
+                for version in ["1.0.0", "main", "latest"]:
+                    s3_key = f"models/{id}/{version}/model.zip"
+                    try:
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        s3.delete_object(Bucket=ap_arn, Key=s3_key)
+                        deleted_count += 1
+                    except ClientError as e:
+                        error_code = e.response.get('Error', {}).get('Code', '')
+                        if error_code == 'NoSuchKey' or error_code == '404':
+                            continue
             if deleted_count > 0:
                 return {"id": id, "type": artifact_type, "status": "deleted", "message": f"Artifact deleted successfully ({deleted_count} version(s) removed)"}
             else:

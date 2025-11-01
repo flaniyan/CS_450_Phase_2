@@ -141,52 +141,10 @@ resource "aws_api_gateway_resource" "directory" {
   path_part   = "directory"
 }
 
-resource "aws_api_gateway_resource" "rate" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
-  path_part   = "rate"
-}
-
 resource "aws_api_gateway_resource" "upload" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
   path_part   = "upload"
-}
-
-resource "aws_api_gateway_resource" "lineage" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
-  path_part   = "lineage"
-}
-
-resource "aws_api_gateway_resource" "size_cost" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
-  path_part   = "size-cost"
-}
-
-resource "aws_api_gateway_resource" "ingest" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
-  path_part   = "ingest"
-}
-
-resource "aws_api_gateway_resource" "download" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
-  path_part   = "download"
-}
-
-resource "aws_api_gateway_resource" "download_model_id" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.download.id
-  path_part   = "{model_id}"
-}
-
-resource "aws_api_gateway_resource" "download_model_id_version" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  parent_id   = aws_api_gateway_resource.download_model_id.id
-  path_part   = "{version}"
 }
 
 # ===== /artifact RESOURCES =====
@@ -498,23 +456,6 @@ resource "aws_api_gateway_integration" "directory_get" {
   uri                     = "${var.validator_service_url}/directory"
 }
 
-# GET /rate
-resource "aws_api_gateway_method" "rate_get" {
-  rest_api_id   = aws_api_gateway_rest_api.main_api.id
-  resource_id   = aws_api_gateway_resource.rate.id
-  http_method   = "GET"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "rate_get" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  resource_id = aws_api_gateway_resource.rate.id
-  http_method = aws_api_gateway_method.rate_get.http_method
-
-  integration_http_method = "GET"
-  type                    = "HTTP_PROXY"
-  uri                     = "${var.validator_service_url}/rate"
-}
 
 # GET /upload
 resource "aws_api_gateway_method" "upload_get" {
@@ -645,50 +586,6 @@ resource "aws_api_gateway_integration_response" "directory_options_200" {
   }
 }
 
-# OPTIONS /rate
-resource "aws_api_gateway_method" "rate_options" {
-  rest_api_id   = aws_api_gateway_rest_api.main_api.id
-  resource_id   = aws_api_gateway_resource.rate.id
-  http_method   = "OPTIONS"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "rate_options" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  resource_id = aws_api_gateway_resource.rate.id
-  http_method = aws_api_gateway_method.rate_options.http_method
-
-  type = "MOCK"
-  request_templates = {
-    "application/json" = "{\"statusCode\": 200}"
-  }
-}
-
-resource "aws_api_gateway_method_response" "rate_options_200" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  resource_id = aws_api_gateway_resource.rate.id
-  http_method = aws_api_gateway_method.rate_options.http_method
-  status_code = "200"
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers" = true
-    "method.response.header.Access-Control-Allow-Methods" = true
-    "method.response.header.Access-Control-Allow-Origin"  = true
-  }
-}
-
-resource "aws_api_gateway_integration_response" "rate_options_200" {
-  rest_api_id = aws_api_gateway_rest_api.main_api.id
-  resource_id = aws_api_gateway_resource.rate.id
-  http_method = aws_api_gateway_method.rate_options.http_method
-  status_code = aws_api_gateway_method_response.rate_options_200.status_code
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
-    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
-  }
-}
 
 # OPTIONS /upload
 resource "aws_api_gateway_method" "upload_options" {
@@ -1408,12 +1305,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.tracks_get,
     aws_api_gateway_integration.admin_get,
     aws_api_gateway_integration.directory_get,
-    aws_api_gateway_integration.rate_get,
     aws_api_gateway_integration.upload_get,
     aws_api_gateway_integration.upload_post,
     aws_api_gateway_integration.admin_options,
     aws_api_gateway_integration.directory_options,
-    aws_api_gateway_integration.rate_options,
     aws_api_gateway_integration.upload_options,
     aws_api_gateway_integration.artifact_type_post,
     aws_api_gateway_integration.artifact_type_id_get,
@@ -1449,14 +1344,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_resource.tracks.id,
       aws_api_gateway_resource.admin.id,
       aws_api_gateway_resource.directory.id,
-      aws_api_gateway_resource.rate.id,
       aws_api_gateway_resource.upload.id,
-      aws_api_gateway_resource.lineage.id,
-      aws_api_gateway_resource.size_cost.id,
-      aws_api_gateway_resource.ingest.id,
-      aws_api_gateway_resource.download.id,
-      aws_api_gateway_resource.download_model_id.id,
-      aws_api_gateway_resource.download_model_id_version.id,
       aws_api_gateway_resource.artifact.id,
       aws_api_gateway_resource.artifact_type.id,
       aws_api_gateway_resource.artifact_type_id.id,
@@ -1484,12 +1372,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_method.tracks_get.id,
       aws_api_gateway_method.admin_get.id,
       aws_api_gateway_method.directory_get.id,
-      aws_api_gateway_method.rate_get.id,
       aws_api_gateway_method.upload_get.id,
       aws_api_gateway_method.upload_post.id,
       aws_api_gateway_method.admin_options.id,
       aws_api_gateway_method.directory_options.id,
-      aws_api_gateway_method.rate_options.id,
       aws_api_gateway_method.upload_options.id,
       aws_api_gateway_method.artifact_type_post.id,
       aws_api_gateway_method.artifact_get.id,
