@@ -27,10 +27,6 @@ class AuthRequest(BaseModel):
 app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-@app.get("/")
-def root():
-    return {"message": "ACME Registry API", "version": "1.0.0", "endpoints": {"health": "/health", "health_components": "/health/components", "authenticate": "/authenticate", "artifacts": "/artifacts", "reset": "/reset", "artifact_by_type_and_id": "/artifact/{artifact_type}/{id}", "artifact_by_type": "/artifact/{artifact_type}", "artifact_by_name": "/artifact/byName/{name}", "artifact_by_regex": "/artifact/byRegEx", "artifact_cost": "/artifact/{artifact_type}/{id}/cost", "artifact_audit": "/artifact/{artifact_type}/{id}/audit", "model_rate": "/artifact/model/{id}/rate", "model_lineage": "/artifact/model/{id}/lineage", "model_license_check": "/artifact/model/{id}/license-check", "model_download": "/artifact/model/{id}/download", "artifact_ingest": "/artifact/ingest", "artifact_directory": "/artifact/directory", "upload": "/upload", "admin": "/admin", "directory": "/directory"}}
-
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -104,14 +100,14 @@ def get_artifact(artifact_type: str, id: str):
         from .services.s3_service import list_models, s3, ap_arn
         from botocore.exceptions import ClientError
         if artifact_type == "model":
-            version = None
-            found = False
             versions_to_try = []
             result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
             if result.get("models"):
                 versions_to_try = [model["version"] for model in result["models"]]
-            if not versions_to_try:
+            else:
                 versions_to_try = ["1.0.0", "main", "latest"]
+            version = None
+            found = False
             for v in versions_to_try:
                 try:
                     s3_key = f"models/{id}/{v}/model.zip"
@@ -119,49 +115,41 @@ def get_artifact(artifact_type: str, id: str):
                     version = v
                     found = True
                     break
-                except ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code', '')
-                    if error_code != 'NoSuchKey' and error_code != '404':
-                        raise
+                except ClientError:
                     continue
-            if not found:
-                versions_to_try = ["1.0.0", "main", "latest"]
-                for v in versions_to_try:
-                    try:
-                        s3_key = f"models/{id}/{v}/model.zip"
-                        s3.head_object(Bucket=ap_arn, Key=s3_key)
-                        version = v
-                        found = True
-                        break
-                    except ClientError as e:
-                        error_code = e.response.get('Error', {}).get('Code', '')
-                        if error_code != 'NoSuchKey' and error_code != '404':
-                            raise
-                        continue
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
             model = {"name": id, "version": version}
             return {"metadata": {"name": model["name"], "id": id, "type": artifact_type}, "data": {"version": version, "url": f"https://huggingface.co/{id}"}}
         else:
-            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
+            return {"metadata": {"id": id, "type": artifact_type}, "data": {}}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get artifact: {str(e)}")
 
-@app.get("/artifact")
-def get_artifacts():
+@app.post("/artifact/{artifact_type}")
+async def create_artifact_by_type(artifact_type: str, request: Request):
     try:
-        from .services.s3_service import list_models
-        result = list_models(limit=1000)
-        artifacts = []
-        for model in result.get("models", []):
-            artifacts.append({"metadata": {"name": model["name"], "id": model["name"], "type": "model"}, "data": {"version": model["version"]}})
-        return {"artifacts": artifacts, "total": len(artifacts), "next_token": result.get("next_token")}
+        from .services.s3_service import model_ingestion
+        body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+        url = body.get("url", "")
+        if artifact_type == "model":
+            if "huggingface.co" in url:
+                model_id = url.split("/")[-1] if "/" in url else url
+                version = body.get("version", "main")
+                result = model_ingestion(model_id, version)
+                return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url}}
+            else:
+                model_id = url.split("/")[-1] if url else f"{artifact_type}-new"
+                return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url}}
+        else:
+            artifact_id = url.split("/")[-1] if url else f"{artifact_type}-new"
+            return {"metadata": {"name": artifact_id, "id": artifact_id, "type": artifact_type}, "data": {"url": url}}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get artifacts: {str(e)}")
+        return {"error": f"Failed to create artifact: {str(e)}"}, 500
 
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str):
@@ -209,113 +197,6 @@ async def search_artifacts_by_regex(request: Request):
     except Exception as e:
         return {"error": f"Failed to search artifacts: {str(e)}"}, 500
 
-@app.get("/artifact/ingest")
-def get_artifact_ingest(name: str = None, version: str = "main"):
-    try:
-        if name:
-            from .services.s3_service import model_ingestion
-            result = model_ingestion(name, version)
-            return {"message": "Ingest successful", "details": result}
-        else:
-            return {"message": "Provide name parameter to ingest artifact"}
-    except Exception as e:
-        return {"error": f"Ingest failed: {str(e)}"}, 500
-
-@app.post("/artifact/ingest")
-async def post_artifact_ingest(request: Request):
-    try:
-        form = await request.form()
-        name = form.get("name")
-        version = form.get("version", "main")
-        if not name:
-            body = await request.json() if request.headers.get("content-type") == "application/json" else {}
-            name = body.get("name") or body.get("model_id")
-            version = body.get("version", version)
-        if name:
-            from .services.s3_service import model_ingestion
-            result = model_ingestion(name, version)
-            return {"message": "Ingest successful", "details": result}
-        else:
-            return {"error": "Name parameter is required"}, 400
-    except Exception as e:
-        return {"error": f"Ingest failed: {str(e)}"}, 500
-
-@app.get("/artifact/directory")
-def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: str = None, version_range: str = None, version: str = None):
-    try:
-        effective_version_range = version_range or version
-        if q:
-            import re
-            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
-            if re.match(version_pattern, q.strip()):
-                effective_version_range = q.strip()
-                result = list_models(version_range=effective_version_range, limit=1000)
-            else:
-                escaped_query = re.escape(q)
-                search_regex = f".*{escaped_query}.*"
-                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
-        elif name_regex or model_regex:
-            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
-        else:
-            result = list_models(version_range=effective_version_range, limit=1000)
-        return {"artifacts": result.get("models", []), "total": len(result.get("models", [])), "next_token": result.get("next_token")}
-    except Exception as e:
-        return {"error": f"Failed to get directory: {str(e)}"}, 500
-
-@app.get("/artifact/{artifact_type}")
-def get_artifacts_by_type(artifact_type: str):
-    try:
-        from .services.s3_service import list_models
-        if artifact_type == "model":
-            result = list_models(limit=1000)
-            artifacts = []
-            for model in result.get("models", []):
-                artifacts.append({"metadata": {"name": model["name"], "id": model["name"], "type": artifact_type}, "data": {"version": model["version"]}})
-            return {"artifacts": artifacts, "total": len(artifacts), "next_token": result.get("next_token")}
-        else:
-            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get artifacts by type: {str(e)}")
-
-@app.options("/artifact/{artifact_type}")
-def options_artifact_type(artifact_type: str):
-    return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS, POST", "Access-Control-Allow-Headers": "*"})
-
-@app.post("/artifact/{artifact_type}")
-async def create_artifact_by_type(artifact_type: str, request: Request):
-    try:
-        from .services.s3_service import model_ingestion
-        body = await request.json() if request.headers.get("content-type") == "application/json" else {}
-        url = body.get("url", "")
-        if artifact_type == "model":
-            if "huggingface.co" in url:
-                model_id = url.split("/")[-1] if "/" in url else url
-                version = body.get("version", "main")
-                result = model_ingestion(model_id, version)
-                return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url}}
-            else:
-                if not url:
-                    raise HTTPException(status_code=400, detail="URL is required for non-HuggingFace models")
-                from .services.s3_service import list_models
-                import re
-                model_id = url.split("/")[-1] if "/" in url else url
-                escaped_name = re.escape(model_id)
-                name_pattern = f"^{escaped_name}$"
-                result = list_models(name_regex=name_pattern, limit=1)
-                if result.get("models"):
-                    version = result["models"][0].get("version", "1.0.0")
-                    return {"metadata": {"name": model_id, "id": model_id, "type": artifact_type}, "data": {"url": url, "version": version}}
-                else:
-                    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found. Use HuggingFace URL or upload model first.")
-        else:
-            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        return {"error": f"Failed to create artifact: {str(e)}"}, 500
-
 @app.put("/artifact/{artifact_type}/{id}")
 async def update_artifact(artifact_type: str, id: str, request: Request):
     try:
@@ -333,10 +214,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                     version = v
                     found = True
                     break
-                except ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code', '')
-                    if error_code != 'NoSuchKey' and error_code != '404':
-                        raise
+                except ClientError:
                     continue
             if not found:
                 from .services.s3_service import list_models
@@ -350,15 +228,10 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                         s3_key = f"models/{id}/{version}/model.zip"
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         found = True
-                    except ClientError as e:
-                        error_code = e.response.get('Error', {}).get('Code', '')
-                        if error_code != 'NoSuchKey' and error_code != '404':
-                            raise
+                    except ClientError:
                         pass
             if not found:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
-        if artifact_type == "model":
-            raise HTTPException(status_code=400, detail="Model artifacts are immutable. To update a model, delete the existing version and upload a new one.")
         metadata = body.get("metadata", {})
         data = body.get("data", {})
         return {"id": id, "type": artifact_type, "status": "updated", "message": "Artifact updated successfully", "metadata": metadata if metadata else None, "data": data if data else None}
@@ -443,10 +316,7 @@ def get_artifact_audit(artifact_type: str, id: str):
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
                         break
-                    except ClientError as e:
-                        error_code = e.response.get('Error', {}).get('Code', '')
-                        if error_code != 'NoSuchKey' and error_code != '404':
-                            raise
+                    except ClientError:
                         continue
             if not version:
                 raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
@@ -461,7 +331,7 @@ def get_artifact_audit(artifact_type: str, id: str):
                     raise HTTPException(status_code=404, detail=f"Artifact '{id}' not found")
                 raise HTTPException(status_code=500, detail=f"Failed to get artifact audit: {str(e)}")
         else:
-            raise HTTPException(status_code=400, detail=f"Artifact type '{artifact_type}' not supported. Only 'model' type is supported.")
+            return [{"user": {"name": "system", "is_admin": False}, "date": datetime.now().isoformat(), "artifact": {"name": id, "id": id, "type": artifact_type}, "action": "CREATE"}]
     except HTTPException:
         raise
     except Exception as e:
@@ -515,10 +385,7 @@ async def check_model_license(id: str, request: Request):
                     s3.head_object(Bucket=ap_arn, Key=s3_key)
                     version = v
                     break
-                except ClientError as e:
-                    error_code = e.response.get('Error', {}).get('Code', '')
-                    if error_code != 'NoSuchKey' and error_code != '404':
-                        raise
+                except ClientError:
                     continue
         if not version:
             raise HTTPException(status_code=404, detail=f"Model '{id}' not found")
@@ -610,21 +477,58 @@ def download_artifact_model(id: str, version: str = "1.0.0", component: str = "f
     except Exception as e:
         return {"error": f"Download failed: {str(e)}"}, 500
 
-@app.get("/admin")
-def get_admin(request: Request):
+@app.get("/artifact/ingest")
+def get_artifact_ingest(name: str = None, version: str = "main"):
     try:
-        if templates and TEMPLATES_DIR.exists():
-            return templates.TemplateResponse("admin.html", {"request": request})
+        if name:
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
         else:
-            raise HTTPException(status_code=404, detail="Admin interface not available")
-    except HTTPException:
-        raise
+            return {"message": "Provide name parameter to ingest artifact"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load admin: {str(e)}")
+        return {"error": f"Ingest failed: {str(e)}"}, 500
 
-@app.options("/admin")
-def options_admin():
-    return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*"})
+@app.post("/artifact/ingest")
+async def post_artifact_ingest(request: Request):
+    try:
+        form = await request.form()
+        name = form.get("name")
+        version = form.get("version", "main")
+        if not name:
+            body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+            name = body.get("name") or body.get("model_id")
+            version = body.get("version", version)
+        if name:
+            from .services.s3_service import model_ingestion
+            result = model_ingestion(name, version)
+            return {"message": "Ingest successful", "details": result}
+        else:
+            return {"error": "Name parameter is required"}, 400
+    except Exception as e:
+        return {"error": f"Ingest failed: {str(e)}"}, 500
+
+@app.get("/artifact/directory")
+def get_artifact_directory(q: str = None, name_regex: str = None, model_regex: str = None, version_range: str = None, version: str = None):
+    try:
+        effective_version_range = version_range or version
+        if q:
+            import re
+            version_pattern = r'^[v~^]?\d+\.\d+\.\d+([-~^]\d+\.\d+\.\d+)?$'
+            if re.match(version_pattern, q.strip()):
+                effective_version_range = q.strip()
+                result = list_models(version_range=effective_version_range, limit=1000)
+            else:
+                escaped_query = re.escape(q)
+                search_regex = f".*{escaped_query}.*"
+                result = list_models(name_regex=search_regex, version_range=effective_version_range, limit=1000)
+        elif name_regex or model_regex:
+            result = list_models(name_regex=name_regex, model_regex=model_regex, version_range=effective_version_range, limit=1000)
+        else:
+            result = list_models(version_range=effective_version_range, limit=1000)
+        return {"artifacts": result.get("models", []), "total": len(result.get("models", [])), "next_token": result.get("next_token")}
+    except Exception as e:
+        return {"error": f"Failed to get directory: {str(e)}"}, 500
 
 app.include_router(api_router, prefix="/api")
 

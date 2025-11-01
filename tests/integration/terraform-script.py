@@ -39,7 +39,6 @@ def upload_test_model():
 def get_real_models():
     """Fetch real models from S3 via API, or upload one if none exist"""
     try:
-        import time
         url = f"{BASE_URL}artifact/directory"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
@@ -57,8 +56,6 @@ def get_real_models():
             model_id, version = uploaded
             if model_id and version:
                 print(f"Successfully uploaded test model: {model_id} v{version}")
-                print("Waiting 3 seconds for S3 eventual consistency...")
-                time.sleep(3)
                 return model_id, version
         print("ERROR: Failed to get or upload a real model. Cannot proceed without real S3 resources.")
         return None, None
