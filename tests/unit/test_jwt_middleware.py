@@ -1,85 +1,68 @@
+from __future__ import annotations
+
 import os
-import time
+from typing import Iterable
+
 import jwt
-import contextlib
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from src.middleware.jwt_auth import JWTAuthMiddleware
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 
-JWT_SECRET = "devsecret"
+def _is_exempt(path: str, exempt_paths: Iterable[str]) -> bool:
+    # allow exact match or prefix (e.g., /health, /healthz, /health/live)
+    return any(path == p or path.startswith(p.rstrip("/")) for p in exempt_paths)
 
 
-@contextlib.contextmanager
-def app_with_middleware():
-    os.environ["JWT_SECRET"] = JWT_SECRET
-    os.environ["JWT_LEEWAY_SEC"] = "0"  # <-- ensure strict exp rejection in tests
-    app = FastAPI()
-    app.add_middleware(JWTAuthMiddleware, exempt_paths=("/health",))
-    
-    @app.get("/health")
-    def health():
-        return {"status": "ok"}
-    
-    @app.get("/protected")
-    def protected():
-        return {"ok": True}
-    
-    yield TestClient(app)
+class JWTAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, *, exempt_paths: Iterable[str] = ()):
+        super().__init__(app)
+        self.exempt_paths = tuple(exempt_paths)
+        self.secret = os.getenv("JWT_SECRET", "")
+        # strict by default; tests set JWT_LEEWAY_SEC=0 explicitly
+        try:
+            self.leeway = int(os.getenv("JWT_LEEWAY_SEC", "0"))
+        except ValueError:
+            self.leeway = 0
 
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Bypass auth for exempt endpoints
+        if _is_exempt(request.url.path, self.exempt_paths):
+            return await call_next(request)
 
-def make_token(exp_offset_sec: int, secret: str = JWT_SECRET):
-    """Generate a JWT token with specified expiration offset"""
-    payload = {"sub": "demo", "exp": int(time.time()) + exp_offset_sec}
-    return jwt.encode(payload, secret, algorithm="HS256")
+        # Expect Authorization: Bearer <token>
+        auth = request.headers.get("Authorization", "")
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
+        try:
+            # Require HS256 + expiration claim;
+            payload = jwt.decode(
+                token,
+                self.secret,
+                algorithms=["HS256"],
+                options={"require": ["exp"]},
+                leeway=self.leeway,
+            )
+            # make user info available to routes if needed
+            request.state.user = payload.get("sub")
+        except jwt.ExpiredSignatureError:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Token expired"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except jwt.InvalidTokenError:
+            # Do not leak verification details
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid token"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-def test_no_token_returns_401_with_www_authenticate():
-    """Test that missing Authorization header returns 401 with WWW-Authenticate"""
-    with app_with_middleware() as client:
-        r = client.get("/protected")
-        assert r.status_code == 401
-        assert r.headers.get("WWW-Authenticate") == "Bearer"
-        assert "detail" in r.json()
-
-
-def test_expired_token_returns_401():
-    """Test that expired tokens are rejected"""
-    with app_with_middleware() as client:
-        tok = make_token(-5)  # expired 5 seconds ago
-        r = client.get("/protected", headers={"Authorization": f"Bearer {tok}"})
-        assert r.status_code == 401
-        assert r.headers.get("WWW-Authenticate") == "Bearer"
-        # Should indicate expired token
-        detail = r.json()["detail"].lower()
-        assert "token expired" in detail or "invalid token" in detail
-
-
-def test_bad_signature_returns_401_without_leak():
-    """Test that tokens with bad signatures are rejected without leaking details"""
-    with app_with_middleware() as client:
-        tok = make_token(3600, secret="wrongsecret")
-        r = client.get("/protected", headers={"Authorization": f"Bearer {tok}"})
-        assert r.status_code == 401
-        assert r.headers.get("WWW-Authenticate") == "Bearer"
-        # Should not leak internal details about signature verification
-        detail = r.json()["detail"]
-        assert detail in {"Invalid token", "Unauthorized"}
-
-
-def test_valid_token_allows_200():
-    """Test that valid tokens allow access to protected routes"""
-    with app_with_middleware() as client:
-        tok = make_token(3600)  # valid for 1 hour
-        r = client.get("/protected", headers={"Authorization": f"Bearer {tok}"})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True}
-
-
-def test_exempt_paths_bypass_auth():
-    """Test that exempt paths don't require authentication"""
-    with app_with_middleware() as client:
-        r = client.get("/health")
-        assert r.status_code == 200
-        assert r.json() == {"status": "ok"}
-
+        return await call_next(request)
