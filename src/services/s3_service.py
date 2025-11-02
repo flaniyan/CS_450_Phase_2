@@ -20,8 +20,8 @@ from ..acmecli.types import MetricValue
 from ..acmecli.hf_handler import fetch_hf_metadata
 from ..acmecli.metrics import METRIC_FUNCTIONS
 
-region = "us-east-1"
-access_point_name = "cs450-s3"
+region = os.getenv("AWS_REGION", "us-east-1")
+access_point_name = os.getenv("S3_ACCESS_POINT_NAME", "cs450-s3")
 
 # Initialize AWS clients with error handling for development
 try:
@@ -39,8 +39,11 @@ except Exception as e:
     # AWS not available - set dummy values for development
     print(f"AWS initialization failed: {e}")
     sts = None
-    account_id = "838693051036"  # Use the actual account ID from the URL
-    ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    account_id = os.getenv("AWS_ACCOUNT_ID", "")
+    if account_id:
+        ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    else:
+        ap_arn = None
     s3 = None
     aws_available = False
 
@@ -142,6 +145,22 @@ def extract_model_component(zip_content: bytes, component: str) -> bytes:
             return output.getvalue()
     except zipfile.BadZipFile:
         raise ValueError("Invalid ZIP file")
+
+def get_presigned_upload_url(model_id: str, version: str, expires_in: int = 3600) -> Dict[str, str]:
+    """Generate presigned URL for direct S3 upload (bypasses API Gateway 10MB limit)"""
+    if not aws_available:
+        raise HTTPException(status_code=503, detail="AWS services not available. Please check your AWS configuration.")
+    try:
+        s3_key = f"models/{model_id}/{version}/model.zip"
+        url = s3.generate_presigned_url(
+            'put_object',
+            Params={'Bucket': ap_arn, 'Key': s3_key, 'ContentType': 'application/zip'},
+            ExpiresIn=expires_in
+        )
+        return {"upload_url": url, "model_id": model_id, "version": version, "s3_key": s3_key, "expires_in": expires_in}
+    except Exception as e:
+        print(f"AWS S3 presigned URL generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
 def upload_model(file_content: bytes, model_id: str, version: str, debloat: bool = False) -> Dict[str, str]:
     if not aws_available:
@@ -506,12 +525,80 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             config = extract_config_from_model(zip_content)
             if config:
                 meta["config"] = config
-            
             meta["contributors"] = {}
             meta["pushed_at"] = None
             meta["github_url"] = ""
             meta["parents"] = []
-            meta["license"] = meta.get("license_text", "")[:100].lower() if meta.get("license_text") else ""
+            meta["full_name"] = model_id
+            meta["stars"] = 0
+            meta["forks"] = 0
+            meta["has_wiki"] = False
+            meta["has_pages"] = False
+            meta["language"] = "python"
+            meta["open_issues_count"] = 0
+            meta["github"] = {}
+            try:
+                from ..acmecli.hf_handler import fetch_hf_metadata
+                clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+                hf_url = f"https://huggingface.co/{clean_model_id}"
+                hf_meta = fetch_hf_metadata(hf_url)
+                if hf_meta:
+                    meta["stars"] = hf_meta.get("likes", 0)
+                    meta["downloads"] = hf_meta.get("downloads", 0)
+                    if hf_meta.get("modelId"):
+                        meta["full_name"] = hf_meta.get("modelId", model_id)
+                    card_data = hf_meta.get("cardData", {})
+                    if isinstance(card_data, dict):
+                        readme_text = card_data.get("---", "")
+                        if isinstance(readme_text, str) and not meta.get("readme_text"):
+                            meta["readme_text"] = readme_text
+                        repo_url = None
+                        for key, value in card_data.items():
+                            if isinstance(value, str) and "github.com" in value.lower():
+                                import re
+                                github_match = re.search(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', value)
+                                if github_match:
+                                    repo_url = github_match.group(0)
+                                    break
+                        if not repo_url and meta.get("readme_text"):
+                            readme = meta["readme_text"]
+                            import re
+                            github_matches = re.findall(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', readme)
+                            if github_matches:
+                                repo_url = github_matches[0]
+                        if repo_url:
+                            meta["github_url"] = repo_url
+                            from ..acmecli.github_handler import fetch_github_metadata
+                            gh_meta = fetch_github_metadata(repo_url)
+                            if gh_meta:
+                                meta["contributors"] = gh_meta.get("contributors", {})
+                                meta["stars"] = gh_meta.get("stars", meta["stars"])
+                                meta["forks"] = gh_meta.get("forks", 0)
+                                meta["full_name"] = gh_meta.get("full_name", meta["full_name"])
+                                meta["pushed_at"] = gh_meta.get("pushed_at")
+                                meta["has_wiki"] = gh_meta.get("has_wiki", False)
+                                meta["has_pages"] = gh_meta.get("has_pages", False)
+                                meta["language"] = gh_meta.get("language", "python")
+                                meta["open_issues_count"] = gh_meta.get("open_issues_count", 0)
+                                if gh_meta.get("readme_text") and not meta.get("readme_text"):
+                                    meta["readme_text"] = gh_meta.get("readme_text", "")
+                                if gh_meta.get("github"):
+                                    meta["github"] = gh_meta.get("github", {})
+                if config:
+                    base_model = config.get("_name_or_path") or config.get("base_model_name_or_path") or config.get("pretrained_model_name_or_path")
+                    if base_model:
+                        parent_id = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+                        if parent_id != clean_model_id:
+                            meta["parents"] = [{"score": 0.5, "id": parent_id}]
+            except Exception as gh_error:
+                print(f"[INGEST] Warning: Could not fetch GitHub metadata: {gh_error}")
+            license_text_content = meta.get("license_text", "")
+            if license_text_content:
+                meta["license"] = license_text_content[:100].lower()
+            else:
+                meta["license"] = ""
+            if not meta.get("readme_text"):
+                print(f"[INGEST] Warning: No README text found for {model_id}")
             
             print(f"[INGEST] Computing metrics...")
             metrics_start = time.time()

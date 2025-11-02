@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container">
+  <h1>License Compatibility Check</h1>
+  <p>Check if a model's license is compatible with a GitHub repository's license for fine-tuning and inference use.</p>
+  
+  <form id="licenseCheckForm" method="post" aria-label="License compatibility check">
+    <label for="model_id">Model ID <span style="color: red;">*</span></label>
+    <input 
+      id="model_id" 
+      type="text" 
+      name="model_id" 
+      placeholder="e.g., gpt2, bert-base-uncased" 
+      value="{{ model_id or '' }}"
+      required 
+      aria-label="Model ID"
+    />
+    
+    <label for="github_url">GitHub Repository URL <span style="color: red;">*</span></label>
+    <input 
+      id="github_url" 
+      type="url" 
+      name="github_url" 
+      placeholder="https://github.com/owner/repo" 
+      value="{{ github_url or '' }}"
+      required 
+      aria-label="GitHub repository URL"
+    />
+    
+    <label for="use_case">Use Case (optional)</label>
+    <select id="use_case" name="use_case" aria-label="Use case">
+      <option value="fine-tune+inference" {% if use_case == 'fine-tune+inference' or not use_case %}selected{% endif %}>Fine-tune + Inference</option>
+      <option value="inference" {% if use_case == 'inference' %}selected{% endif %}>Inference Only</option>
+      <option value="fine-tune" {% if use_case == 'fine-tune' %}selected{% endif %}>Fine-tune Only</option>
+    </select>
+    
+    <button class="btn" type="submit">Check Compatibility</button>
+  </form>
+
+  {% if result %}
+    <div class="card" style="margin-top: 24px;">
+      <h2>Compatibility Result</h2>
+      
+      {% if result.compatible %}
+        <div class="flash success" style="margin-bottom: 16px;">
+          <strong>✓ Compatible</strong> - The licenses are compatible for your use case.
+        </div>
+      {% else %}
+        <div class="flash error" style="margin-bottom: 16px;">
+          <strong>✗ Not Compatible</strong> - License compatibility issues detected.
+        </div>
+      {% endif %}
+      
+      <div style="display: grid; gap: 16px; margin-top: 16px;">
+        <div>
+          <h3>Licenses</h3>
+          <ul style="margin: 8px 0;">
+            <li><strong>Model License:</strong> {{ result.model_license or 'unknown' }}</li>
+            <li><strong>GitHub License:</strong> {{ result.github_license or 'unknown' }}</li>
+            <li><strong>Use Case:</strong> {{ result.use_case or 'fine-tune+inference' }}</li>
+          </ul>
+        </div>
+        
+        <div>
+          <h3>Reason</h3>
+          <p style="margin: 8px 0;">{{ result.reason or 'No reason provided' }}</p>
+        </div>
+        
+        {% if result.restrictions and result.restrictions|length > 0 %}
+          <div>
+            <h3>Restrictions & Requirements</h3>
+            <ul style="margin: 8px 0;">
+              {% for restriction in result.restrictions %}
+                <li>{{ restriction }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% elif error %}
+    <div class="flash error" style="margin-top: 24px;">
+      <strong>Error:</strong> {{ error }}
+    </div>
+  {% endif %}
+</section>
+
+<script>
+document.getElementById('licenseCheckForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  
+  const modelId = document.getElementById('model_id').value.trim();
+  const githubUrl = document.getElementById('github_url').value.trim();
+  const useCase = document.getElementById('use_case').value;
+  
+  if (!modelId || !githubUrl) {
+    alert('Please fill in both Model ID and GitHub URL');
+    return false;
+  }
+  
+  const submitButton = this.querySelector('button[type="submit"]');
+  const originalText = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = 'Checking...';
+  
+  try {
+    const response = await fetch(`/artifact/model/${encodeURIComponent(modelId)}/license-check`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        github_url: githubUrl,
+        use_case: useCase
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || data.detail || 'Failed to check license compatibility');
+    }
+    
+    // Reload page with result
+    const params = new URLSearchParams({
+      model_id: modelId,
+      github_url: githubUrl,
+      use_case: useCase,
+      result: JSON.stringify(data)
+    });
+    window.location.href = `/license-check?${params.toString()}`;
+  } catch (error) {
+    alert(`Error: ${error.message}`);
+    submitButton.disabled = false;
+    submitButton.textContent = originalText;
+  }
+});
+</script>
+{% endblock %}
+

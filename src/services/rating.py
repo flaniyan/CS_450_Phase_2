@@ -35,23 +35,131 @@ class RateRequest(BaseModel):
 
 def analyze_model_content(target: str) -> Dict[str, Any]:
     try:
-        model_content = download_model(target, "1.0.0", "full")
+        from ..services.s3_service import download_model, extract_config_from_model, download_from_huggingface
+        model_content = None
+        try:
+            model_content = download_model(target, "1.0.0", "full")
+        except:
+            pass
         if not model_content:
             for version in ["1.0", "latest", "main"]:
-                model_content = download_model(target, version, "full")
-                if model_content:
-                    break
+                try:
+                    model_content = download_model(target, version, "full")
+                    if model_content:
+                        break
+                except:
+                    continue
+        clean_model_id = target
+        downloaded_from_hf = False
         if not model_content:
-            raise ValueError(f"No model content found for {target}. Cannot compute metrics without model data.")
+            try:
+                if target.startswith("https://huggingface.co/"):
+                    clean_model_id = target.replace("https://huggingface.co/", "")
+                elif target.startswith("http://huggingface.co/"):
+                    clean_model_id = target.replace("http://huggingface.co/", "")
+                if clean_model_id != target:
+                    model_content = download_from_huggingface(clean_model_id, "main")
+                    downloaded_from_hf = True
+            except Exception as hf_error:
+                raise ValueError(f"No model content found for {target} in S3 or HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}")
+        effective_model_id = clean_model_id if clean_model_id != target else target
         with tempfile.TemporaryDirectory() as temp_dir:
-            zip_path = os.path.join(temp_dir, f"{target}.zip")
+            zip_path = os.path.join(temp_dir, f"{effective_model_id}.zip")
             with open(zip_path, 'wb') as f:
                 f.write(model_content)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
-            meta = create_metadata_from_files(temp_dir, target)
+            meta = create_metadata_from_files(temp_dir, effective_model_id)
+            config = extract_config_from_model(model_content)
+            if config:
+                meta["config"] = config
+            meta["contributors"] = {}
+            meta["pushed_at"] = None
+            meta["github_url"] = ""
+            meta["parents"] = []
+            meta["full_name"] = effective_model_id
+            meta["stars"] = 0
+            meta["forks"] = 0
+            meta["has_wiki"] = False
+            meta["has_pages"] = False
+            meta["language"] = "python"
+            meta["open_issues_count"] = 0
+            meta["github"] = {}
+            try:
+                from ..acmecli.hf_handler import fetch_hf_metadata
+                hf_url = f"https://huggingface.co/{effective_model_id}"
+                hf_meta = fetch_hf_metadata(hf_url)
+                if hf_meta:
+                    meta["stars"] = hf_meta.get("likes", 0)
+                    meta["downloads"] = hf_meta.get("downloads", 0)
+                    if hf_meta.get("modelId"):
+                        meta["full_name"] = hf_meta.get("modelId", effective_model_id)
+                    card_data = hf_meta.get("cardData", {})
+                    if isinstance(card_data, dict):
+                        readme_text = card_data.get("---", "")
+                        if isinstance(readme_text, str) and not meta.get("readme_text"):
+                            meta["readme_text"] = readme_text
+                        repo_url = None
+                        for key, value in card_data.items():
+                            if isinstance(value, str) and "github.com" in value.lower():
+                                import re
+                                github_match = re.search(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', value)
+                                if github_match:
+                                    repo_url = github_match.group(0)
+                                    break
+                        if not repo_url and meta.get("readme_text"):
+                            readme = meta["readme_text"]
+                            import re
+                            github_matches = re.findall(r'https?://github\.com/[\w\-\.]+/[\w\-\.]+', readme)
+                            if github_matches:
+                                repo_url = github_matches[0]
+                        if repo_url:
+                            meta["github_url"] = repo_url
+                            from ..acmecli.github_handler import fetch_github_metadata
+                            gh_meta = fetch_github_metadata(repo_url)
+                            if gh_meta:
+                                meta["contributors"] = gh_meta.get("contributors", {})
+                                meta["stars"] = gh_meta.get("stars", meta["stars"])
+                                meta["forks"] = gh_meta.get("forks", 0)
+                                meta["full_name"] = gh_meta.get("full_name", meta["full_name"])
+                                meta["pushed_at"] = gh_meta.get("pushed_at")
+                                meta["has_wiki"] = gh_meta.get("has_wiki", False)
+                                meta["has_pages"] = gh_meta.get("has_pages", False)
+                                meta["language"] = gh_meta.get("language", "python")
+                                meta["open_issues_count"] = gh_meta.get("open_issues_count", 0)
+                                if gh_meta.get("readme_text") and not meta.get("readme_text"):
+                                    meta["readme_text"] = gh_meta.get("readme_text", "")
+                                if gh_meta.get("github"):
+                                    meta["github"] = gh_meta.get("github", {})
+                if config:
+                    base_model = config.get("_name_or_path") or config.get("base_model_name_or_path") or config.get("pretrained_model_name_or_path")
+                    if base_model:
+                        parent_id = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+                        if parent_id != effective_model_id:
+                            meta["parents"] = [{"score": 0.5, "id": parent_id}]
+            except Exception as gh_error:
+                print(f"[RATE] Warning: Could not fetch GitHub metadata: {gh_error}")
+            license_text_content = meta.get("license_text", "")
+            if license_text_content:
+                meta["license"] = license_text_content[:100].lower()
+            else:
+                meta["license"] = ""
+            if not meta.get("readme_text"):
+                print(f"[RATE] Warning: No README text found for {target}")
+            from ..acmecli.metrics.license_metric import LicenseMetric
+            from ..acmecli.metrics.ramp_up_metric import RampUpMetric
+            from ..acmecli.metrics.bus_factor_metric import BusFactorMetric
+            from ..acmecli.metrics.performance_claims_metric import PerformanceClaimsMetric
+            from ..acmecli.metrics.size_metric import SizeMetric
+            from ..acmecli.metrics.dataset_and_code_metric import DatasetAndCodeMetric
+            from ..acmecli.metrics.dataset_quality_metric import DatasetQualityMetric
+            from ..acmecli.metrics.code_quality_metric import CodeQualityMetric
+            from ..acmecli.metrics.reproducibility_metric import ReproducibilityMetric
+            from ..acmecli.metrics.reviewedness_metric import ReviewednessMetric
+            from ..acmecli.metrics.treescore_metric import TreescoreMetric
+            quick_metrics = {'license': LicenseMetric().score, 'ramp_up_time': RampUpMetric().score, 'bus_factor': BusFactorMetric().score, 'performance_claims': PerformanceClaimsMetric().score, 'size_score': SizeMetric().score, 'dataset_and_code_score': DatasetAndCodeMetric().score, 'dataset_quality': DatasetQualityMetric().score, 'code_quality': CodeQualityMetric().score, 'Reproducibility': ReproducibilityMetric().score, 'Reviewedness': ReviewednessMetric().score, 'Treescore': TreescoreMetric().score}
             print(f"Running ACME metrics for {target} with {len(meta['repo_files'])} files")
-            return run_acme_metrics(meta, METRIC_FUNCTIONS)
+            return run_acme_metrics(meta, quick_metrics)
     except Exception as e:
         print(f"Error analyzing model {target}: {e}")
         traceback.print_exc()
@@ -71,11 +179,18 @@ def create_metadata_from_files(temp_dir: str, model_name: str) -> Dict[str, Any]
             file_path = os.path.relpath(os.path.join(root, file), temp_dir)
             meta["repo_files"].add(file_path.replace("\\", "/"))
     readme_files = glob.glob(os.path.join(temp_dir, "**", "*readme*"), recursive=True)
+    if not readme_files:
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "**", "README*"), recursive=True))
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "**", "readme*"), recursive=True))
+        readme_files.extend(glob.glob(os.path.join(temp_dir, "README*"), recursive=False))
     for readme_file in readme_files:
         try:
             with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
-                meta["readme_text"] += f.read() + "\n"
-        except:
+                content = f.read()
+                if content:
+                    meta["readme_text"] += content + "\n"
+        except Exception as e:
+            print(f"Warning: Could not read README file {readme_file}: {e}")
             pass
     license_files = glob.glob(os.path.join(temp_dir, "**", "*license*"), recursive=True)
     license_files.extend(glob.glob(os.path.join(temp_dir, "**", "*licence*"), recursive=True))
