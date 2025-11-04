@@ -64,3 +64,6 @@ The pipeline will:
 3. Update Terraform infrastructure
 4. Deploy to ECS
 5. Run health checks
+
+
+

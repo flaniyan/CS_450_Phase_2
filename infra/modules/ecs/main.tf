@@ -1,3 +1,8 @@
+# Data source for JWT secret
+data "aws_secretsmanager_secret" "jwt_secret" {
+  name = "acme-jwt-secret"
+}
+
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
   name                 = "validator-service"
@@ -96,6 +101,13 @@ resource "aws_ecs_task_definition" "validator_task" {
       }
     ]
 
+    secrets = [
+      {
+        name      = "JWT_SECRET"
+        valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
+      }
+    ]
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -103,14 +115,6 @@ resource "aws_ecs_task_definition" "validator_task" {
         awslogs-region        = "us-east-1"
         awslogs-stream-prefix = "ecs"
       }
-    }
-
-    healthCheck = {
-      command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 60
     }
   }])
 }
@@ -234,8 +238,13 @@ resource "aws_route_table" "validator_rt" {
   }
 }
 
-resource "aws_route_table_association" "validator_rta" {
+resource "aws_route_table_association" "validator_rta_1" {
   subnet_id      = aws_subnet.validator_subnet_1.id
+  route_table_id = aws_route_table.validator_rt.id
+}
+
+resource "aws_route_table_association" "validator_rta_2" {
+  subnet_id      = aws_subnet.validator_subnet_2.id
   route_table_id = aws_route_table.validator_rt.id
 }
 
@@ -291,6 +300,38 @@ resource "aws_iam_role" "ecs_execution_role" {
 resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
   role       = aws_iam_role.ecs_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# IAM policy for Secrets Manager access
+resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
+  name = "ecs-execution-secrets-policy"
+  role = aws_iam_role.ecs_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = data.aws_secretsmanager_secret.jwt_secret.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.us-east-1.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "ecs_task_role" {
