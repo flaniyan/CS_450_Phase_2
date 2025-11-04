@@ -4,7 +4,7 @@ import os
 import json
 
 BASE_URL = os.getenv("API_GATEWAY_URL", "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/")
-DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", "")
+DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", r"C:\Users\mdali\Downloads\hugging-face-model_1.0.0_full_1.0.0_full.zip")
 DEFAULT_TEST_MODEL = os.getenv("TEST_MODEL_ID", "MiniMaxAI/MiniMax-M2")
 
 def upload_test_model():
