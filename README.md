@@ -194,7 +194,7 @@ See [CD_SETUP_GUIDE.md](CD_SETUP_GUIDE.md) for configuration instructions.
 ## Project Layout
 
 | Path | Description |
-| --- | --- |
+|------|-------------|
 | `run.py` | CLI orchestrator for install, test, and score flows. |
 | `run` | Thin executable shim that re-invokes `run.py` with the active interpreter. |
 | `src/acmecli/` | Library package containing handlers, metrics, scoring, and types. |
@@ -260,7 +260,7 @@ See [CD_SETUP_GUIDE.md](CD_SETUP_GUIDE.md) for configuration instructions.
 Each metric exposes `name` and `score(meta: dict) -> MetricValue`. Implementations live under `src/acmecli/metrics/` and are unit-tested in `tests/`.
 
 | Metric | Module | Purpose and Heuristics |
-| --- | --- | --- |
+|--------|--------|----------------------|
 | `LicenseMetric` | `license_metric.py` | Scores LGPLv2.1 compatibility based on SPDX identifiers and README cues; penalizes missing license data. |
 | `RampUpMetric` | `ramp_up_metric.py` | Rewards thorough READMEs, quickstart sections, recent commits, project wikis, and star counts to reflect onboarding ease. |
 | `BusFactorMetric` | `bus_factor_metric.py` | Estimates sustainability using contributor counts, contribution distribution, organization ownership hints, and fork counts. |
@@ -421,6 +421,3 @@ aws ecs describe-services --cluster validator-cluster --services validator-servi
 - `REGISTRY` depends on metric modules being imported; custom consumers must import `acmecli.metrics` before invoking `process_url`.
 - NDJSON output currently omits `hf_downloads`, `cli`, and `logging_env` scores; extend `ReportRow` if these should be surfaced downstream.
 - The cache is in-memory and per-process; restart the CLI or run in parallel to clear state.
-#   C D   P i p e l i n e   T e s t   -   1 0 / 2 2 / 2 0 2 5   1 4 : 2 1 : 2 0 
- 
- 
