@@ -12,6 +12,7 @@ from .hf_handler import HFHandler
 from .cache import InMemoryCache
 from .scoring import compute_net_score
 
+
 def setup_logging():
     log_file = os.environ.get("LOG_FILE")
     raw_level = os.environ.get("LOG_LEVEL", "0")
@@ -48,6 +49,7 @@ def setup_logging():
         handler.setLevel(level)
     root_logger.addHandler(handler)
 
+
 def classify(url: str) -> str:
     u = url.strip().lower()
     if "huggingface.co/datasets/" in u:
@@ -59,11 +61,11 @@ def classify(url: str) -> str:
     return "CODE"
 
 
-
 def extract_urls(raw: str) -> list[str]:
     if not raw:
         return []
-    return [part.strip() for part in raw.split(',') if part.strip()]
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
 
 def process_url(url: str, github_handler, hf_handler, cache):
     if classify(url) == "MODEL_GITHUB":
@@ -80,9 +82,7 @@ def process_url(url: str, github_handler, hf_handler, cache):
 
     results = {}
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_to_metric = {
-            executor.submit(m.score, meta): m.name for m in REGISTRY
-        }
+        future_to_metric = {executor.submit(m.score, meta): m.name for m in REGISTRY}
         for future in concurrent.futures.as_completed(future_to_metric):
             metric_name = future_to_metric[future]
             try:
@@ -92,53 +92,62 @@ def process_url(url: str, github_handler, hf_handler, cache):
                 logging.error(f"Error computing metric {metric_name}: {e}")
                 # Create a default MetricValue for failed metrics
                 from .types import MetricValue
+
                 results[metric_name] = MetricValue(metric_name, 0.0, 0)
-    
+
     net_score, net_score_latency = compute_net_score(results)
-    
+
     # Helper function to safely get metric values
     def get_metric_value(name, default=0.0):
         metric = results.get(name)
         return metric.value if metric else default
-    
+
     def get_metric_latency(name, default=0):
         metric = results.get(name)
         return metric.latency_ms if metric else default
-    
+
     # Handle size_score specially since it returns a dict
-    size_result = results.get('size_score')
-    size_score_value = size_result.value if size_result else {
-        'raspberry_pi': 0.0, 'jetson_nano': 0.0, 'desktop_pc': 0.0, 'aws_server': 0.0
-    }
-    
+    size_result = results.get("size_score")
+    size_score_value = (
+        size_result.value
+        if size_result
+        else {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0,
+        }
+    )
+
     return ReportRow(
         name=repo_name,
         category="MODEL",
         net_score=net_score,
         net_score_latency=net_score_latency,
-        ramp_up_time=get_metric_value('ramp_up_time'),
-        ramp_up_time_latency=get_metric_latency('ramp_up_time'),
-        bus_factor=get_metric_value('bus_factor'),
-        bus_factor_latency=get_metric_latency('bus_factor'),
-        performance_claims=get_metric_value('performance_claims'),
-        performance_claims_latency=get_metric_latency('performance_claims'),
-        license=get_metric_value('license'),
-        license_latency=get_metric_latency('license'),
+        ramp_up_time=get_metric_value("ramp_up_time"),
+        ramp_up_time_latency=get_metric_latency("ramp_up_time"),
+        bus_factor=get_metric_value("bus_factor"),
+        bus_factor_latency=get_metric_latency("bus_factor"),
+        performance_claims=get_metric_value("performance_claims"),
+        performance_claims_latency=get_metric_latency("performance_claims"),
+        license=get_metric_value("license"),
+        license_latency=get_metric_latency("license"),
         size_score=size_score_value,
-        size_score_latency=get_metric_latency('size_score'),
-        dataset_and_code_score=get_metric_value('dataset_and_code_score'),
-        dataset_and_code_score_latency=get_metric_latency('dataset_and_code_score'),
-        dataset_quality=get_metric_value('dataset_quality'),
-        dataset_quality_latency=get_metric_latency('dataset_quality'),
-        code_quality=get_metric_value('code_quality'),
-        code_quality_latency=get_metric_latency('code_quality'),
-        reproducibility=get_metric_value('reproducibility'),
-        reproducibility_latency=get_metric_latency('reproducibility'),
-        reviewedness=get_metric_value('reviewedness'),
-        reviewedness_latency=get_metric_latency('reviewedness'),
-        treescore=get_metric_value('treescore'),
-        treescore_latency=get_metric_latency('treescore'),
+        size_score_latency=get_metric_latency("size_score"),
+        dataset_and_code_score=get_metric_value("dataset_and_code_score"),
+        dataset_and_code_score_latency=get_metric_latency("dataset_and_code_score"),
+        dataset_quality=get_metric_value("dataset_quality"),
+        dataset_quality_latency=get_metric_latency("dataset_quality"),
+        code_quality=get_metric_value("code_quality"),
+        code_quality_latency=get_metric_latency("code_quality"),
+        reproducibility=get_metric_value("reproducibility"),
+        reproducibility_latency=get_metric_latency("reproducibility"),
+        reviewedness=get_metric_value("reviewedness"),
+        reviewedness_latency=get_metric_latency("reviewedness"),
+        treescore=get_metric_value("treescore"),
+        treescore_latency=get_metric_latency("treescore"),
     )
+
 
 def main(argv: list[str]) -> int:
     setup_logging()

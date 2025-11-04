@@ -16,12 +16,14 @@ Scoring idea:
 - score = 0.6 * activity + 0.4 * backlog
 """
 
+
 def _extract_github(context):
     # Try object attribute then dict
     gh = getattr(context, "github", None)
     if gh is None and isinstance(context, dict):
         gh = context.get("github")
     return gh or {}
+
 
 def score_pull_requests(context) -> float:
     gh = _extract_github(context)
@@ -42,10 +44,11 @@ def score_pull_requests(context) -> float:
         return 0.5
 
     activity = min(1.0, merged_prs / 50.0)
-    backlog  = 1.0 - min(1.0, open_prs / 50.0)
+    backlog = 1.0 - min(1.0, open_prs / 50.0)
     score = 0.6 * activity + 0.4 * backlog
     # Clamp
     return max(0.0, min(1.0, score))
+
 
 def score_pull_requests_with_latency(context) -> Tuple[float, float]:
     t0 = time.perf_counter()

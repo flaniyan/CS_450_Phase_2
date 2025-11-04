@@ -3,7 +3,11 @@ import json
 from typing import Dict, Any, Optional, Tuple
 from ..acmecli.github_handler import fetch_github_metadata
 from ..acmecli.hf_handler import fetch_hf_metadata
-from .s3_service import download_model, extract_config_from_model, download_from_huggingface
+from .s3_service import (
+    download_model,
+    extract_config_from_model,
+    download_from_huggingface,
+)
 
 
 def normalize_license(license_str: str) -> str:
@@ -73,10 +77,12 @@ def extract_model_license(model_id: str, version: str = "1.0.0") -> Optional[str
     try:
         from .s3_service import list_models, download_model
         from botocore.exceptions import ClientError
+
         model_content = None
         found_version = None
         try:
             import re
+
             escaped_name = re.escape(model_id)
             name_pattern = f"^{escaped_name}$"
             result = list_models(name_regex=name_pattern, limit=1)
@@ -106,7 +112,9 @@ def extract_model_license(model_id: str, version: str = "1.0.0") -> Optional[str
                     clean_model_id = model_id.replace("http://huggingface.co/", "")
                 hf_meta = fetch_hf_metadata(f"https://huggingface.co/{clean_model_id}")
                 if hf_meta:
-                    license_info = hf_meta.get("license") or hf_meta.get("cardData", {}).get("license", "")
+                    license_info = hf_meta.get("license") or hf_meta.get(
+                        "cardData", {}
+                    ).get("license", "")
                     if license_info:
                         return normalize_license(str(license_info))
             except:
@@ -117,16 +125,17 @@ def extract_model_license(model_id: str, version: str = "1.0.0") -> Optional[str
             import tempfile
             import os
             import glob
+
             with tempfile.TemporaryDirectory() as temp_dir:
                 zip_path = os.path.join(temp_dir, f"{model_id}.zip")
-                with open(zip_path, 'wb') as f:
+                with open(zip_path, "wb") as f:
                     f.write(model_content)
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(temp_dir)
                 license_patterns = [
                     r'license["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
                     r'licenses?["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
-                    r'"license"\s*:\s*"([^"]+)"'
+                    r'"license"\s*:\s*"([^"]+)"',
                 ]
                 config = extract_config_from_model(model_content)
                 if config:
@@ -135,12 +144,20 @@ def extract_model_license(model_id: str, version: str = "1.0.0") -> Optional[str
                         matches = re.findall(pattern, config_str, re.IGNORECASE)
                         if matches:
                             return normalize_license(matches[0])
-                readme_files = glob.glob(os.path.join(temp_dir, "**", "*readme*"), recursive=True)
-                readme_files.extend(glob.glob(os.path.join(temp_dir, "**", "*README*"), recursive=True))
-                readme_files.extend(glob.glob(os.path.join(temp_dir, "README*"), recursive=False))
+                readme_files = glob.glob(
+                    os.path.join(temp_dir, "**", "*readme*"), recursive=True
+                )
+                readme_files.extend(
+                    glob.glob(os.path.join(temp_dir, "**", "*README*"), recursive=True)
+                )
+                readme_files.extend(
+                    glob.glob(os.path.join(temp_dir, "README*"), recursive=False)
+                )
                 for readme_file in readme_files:
                     try:
-                        with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(
+                            readme_file, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             content = f.read()
                             for pattern in license_patterns:
                                 matches = re.findall(pattern, content, re.IGNORECASE)
@@ -148,19 +165,31 @@ def extract_model_license(model_id: str, version: str = "1.0.0") -> Optional[str
                                     return normalize_license(matches[0])
                     except:
                         pass
-                license_files = glob.glob(os.path.join(temp_dir, "**", "*license*"), recursive=True)
-                license_files.extend(glob.glob(os.path.join(temp_dir, "**", "*LICENSE*"), recursive=True))
+                license_files = glob.glob(
+                    os.path.join(temp_dir, "**", "*license*"), recursive=True
+                )
+                license_files.extend(
+                    glob.glob(os.path.join(temp_dir, "**", "*LICENSE*"), recursive=True)
+                )
                 for license_file in license_files:
                     try:
-                        with open(license_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(
+                            license_file, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             content = f.read()[:500].lower()
                             if "mit" in content:
                                 return "mit"
                             if "apache" in content:
                                 return "apache-2"
-                            if "gpl-3" in content or "gnu general public license version 3" in content:
+                            if (
+                                "gpl-3" in content
+                                or "gnu general public license version 3" in content
+                            ):
                                 return "gpl-3"
-                            if "gpl-2" in content or "gnu general public license version 2" in content:
+                            if (
+                                "gpl-2" in content
+                                or "gnu general public license version 2" in content
+                            ):
                                 return "gpl-2"
                             if "bsd" in content:
                                 return "bsd"
@@ -190,7 +219,7 @@ def extract_github_license(github_url: str) -> Optional[str]:
             license_patterns = [
                 r'license["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
                 r'licenses?["\']?\s*[:=]\s*["\']?([^"\']+)["\']?',
-                r'"license"\s*:\s*"([^"]+)"'
+                r'"license"\s*:\s*"([^"]+)"',
             ]
             for pattern in license_patterns:
                 matches = re.findall(pattern, readme_text, re.IGNORECASE)
@@ -202,7 +231,11 @@ def extract_github_license(github_url: str) -> Optional[str]:
         return None
 
 
-def check_license_compatibility(model_license: Optional[str], github_license: Optional[str], use_case: str = "fine-tune+inference") -> Dict[str, Any]:
+def check_license_compatibility(
+    model_license: Optional[str],
+    github_license: Optional[str],
+    use_case: str = "fine-tune+inference",
+) -> Dict[str, Any]:
     """Check license compatibility for fine-tuning and inference/generation use."""
     result = {
         "compatible": False,
@@ -210,23 +243,42 @@ def check_license_compatibility(model_license: Optional[str], github_license: Op
         "github_license": github_license or "unknown",
         "use_case": use_case,
         "reason": "",
-        "restrictions": []
+        "restrictions": [],
     }
     if not model_license and not github_license:
         result["reason"] = "No licenses found in model or GitHub repository"
-        result["restrictions"].append("Unable to determine compatibility without license information")
+        result["restrictions"].append(
+            "Unable to determine compatibility without license information"
+        )
         return result
     if not model_license:
         result["reason"] = "Model license not found"
-        result["restrictions"].append("Model license is required for compatibility check")
+        result["restrictions"].append(
+            "Model license is required for compatibility check"
+        )
         return result
     if not github_license:
         result["reason"] = "GitHub repository license not found"
-        result["restrictions"].append("GitHub license is required for compatibility check")
+        result["restrictions"].append(
+            "GitHub license is required for compatibility check"
+        )
         return result
     model_lic = normalize_license(model_license)
     github_lic = normalize_license(github_license)
-    permissive_licenses = ["mit", "bsd", "apache-2", "apache", "mpl-2.0", "mpl", "lgpl-2.1", "lgpl-3", "cc0-1.0", "cc0", "unlicense", "public-domain"]
+    permissive_licenses = [
+        "mit",
+        "bsd",
+        "apache-2",
+        "apache",
+        "mpl-2.0",
+        "mpl",
+        "lgpl-2.1",
+        "lgpl-3",
+        "cc0-1.0",
+        "cc0",
+        "unlicense",
+        "public-domain",
+    ]
     copyleft_licenses = ["gpl-2", "gpl-3", "gpl"]
     restrictive_licenses = ["no-license", "proprietary", "unknown"]
     model_is_permissive = any(lic in model_lic for lic in permissive_licenses)
@@ -239,45 +291,77 @@ def check_license_compatibility(model_license: Optional[str], github_license: Op
         if model_is_restrictive or github_is_restrictive:
             result["compatible"] = False
             result["reason"] = f"Both licenses are restrictive ({model_lic})"
-            result["restrictions"].append("No license or proprietary license prohibits use without explicit permission")
+            result["restrictions"].append(
+                "No license or proprietary license prohibits use without explicit permission"
+            )
         else:
             result["compatible"] = True
             result["reason"] = f"Both licenses are the same ({model_lic})"
         return result
     if model_is_restrictive or github_is_restrictive:
         result["compatible"] = False
-        result["reason"] = f"Restrictive license detected ({model_lic if model_is_restrictive else github_lic})"
-        result["restrictions"].append("No license or proprietary license prohibits use without explicit permission")
+        result["reason"] = (
+            f"Restrictive license detected ({model_lic if model_is_restrictive else github_lic})"
+        )
+        result["restrictions"].append(
+            "No license or proprietary license prohibits use without explicit permission"
+        )
         return result
     if model_is_permissive and github_is_permissive:
         result["compatible"] = True
-        result["reason"] = f"Both licenses are permissive ({model_lic} and {github_lic})"
+        result["reason"] = (
+            f"Both licenses are permissive ({model_lic} and {github_lic})"
+        )
         return result
     if model_is_copyleft and github_is_copyleft:
         if "gpl-3" in model_lic and "gpl-3" in github_lic:
             result["compatible"] = True
-            result["reason"] = "Both are GPL-3.0, compatible but requires derived works to be GPL-3.0"
-            result["restrictions"].append("Derived works must be licensed under GPL-3.0")
+            result["reason"] = (
+                "Both are GPL-3.0, compatible but requires derived works to be GPL-3.0"
+            )
+            result["restrictions"].append(
+                "Derived works must be licensed under GPL-3.0"
+            )
         elif "gpl-2" in model_lic and "gpl-2" in github_lic:
             result["compatible"] = True
-            result["reason"] = "Both are GPL-2.0, compatible but requires derived works to be GPL-2.0"
-            result["restrictions"].append("Derived works must be licensed under GPL-2.0")
+            result["reason"] = (
+                "Both are GPL-2.0, compatible but requires derived works to be GPL-2.0"
+            )
+            result["restrictions"].append(
+                "Derived works must be licensed under GPL-2.0"
+            )
         else:
             result["compatible"] = False
-            result["reason"] = f"Incompatible copyleft licenses ({model_lic} and {github_lic})"
-            result["restrictions"].append("Copyleft licenses require derived works to use the same license")
+            result["reason"] = (
+                f"Incompatible copyleft licenses ({model_lic} and {github_lic})"
+            )
+            result["restrictions"].append(
+                "Copyleft licenses require derived works to use the same license"
+            )
         return result
     if model_is_permissive and github_is_copyleft:
         result["compatible"] = False
-        result["reason"] = f"Permissive model license ({model_lic}) incompatible with copyleft GitHub license ({github_lic})"
-        result["restrictions"].append(f"GitHub license ({github_lic}) requires derived works to be {github_lic}")
-        result["restrictions"].append("Fine-tuning creates derived works, which must comply with copyleft requirements")
+        result["reason"] = (
+            f"Permissive model license ({model_lic}) incompatible with copyleft GitHub license ({github_lic})"
+        )
+        result["restrictions"].append(
+            f"GitHub license ({github_lic}) requires derived works to be {github_lic}"
+        )
+        result["restrictions"].append(
+            "Fine-tuning creates derived works, which must comply with copyleft requirements"
+        )
         return result
     if model_is_copyleft and github_is_permissive:
         result["compatible"] = True
-        result["reason"] = f"Copyleft model license ({model_lic}) allows permissive GitHub license ({github_lic})"
-        result["restrictions"].append(f"Model license ({model_lic}) requires derived works to be {model_lic}")
-        result["restrictions"].append("Fine-tuning creates derived works, which must comply with copyleft requirements")
+        result["reason"] = (
+            f"Copyleft model license ({model_lic}) allows permissive GitHub license ({github_lic})"
+        )
+        result["restrictions"].append(
+            f"Model license ({model_lic}) requires derived works to be {model_lic}"
+        )
+        result["restrictions"].append(
+            "Fine-tuning creates derived works, which must comply with copyleft requirements"
+        )
         return result
     if "apache" in model_lic and "apache" in github_lic:
         result["compatible"] = True
@@ -290,10 +374,15 @@ def check_license_compatibility(model_license: Optional[str], github_license: Op
     if "mit" in model_lic or "mit" in github_lic:
         if model_is_permissive or github_is_permissive:
             result["compatible"] = True
-            result["reason"] = "MIT license is compatible with other permissive licenses"
+            result["reason"] = (
+                "MIT license is compatible with other permissive licenses"
+            )
             return result
     result["compatible"] = False
-    result["reason"] = f"License compatibility could not be determined ({model_lic} vs {github_lic})"
-    result["restrictions"].append("Consult legal counsel for compatibility determination")
+    result["reason"] = (
+        f"License compatibility could not be determined ({model_lic} vs {github_lic})"
+    )
+    result["restrictions"].append(
+        "Consult legal counsel for compatibility determination"
+    )
     return result
-
