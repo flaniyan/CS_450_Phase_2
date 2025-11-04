@@ -44,6 +44,8 @@ jobs:
         with:
           path: ~/.terraform.d/plugin-cache
           key: ${{ runner.os }}-tf-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-tf-
 
       - name: Debug OIDC Configuration
         if: ${{ env.USE_OIDC == 'true' }}
@@ -98,7 +100,11 @@ jobs:
       - name: Terraform init
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false -lock-timeout=5m
+        env:
+          TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+        run: |
+          mkdir -p ~/.terraform.d/plugin-cache
+          terraform init -input=false -lock-timeout=5m
 
       - name: Select or create workspace
         shell: bash
