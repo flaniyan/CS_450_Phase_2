@@ -51,7 +51,11 @@ class GitHubHandler:
             "size": repo_data.get("size", 0),
             "language": repo_data.get("language", ""),
             "topics": repo_data.get("topics", []),
-            "license": repo_data.get("license", {}).get("spdx_id", "") if repo_data.get("license") else "",
+            "license": (
+                repo_data.get("license", {}).get("spdx_id", "")
+                if repo_data.get("license")
+                else ""
+            ),
             "created_at": repo_data.get("created_at", ""),
             "updated_at": repo_data.get("updated_at", ""),
             "pushed_at": repo_data.get("pushed_at", ""),
@@ -65,17 +69,25 @@ class GitHubHandler:
 
         contributors_url = f"https://api.github.com/repos/{owner}/{repo}/contributors"
         contributors = self._get_json(contributors_url)
-        meta["contributors"] = {
-            contrib.get("login", "unknown"): contrib.get("contributions", 0)
-            for contrib in contributors[:10]
-        } if isinstance(contributors, list) else {}
+        meta["contributors"] = (
+            {
+                contrib.get("login", "unknown"): contrib.get("contributions", 0)
+                for contrib in contributors[:10]
+            }
+            if isinstance(contributors, list)
+            else {}
+        )
 
         readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
         readme_data = self._get_json(readme_url)
         if readme_data:
             try:
                 content = readme_data.get("content", "")
-                meta["readme_text"] = b64decode(content).decode("utf-8", errors="ignore") if content else ""
+                meta["readme_text"] = (
+                    b64decode(content).decode("utf-8", errors="ignore")
+                    if content
+                    else ""
+                )
             except Exception as exc:
                 logging.warning("Failed to decode README for %s: %s", url, exc)
                 meta["readme_text"] = ""
@@ -87,22 +99,38 @@ class GitHubHandler:
             prs = []
             if isinstance(prs_data, list):
                 for pr in prs_data[:30]:
-                    pr_info = {"merged": pr.get("merged", False), "approved": False, "review_count": 0, "additions": pr.get("additions", 0), "files": []}
+                    pr_info = {
+                        "merged": pr.get("merged", False),
+                        "approved": False,
+                        "review_count": 0,
+                        "additions": pr.get("additions", 0),
+                        "files": [],
+                    }
                     pr_number = pr.get("number")
                     if pr_number:
                         reviews_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
                         reviews = self._get_json(reviews_url)
                         if isinstance(reviews, list):
-                            approved_reviews = [r for r in reviews if r.get("state") == "APPROVED"]
+                            approved_reviews = [
+                                r for r in reviews if r.get("state") == "APPROVED"
+                            ]
                             pr_info["review_count"] = len(reviews)
                             pr_info["approved"] = len(approved_reviews) > 0
                         files_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
                         files_data = self._get_json(files_url)
                         if isinstance(files_data, list):
-                            pr_info["files"] = [{"filename": f.get("filename", ""), "additions": f.get("additions", 0)} for f in files_data]
+                            pr_info["files"] = [
+                                {
+                                    "filename": f.get("filename", ""),
+                                    "additions": f.get("additions", 0),
+                                }
+                                for f in files_data
+                            ]
                     prs.append(pr_info)
             meta["github"] = {"prs": prs}
-            commits_url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=30"
+            commits_url = (
+                f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=30"
+            )
             commits_data = self._get_json(commits_url)
             direct_commits = []
             if isinstance(commits_data, list):
@@ -116,7 +144,13 @@ class GitHubHandler:
                             stats = commit_detail.get("stats", {})
                             commit_info["additions"] = stats.get("additions", 0)
                             files = commit_detail.get("files", [])
-                            commit_info["files"] = [{"filename": f.get("filename", ""), "additions": f.get("additions", 0)} for f in files]
+                            commit_info["files"] = [
+                                {
+                                    "filename": f.get("filename", ""),
+                                    "additions": f.get("additions", 0),
+                                }
+                                for f in files
+                            ]
                     direct_commits.append(commit_info)
             if "github" not in meta:
                 meta["github"] = {}

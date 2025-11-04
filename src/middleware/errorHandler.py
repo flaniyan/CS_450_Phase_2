@@ -13,5 +13,3 @@ def error_handler(request: Request, exc: Exception):
             "message": str(exc) or "Something went wrong",
         },
     )
-
-

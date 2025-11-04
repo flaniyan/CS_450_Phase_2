@@ -1,11 +1,12 @@
 repos:
-- repo: local
+- repo: https://github.com/psf/black
+  rev: 24.1.1
   hooks:
   - id: black
-    name: black
-    entry: black
-    language: system
-    files: \.py$
+    language_version: python3
+    args: [--line-length=100]
+- repo: local
+  hooks:
   - id: pytest
     name: pytest
     entry: pytest
