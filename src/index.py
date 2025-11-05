@@ -9,7 +9,7 @@ import random
 import logging
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
-from fastapi.security import HTTPBearer
+# from fastapi.security import HTTPBearer  # Not used - removed to prevent accidental security enforcement
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,7 @@ from .services.s3_service import list_models, upload_model, download_model, rese
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
 
-bearer = HTTPBearer(auto_error=True)
+# bearer = HTTPBearer(auto_error=True)  # Unused - removed to prevent any accidental security enforcement
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 class User(BaseModel):
