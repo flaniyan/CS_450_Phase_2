@@ -93,19 +93,41 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     return response
 
 @app.put("/authenticate")
-def authenticate(auth_request: AuthRequest, request: Request):
+async def authenticate(request: Request):
     try:
         logger.info(f"=== AUTHENTICATE ENDPOINT CALLED ===")
         logger.info(f"Received authenticate request with headers: {dict(request.headers)}")
-        logger.info(f"Request body received - user: {auth_request.user.name if auth_request.user else None}")
-        logger.info(f"Request body received - has secret: {bool(auth_request.secret)}")
-        if not auth_request.user or not auth_request.secret:
+        
+        # Parse body manually to avoid FastAPI validation issues
+        try:
+            body = await request.json()
+            logger.info(f"Request body JSON: {body}")
+        except Exception as json_error:
+            logger.error(f"Failed to parse JSON: {str(json_error)}", exc_info=True)
             raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
+        
+        # Manually validate the request body
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
+        
+        user_data = body.get("user")
+        secret_data = body.get("secret")
+        
+        logger.info(f"Request body received - user: {user_data.get('name') if user_data else None}")
+        logger.info(f"Request body received - has secret: {bool(secret_data)}")
+        
+        if not user_data or not secret_data:
+            raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
+        
         auth_enabled = True
         if not auth_enabled:
             raise HTTPException(status_code=501, detail="This system does not support authentication.")
-        if (auth_request.user.name == "ece30861defaultadminuser" and 
-            auth_request.secret.password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"):
+        
+        user_name = user_data.get("name")
+        password = secret_data.get("password")
+        
+        if (user_name == "ece30861defaultadminuser" and 
+            password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"):
             token = "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example"
             return token
         else:
@@ -113,12 +135,13 @@ def authenticate(auth_request: AuthRequest, request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Authenticate error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
 
 @app.post("/login")
-def login(auth_request: AuthRequest, request: Request):
+async def login(request: Request):
     """Login endpoint - alias for authenticate endpoint"""
-    return authenticate(auth_request, request)
+    return await authenticate(request)
 
 @app.post("/artifacts")
 async def list_artifacts(request: Request, offset: str = None):
