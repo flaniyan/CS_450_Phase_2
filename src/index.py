@@ -34,21 +34,28 @@ app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 @app.middleware("http")
 async def log_request_body(request: Request, call_next):
+    # Log ALL requests first, before any processing
+    logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
+    logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
     try:
-        logger.info(f"=== MIDDLEWARE: {request.method} {request.url.path} ===")
         if request.url.path == "/authenticate":
             logger.info(f"=== AUTHENTICATE REQUEST DETECTED ===")
-            body = await request.body()
-            logger.info(f"=== RAW REQUEST BODY ===")
-            logger.info(f"Body bytes: {body}")
-            logger.info(f"Body length: {len(body)}")
-            logger.info(f"Content-Type: {request.headers.get('content-type')}")
-            logger.info(f"Method: {request.method}")
-            logger.info(f"Path: {request.url.path}")
-            # Reset body for FastAPI to parse
-            async def receive():
-                return {"type": "http.request", "body": body}
-            request._receive = receive
+            try:
+                body = await request.body()
+                logger.info(f"=== RAW REQUEST BODY ===")
+                logger.info(f"Body bytes: {body}")
+                logger.info(f"Body length: {len(body)}")
+                logger.info(f"Content-Type: {request.headers.get('content-type')}")
+                logger.info(f"Method: {request.method}")
+                logger.info(f"Path: {request.url.path}")
+                # Reset body for FastAPI to parse
+                async def receive():
+                    return {"type": "http.request", "body": body}
+                request._receive = receive
+            except Exception as body_error:
+                logger.error(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", exc_info=True)
+                raise
+        logger.info(f"=== MIDDLEWARE: Calling call_next ===")
         response = await call_next(request)
         logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
         return response
