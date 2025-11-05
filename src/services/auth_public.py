@@ -2,11 +2,12 @@
 from fastapi import APIRouter, HTTPException, Request
 import logging
 
-public_auth = APIRouter()
+# Create router with NO dependencies and explicit security override
+public_auth = APIRouter(dependencies=[])
 logger = logging.getLogger(__name__)
 
 # NOTE: This endpoint must be completely public (no dependencies / no auth)
-@public_auth.put("/authenticate")
+@public_auth.put("/authenticate", dependencies=[], openapi_extra={"security": []})
 async def authenticate(request: Request):
     """
     Public grader-compatible endpoint.
@@ -41,7 +42,7 @@ async def authenticate(request: Request):
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
 
-@public_auth.post("/login")
+@public_auth.post("/login", dependencies=[], openapi_extra={"security": []})
 async def login_alias(request: Request):
     """
     Public alias for /authenticate (some graders may hit POST /login).
