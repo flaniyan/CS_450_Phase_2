@@ -1,0 +1,39 @@
+[33mbebd9cd[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mREST_API[m[33m, [m[1;31morigin/REST_API[m[33m)[m /authenticate was still being forced through FastAPIs bearer-token security due to shared/global auth dependencies...pulled /authenticate into its own public router with no security, moved all protected endpoints to a private router, and included the public router first in index.py
+[33m060fd2d[m should fix any header mismatch and returns a bare token to get rid of the bearer bug
+[33mbd0cf81[m make sure middleware runs first for all requests and added an exception handler to log any HTTP exceptions for debugging purposes...should also bypass any FASTAPI security checks for authenticate endpoint
+[33m3d05eb4[m deleting the debugging doc
+[33m85bd34c[m seeing if post works (also only using request as parameter to see if maybe the missing header error is gone)
+[33mb8a63f5[m Change authenticate endpoint to accept raw Request and parse JSON manually to bypass FastAPI validation
+[33m6814dce[m checking if fastapi's request validation is running before the middleware
+[33m4b08fa0[m more detailed log...didnt appear in cloudfront logs for some reason lets try again
+[33m43cbba3[m adding middleware code for debugging 'missing or malformed authentication header'
+[33m39fea58[m giving metrics more leniency and added new files for tesitng purposes (curl doesnt work for some with the need of authentication
+[33m7d52aae[m give more leniency for all metrics
+[33md723551[m verified all autograder endpoints...added an artifact storge dictionary for proper metadata handling for non-models (clears this while also resetting the registry in the reset endpoint), added code logic to handle non-model artifacts (dataset and code), added the storage variable for ingest to handle manual model uploading (instead of only handling HF model links), formatted with black, made sure the ID is actually formed randomly instead of just using model name (also added validation checks for artifact ID format), etc
+[33mdb5a74e[m reverting back to local uploading instead of ingest in the terraform-script for testing
+[33m97582db[m fixing id search
+[33ma805bf5[m license check modelGO approaches code implementation
+[33m7c4ad5a[m better handling for github so all metrics show some sort of output
+[33m5f80f42[m fixing regex
+[33mfdae22b[m make sure list_models() is used first to get the actual version
+[33m887c99c[m merging for ingest testing
+[33m43bb3e3[m rate fix for ingest
+[33m5ee9d7d[m getting rid of redeployment, adding solid fallbac, etc
+[33mb9b9fd4[m test
+[33m8c8effd[m fixing method already exists error
+[33m8938709[m added some delay so the model is available from the s3 for the request to work...plus fixing some 400 errors
+[33m13a2c02[m removing automatic redeployment in hte api gaetway
+[33m668fe11[m fix for 400 errors (hopefully)
+[33md842097[m adding any missing endpoints that could cause the 404 error
+[33mf382d71[m Better error handling for debugging purposes
+[33m42f2870[m trying a different endpoint for upload
+[33m6c39a83[m deleting duplicate blocks
+[33mf9c1d71[m added more endpoints in main.tf handling API gateway, added more methods in terraform-script, fixing the internal server error, getting rid of mock stuff for now...
+[33m0e6eaf4[m added more endpoints in main.tf handling API gateway, added more methods in terraform-script, fixing the internal server error, getting rid of mock stuff for now...
+[33m689a224[m fixing upload internal server problem (hopefully), fix/add the necessary GET routes, and made the log more accurate in terraform-script
+[33m796fb3f[m Add /upload endpoint directly to index.py for API Gateway compatibility
+[33mfeef61d[m Fix duplicate depends_on block in API Gateway deployment
+[33m8dd13c1[m Fix multipart/form-data handling for /upload endpoint and add root GET endpoint
+[33mbfe85f9[m fixed the authentication error (just needs to be redeployed via CD since the docker is running old code), added real code to index.py, using a different API ID (1q1x0d7k93 instead of dyrelddhj1) that has all the necessary routing, and added more methods in the terraform-script.py file
+[33m034aa33[m add endpoints
+[33m0bd8e04[m add some stuff in the terraform configuration file and fix index.py routing
