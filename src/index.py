@@ -34,20 +34,27 @@ app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 @app.middleware("http")
 async def log_request_body(request: Request, call_next):
-    if request.url.path == "/authenticate":
-        body = await request.body()
-        logger.info(f"=== RAW REQUEST BODY ===")
-        logger.info(f"Body bytes: {body}")
-        logger.info(f"Body length: {len(body)}")
-        logger.info(f"Content-Type: {request.headers.get('content-type')}")
-        logger.info(f"Method: {request.method}")
-        logger.info(f"Path: {request.url.path}")
-        # Reset body for FastAPI to parse
-        async def receive():
-            return {"type": "http.request", "body": body}
-        request._receive = receive
-    response = await call_next(request)
-    return response
+    try:
+        logger.info(f"=== MIDDLEWARE: {request.method} {request.url.path} ===")
+        if request.url.path == "/authenticate":
+            logger.info(f"=== AUTHENTICATE REQUEST DETECTED ===")
+            body = await request.body()
+            logger.info(f"=== RAW REQUEST BODY ===")
+            logger.info(f"Body bytes: {body}")
+            logger.info(f"Body length: {len(body)}")
+            logger.info(f"Content-Type: {request.headers.get('content-type')}")
+            logger.info(f"Method: {request.method}")
+            logger.info(f"Path: {request.url.path}")
+            # Reset body for FastAPI to parse
+            async def receive():
+                return {"type": "http.request", "body": body}
+            request._receive = receive
+        response = await call_next(request)
+        logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
+        return response
+    except Exception as e:
+        logger.error(f"=== MIDDLEWARE ERROR: {str(e)} ===", exc_info=True)
+        raise
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
     auth_header = request.headers.get("X-Authorization", "")
@@ -81,7 +88,10 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
 @app.put("/authenticate")
 def authenticate(auth_request: AuthRequest, request: Request):
     try:
+        logger.info(f"=== AUTHENTICATE ENDPOINT CALLED ===")
         logger.info(f"Received authenticate request with headers: {dict(request.headers)}")
+        logger.info(f"Request body received - user: {auth_request.user.name if auth_request.user else None}")
+        logger.info(f"Request body received - has secret: {bool(auth_request.secret)}")
         if not auth_request.user or not auth_request.secret:
             raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
         auth_enabled = True
