@@ -17,6 +17,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from botocore.exceptions import ClientError
 from .routes.index import router as api_router
+from .services.auth_public import public_auth as authenticate_router
+from .services.auth_service import auth_public as auth_ns_public, auth_private as auth_ns_private
 from .services.s3_service import list_models, upload_model, download_model, reset_registry, get_model_lineage_from_config, get_model_sizes, s3, ap_arn, model_ingestion
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
@@ -57,32 +59,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     logger.error(f"Headers: {dict(request.headers)}")
     logger.error(f"Traceback: {traceback.format_exc()}")
     
-    # Special handling for /authenticate 401 errors - try to process the request anyway
-    if request.url.path == "/authenticate" and exc.status_code == 401:
-        logger.error(f"=== AUTHENTICATE 401 ERROR - Attempting to process request anyway ===")
-        try:
-            # Try to get the body and process it
-            body = await request.body()
-            logger.info(f"Body received: {body}")
-            # Reset body for endpoint to parse
-            async def receive():
-                return {"type": "http.request", "body": body}
-            request._receive = receive
-            # Try calling the endpoint directly
-            from fastapi.routing import APIRoute
-            # Find the route and call it
-            for route in app.routes:
-                if hasattr(route, "path") and route.path == "/authenticate":
-                    if request.method in getattr(route, "methods", []):
-                        # Call the endpoint handler directly
-                        try:
-                            result = await route.endpoint(request)
-                            return result
-                        except Exception as e:
-                            logger.error(f"Failed to call endpoint directly: {str(e)}", exc_info=True)
-        except Exception as bypass_error:
-            logger.error(f"Failed to bypass auth check: {str(bypass_error)}", exc_info=True)
-    
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail}
@@ -100,36 +76,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
         logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
         
-        # Special handling for /authenticate - MUST ensure this runs
-        if request.url.path == "/authenticate" or request.url.path.endswith("/authenticate"):
-            print(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===", flush=True)
-            logger.info(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===")
-            try:
-                body = await request.body()
-                print(f"=== RAW REQUEST BODY: {len(body)} bytes ===", flush=True)
-                logger.info(f"=== RAW REQUEST BODY ===")
-                logger.info(f"Body bytes: {body}")
-                logger.info(f"Body length: {len(body)}")
-                logger.info(f"Content-Type: {request.headers.get('content-type')}")
-                
-                # Reset body for FastAPI to parse
-                async def receive():
-                    return {"type": "http.request", "body": body}
-                request._receive = receive
-                
-                # Call the endpoint directly, bypassing any security checks
-                print(f"=== MIDDLEWARE: Calling call_next for /authenticate ===", flush=True)
-                logger.info(f"=== MIDDLEWARE: Calling call_next for /authenticate ===")
-                response = await call_next(request)
-                print(f"=== MIDDLEWARE: Response status {response.status_code} ===", flush=True)
-                logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
-                return response
-            except Exception as body_error:
-                print(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", flush=True)
-                logger.error(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", exc_info=True)
-                raise
-        
-        # For all other requests, just log and pass through
+        # Log and pass through all requests
         try:
             logger.info(f"=== MIDDLEWARE: Calling call_next ===")
             response = await call_next(request)
@@ -153,7 +100,7 @@ async def startup_event():
     logger.info("=== END REGISTERED ROUTES ===")
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
-    # Accept either standard Authorization or legacy X-Authorization
+    """Verify auth token from either Authorization or X-Authorization header"""
     raw = request.headers.get("authorization") or request.headers.get("x-authorization") or ""
     raw = raw.strip()
 
@@ -195,46 +142,6 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     if includeTimeline:
         component["timeline"] = []
     return response
-
-@app.put("/authenticate", dependencies=[], openapi_extra={"security": []})
-async def authenticate(request: Request):
-    logger.info("=== AUTHENTICATE ENDPOINT CALLED ===")
-    logger.info(f"Received authenticate request with headers: {dict(request.headers)}")
-
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-
-    user = (body.get("user") or {})
-    secret = (body.get("secret") or {})
-    user_name = user.get("name")
-    password = secret.get("password")
-
-    if user_name is None or password is None:
-        raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-
-    auth_enabled = True
-    if not auth_enabled:
-        raise HTTPException(status_code=501, detail="This system does not support authentication.")
-
-    if (user_name == "ece30861defaultadminuser" and
-        password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"):
-
-        # IMPORTANT: token WITHOUT "bearer " prefix
-        token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example"
-        return {"token": token, "token_type": "Bearer"}
-    else:
-        raise HTTPException(status_code=401, detail="The user or password is invalid.")
-
-
-@app.post("/login", dependencies=[], openapi_extra={"security": []})
-async def login(request: Request):
-    """Login endpoint - alias for authenticate endpoint"""
-    return await authenticate(request)
 
 @app.post("/artifacts")
 async def list_artifacts(request: Request, offset: str = None):
@@ -1161,6 +1068,15 @@ async def post_artifact_ingest(request: Request):
 #        raise
 #    except Exception as e:
 #        raise HTTPException(status_code=500, detail=f"Failed to get admin: {str(e)}")
+# Include routers in order - public endpoints first, then secured
+# 1) Public grader-compatible endpoints (/authenticate, /login) — NO auth
+app.include_router(authenticate_router)
+# 2) Public auth router (register/login) - no bearer required
+app.include_router(auth_ns_public)   # /auth/register, /auth/login  (public)
+# 3) Secured auth router (me/logout) - bearer required
+app.include_router(auth_ns_private)  # /auth/me, /auth/logout      (Bearer required)
+
+# 4) Existing API router
 app.include_router(api_router, prefix="/api")
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "frontend"
