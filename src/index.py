@@ -21,6 +21,7 @@ from .services.s3_service import list_models, upload_model, download_model, rese
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
 
+bearer = HTTPBearer(auto_error=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 class User(BaseModel):
@@ -41,11 +42,13 @@ app = FastAPI(
 # Add exception handler to catch authentication errors - MUST be registered early
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Catch all HTTP exceptions to log them"""
     import traceback
+    print(f"=== HTTP EXCEPTION CAUGHT: {exc.status_code} {request.method} {request.url.path} ===", flush=True)
     logger.error(f"=== HTTP EXCEPTION CAUGHT ===")
     logger.error(f"Status: {exc.status_code}")
     logger.error(f"Detail: {exc.detail}")
@@ -88,54 +91,57 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 # Register CORS middleware FIRST (will run LAST due to LIFO order)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# Register custom middleware LAST (will run FIRST due to LIFO order) - MUST run before any route processing
-@app.middleware("http")
-async def log_request_body(request: Request, call_next):
-    # Log ALL requests first, before any processing
-    # Use print() as fallback in case logger isn't working
-    print(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===", flush=True)
-    logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
-    logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
-    
-    # Special handling for /authenticate - MUST ensure this runs
-    if request.url.path == "/authenticate" or request.url.path.endswith("/authenticate"):
-        print(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===", flush=True)
-        logger.info(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===")
+# Register custom middleware as BaseHTTPMiddleware to ensure it ALWAYS runs
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Log ALL requests first, before any processing
+        # Use print() as fallback in case logger isn't working
+        print(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===", flush=True)
+        logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
+        logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
+        
+        # Special handling for /authenticate - MUST ensure this runs
+        if request.url.path == "/authenticate" or request.url.path.endswith("/authenticate"):
+            print(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===", flush=True)
+            logger.info(f"=== AUTHENTICATE REQUEST DETECTED IN MIDDLEWARE ===")
+            try:
+                body = await request.body()
+                print(f"=== RAW REQUEST BODY: {len(body)} bytes ===", flush=True)
+                logger.info(f"=== RAW REQUEST BODY ===")
+                logger.info(f"Body bytes: {body}")
+                logger.info(f"Body length: {len(body)}")
+                logger.info(f"Content-Type: {request.headers.get('content-type')}")
+                
+                # Reset body for FastAPI to parse
+                async def receive():
+                    return {"type": "http.request", "body": body}
+                request._receive = receive
+                
+                # Call the endpoint directly, bypassing any security checks
+                print(f"=== MIDDLEWARE: Calling call_next for /authenticate ===", flush=True)
+                logger.info(f"=== MIDDLEWARE: Calling call_next for /authenticate ===")
+                response = await call_next(request)
+                print(f"=== MIDDLEWARE: Response status {response.status_code} ===", flush=True)
+                logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
+                return response
+            except Exception as body_error:
+                print(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", flush=True)
+                logger.error(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", exc_info=True)
+                raise
+        
+        # For all other requests, just log and pass through
         try:
-            body = await request.body()
-            print(f"=== RAW REQUEST BODY: {len(body)} bytes ===", flush=True)
-            logger.info(f"=== RAW REQUEST BODY ===")
-            logger.info(f"Body bytes: {body}")
-            logger.info(f"Body length: {len(body)}")
-            logger.info(f"Content-Type: {request.headers.get('content-type')}")
-            
-            # Reset body for FastAPI to parse
-            async def receive():
-                return {"type": "http.request", "body": body}
-            request._receive = receive
-            
-            # Call the endpoint directly, bypassing any security checks
-            print(f"=== MIDDLEWARE: Calling call_next for /authenticate ===", flush=True)
-            logger.info(f"=== MIDDLEWARE: Calling call_next for /authenticate ===")
+            logger.info(f"=== MIDDLEWARE: Calling call_next ===")
             response = await call_next(request)
-            print(f"=== MIDDLEWARE: Response status {response.status_code} ===", flush=True)
             logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
             return response
-        except Exception as body_error:
-            print(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", flush=True)
-            logger.error(f"=== MIDDLEWARE BODY ERROR: {str(body_error)} ===", exc_info=True)
+        except Exception as e:
+            print(f"=== MIDDLEWARE ERROR: {str(e)} ===", flush=True)
+            logger.error(f"=== MIDDLEWARE ERROR: {str(e)} ===", exc_info=True)
             raise
-    
-    # For all other requests, just log and pass through
-    try:
-        logger.info(f"=== MIDDLEWARE: Calling call_next ===")
-        response = await call_next(request)
-        logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
-        return response
-    except Exception as e:
-        print(f"=== MIDDLEWARE ERROR: {str(e)} ===", flush=True)
-        logger.error(f"=== MIDDLEWARE ERROR: {str(e)} ===", exc_info=True)
-        raise
+
+# Register middleware using BaseHTTPMiddleware to ensure it always runs
+app.add_middleware(LoggingMiddleware)
 
 @app.on_event("startup")
 async def startup_event():
@@ -147,10 +153,25 @@ async def startup_event():
     logger.info("=== END REGISTERED ROUTES ===")
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
-    auth_header = request.headers.get("X-Authorization", "")
-    if not auth_header:
+    # Accept either standard Authorization or legacy X-Authorization
+    raw = request.headers.get("authorization") or request.headers.get("x-authorization") or ""
+    raw = raw.strip()
+
+    if not raw:
         return False
-    return auth_header.lower().startswith("bearer ")
+
+    # Normalize: allow "Bearer <token>" or legacy "bearer <token>"
+    if raw.lower().startswith("bearer "):
+        token = raw.split(" ", 1)[1].strip()
+    else:
+        # Also accept a raw JWT without the "Bearer " prefix
+        token = raw.strip()
+
+    # Very light check: looks like a JWT (three parts with dots)
+    # (Replace with real verification when ready)
+    parts = token.split(".")
+    return len(parts) == 3 and all(parts)
+
 
 @app.get("/health")
 def health():
@@ -177,46 +198,40 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
 
 @app.put("/authenticate", dependencies=[], openapi_extra={"security": []})
 async def authenticate(request: Request):
-    # This endpoint should NOT require authentication - it's where you GET the token
-    logger.info(f"=== AUTHENTICATE ENDPOINT CALLED ===")
+    logger.info("=== AUTHENTICATE ENDPOINT CALLED ===")
     logger.info(f"Received authenticate request with headers: {dict(request.headers)}")
-    
+
     try:
-        # Parse body manually to avoid FastAPI validation issues
         body = await request.json()
-        logger.info(f"Request body JSON: {body}")
-    except Exception as json_error:
-        logger.error(f"Failed to parse JSON: {str(json_error)}", exc_info=True)
+    except Exception:
         raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-    
-    # Manually validate the request body
+
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-    
-    user_data = body.get("user")
-    secret_data = body.get("secret")
-    
-    logger.info(f"Request body received - user: {user_data.get('name') if user_data else None}")
-    logger.info(f"Request body received - has secret: {bool(secret_data)}")
-    
-    if not user_data or not secret_data:
+
+    user = (body.get("user") or {})
+    secret = (body.get("secret") or {})
+    user_name = user.get("name")
+    password = secret.get("password")
+
+    if user_name is None or password is None:
         raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
-    
+
     auth_enabled = True
     if not auth_enabled:
         raise HTTPException(status_code=501, detail="This system does not support authentication.")
-    
-    user_name = user_data.get("name")
-    password = secret_data.get("password")
-    
+
     if (user_name == "ece30861defaultadminuser" and
         password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"):
-        token = "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example"
-        return token
+
+        # IMPORTANT: token WITHOUT "bearer " prefix
+        token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example"
+        return {"token": token, "token_type": "Bearer"}
     else:
         raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
-@app.post("/login")
+
+@app.post("/login", dependencies=[], openapi_extra={"security": []})
 async def login(request: Request):
     """Login endpoint - alias for authenticate endpoint"""
     return await authenticate(request)
