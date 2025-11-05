@@ -22,9 +22,12 @@ class TreescoreMetric:
             if 0.0 <= s <= 1.0:
                 scores.append(s)
 
-        # No usable parent scores
+        # More lenient: if no usable parent scores but parents exist, give baseline score
         if not scores:
-            return 0.0
+            # If parents array exists but has no scores, give baseline score for having lineage info
+            if parents and len(parents) > 0:
+                return 0.5  # Baseline score for having parent lineage info even without scores
+            return -1.0  # Only return -1 if truly no parent data
 
         # Average and clamp to [0,1]
         avg = sum(scores) / len(scores)

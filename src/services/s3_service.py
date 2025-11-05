@@ -746,6 +746,9 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             config = extract_config_from_model(zip_content)
             if config:
                 meta["config"] = config
+            zip_size_bytes = len(zip_content)
+            zip_size_kb = zip_size_bytes / 1024
+            meta["size"] = int(zip_size_kb)
             meta["contributors"] = {}
             meta["pushed_at"] = None
             meta["github_url"] = ""
@@ -758,6 +761,7 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             meta["language"] = "python"
             meta["open_issues_count"] = 0
             meta["github"] = {}
+            meta["license"] = ""
             try:
                 from ..acmecli.hf_handler import fetch_hf_metadata
 
@@ -771,35 +775,91 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                     meta["downloads"] = hf_meta.get("downloads", 0)
                     if hf_meta.get("modelId"):
                         meta["full_name"] = hf_meta.get("modelId", model_id)
-                    card_data = hf_meta.get("cardData", {})
-                    if isinstance(card_data, dict):
-                        readme_text = card_data.get("---", "")
-                        if isinstance(readme_text, str) and not meta.get("readme_text"):
-                            meta["readme_text"] = readme_text
-                        repo_url = None
-                        for key, value in card_data.items():
-                            if isinstance(value, str) and "github.com" in value.lower():
-                                import re
-
-                                github_match = re.search(
-                                    r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", value
-                                )
-                                if github_match:
-                                    repo_url = github_match.group(0)
-                                    break
-                        if not repo_url and meta.get("readme_text"):
-                            readme = meta["readme_text"]
-                            import re
-
-                            github_matches = re.findall(
-                                r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", readme
-                            )
+                    # Extract description for better scoring
+                    description = hf_meta.get("description", "") or hf_meta.get("cardData", {}).get("description", "")
+                    if description and not meta.get("readme_text"):
+                        meta["readme_text"] = description
+                    elif description and meta.get("readme_text"):
+                        # Append description to readme if not already present
+                        if description.lower() not in meta.get("readme_text", "").lower():
+                            meta["readme_text"] = description + "\n\n" + meta.get("readme_text", "")
+                    # Extract tags/topics for better scoring
+                    tags = hf_meta.get("tags", []) or hf_meta.get("cardData", {}).get("tags", [])
+                    if tags:
+                        meta["tags"] = tags
+                    hf_license = hf_meta.get("license", "") or hf_meta.get("cardData", {}).get("license", "")
+                    if hf_license and not meta.get("license"):
+                        meta["license"] = hf_license.lower()
+                    repo_url = None
+                    import re
+                    if isinstance(hf_meta, dict):
+                        github_field = hf_meta.get("github", "")
+                        if github_field:
+                            if isinstance(github_field, str):
+                                if github_field.startswith("http"):
+                                    repo_url = github_field
+                                else:
+                                    repo_url = f"https://github.com/{github_field}"
+                            elif isinstance(github_field, dict):
+                                repo_url = github_field.get("url") or github_field.get("repo")
+                    if not repo_url:
+                        card_data = hf_meta.get("cardData", {})
+                        if isinstance(card_data, dict):
+                            readme_text = card_data.get("---", "")
+                            if isinstance(readme_text, str) and not meta.get("readme_text"):
+                                meta["readme_text"] = readme_text
+                            card_license = card_data.get("license", "")
+                            if card_license and not meta.get("license"):
+                                meta["license"] = card_license.lower()
+                            for key, value in card_data.items():
+                                if isinstance(value, str) and ("github.com" in value.lower() or "github" in key.lower()):
+                                    github_match = re.search(
+                                        r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", value
+                                    )
+                                    if github_match:
+                                        repo_url = github_match.group(0)
+                                        break
+                                    elif "/" in value and len(value.split("/")) == 2:
+                                        potential_repo = value.strip()
+                                        if not potential_repo.startswith("http"):
+                                            repo_url = f"https://github.com/{potential_repo}"
+                                        break
+                    if not repo_url and meta.get("readme_text"):
+                        readme = meta.get("readme_text", "")
+                        # More lenient regex to catch GitHub URLs in various formats
+                        # Handles: https://github.com/owner/repo, http://github.com/owner/repo
+                        # Also handles URLs with paths like /tree/main, /blob/main, etc.
+                        # Handles URLs without protocol: github.com/owner/repo
+                        # Handles markdown links: [text](https://github.com/owner/repo)
+                        # Handles URLs with underscores and hyphens in owner/repo names
+                        
+                        # First try markdown link syntax: [text](url) or [text](url "title")
+                        markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
+                        markdown_match = re.search(markdown_pattern, readme)
+                        if markdown_match:
+                            owner, repo = markdown_match.group(2), markdown_match.group(3)
+                            owner = owner.rstrip('.').strip()
+                            repo = repo.rstrip('.').strip()
+                            if owner and repo:
+                                repo_url = f"https://github.com/{owner}/{repo}"
+                        else:
+                            # Fallback to direct URL matching
+                            github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
+                            github_matches = re.findall(github_pattern, readme)
                             if github_matches:
-                                repo_url = github_matches[0]
-                        if repo_url:
-                            meta["github_url"] = repo_url
-                            from ..acmecli.github_handler import fetch_github_metadata
-
+                                # Extract owner and repo, construct full URL
+                                # Take the first match, clean up owner/repo (remove trailing dots, etc.)
+                                owner, repo = github_matches[0]
+                                owner = owner.rstrip('.').strip()
+                                repo = repo.rstrip('.').strip()
+                                if owner and repo:
+                                    repo_url = f"https://github.com/{owner}/{repo}"
+                    if repo_url:
+                        meta["github_url"] = repo_url
+                        meta["github"] = {"prs": [], "direct_commits": []}
+                        from ..acmecli.github_handler import fetch_github_metadata
+                        try:
+                            # Fetch GitHub metadata with timeout - needed for treescore, reproducibility, reviewedness metrics
                             gh_meta = fetch_github_metadata(repo_url)
                             if gh_meta:
                                 meta["contributors"] = gh_meta.get("contributors", {})
@@ -815,12 +875,23 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                                 meta["open_issues_count"] = gh_meta.get(
                                     "open_issues_count", 0
                                 )
+                                gh_size_kb = gh_meta.get("size", 0)
+                                if gh_size_kb and gh_size_kb > 0:
+                                    meta["size"] = gh_size_kb
+                                gh_license = gh_meta.get("license", "")
+                                if gh_license and not meta.get("license"):
+                                    meta["license"] = gh_license.lower()
                                 if gh_meta.get("readme_text") and not meta.get(
                                     "readme_text"
                                 ):
                                     meta["readme_text"] = gh_meta.get("readme_text", "")
+                                if gh_meta.get("repo_files"):
+                                    meta["repo_files"] = meta.get("repo_files", set()) | gh_meta.get("repo_files", set())
                                 if gh_meta.get("github"):
                                     meta["github"] = gh_meta.get("github", {})
+                        except Exception as gh_fetch_error:
+                            print(f"[INGEST] Warning: Could not fetch GitHub metadata for {repo_url}: {gh_fetch_error}")
+                            print(f"[INGEST] Note: github_url is set but GitHub API data unavailable (may be rate limited)")
                 if config:
                     base_model = (
                         config.get("_name_or_path")
@@ -832,14 +903,23 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                             "https://huggingface.co/", ""
                         ).replace("http://huggingface.co/", "")
                         if parent_id != clean_model_id:
-                            meta["parents"] = [{"score": 0.5, "id": parent_id}]
+                            # Simplified parent lookup - just use the parent ID from config
+                            # Skip expensive parent model analysis to speed up ingestion
+                            parent_score = None
+                            
+                            # Always set parents array - even if score is None, treescore needs the parent info
+                            if parent_score is not None:
+                                meta["parents"] = [{"score": parent_score, "id": parent_id}]
+                            else:
+                                # If no score found, set to None but still include parent in lineage
+                                meta["parents"] = [{"score": None, "id": parent_id}]
             except Exception as gh_error:
                 print(f"[INGEST] Warning: Could not fetch GitHub metadata: {gh_error}")
             license_text_content = meta.get("license_text", "")
-            if license_text_content:
-                meta["license"] = license_text_content[:100].lower()
-            else:
-                meta["license"] = ""
+            if license_text_content and not meta.get("license"):
+                license_text_lower = license_text_content[:100].lower()
+                if license_text_lower:
+                    meta["license"] = license_text_lower
             if not meta.get("readme_text"):
                 print(f"[INGEST] Warning: No README text found for {model_id}")
 

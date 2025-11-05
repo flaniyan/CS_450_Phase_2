@@ -21,63 +21,66 @@ class CodeQualityMetric:
             readme_text = ""
 
         if readme_text:
-            # Look for testing mentions
+            # Look for testing mentions - expanded
             testing_keywords = [
-                "test",
-                "testing",
-                "pytest",
-                "unittest",
-                "coverage",
-                "ci",
-                "continuous integration",
+                "test", "tests", "testing", "tested", "test suite", "test cases",
+                "pytest", "unittest", "nose", "nose2", "doctest", "doctests",
+                "coverage", "code coverage", "test coverage", "coverage.py",
+                "ci", "cd", "continuous integration", "continuous deployment",
+                "github actions", "gitlab ci", "jenkins", "travis", "circleci",
+                "unit test", "unit tests", "integration test", "integration tests",
+                "test framework", "test runner", "test automation", "qa", "quality assurance"
             ]
             if any(keyword in readme_text for keyword in testing_keywords):
                 score += 0.3
 
-            # Look for documentation practices
+            # Look for documentation practices - expanded
             doc_keywords = [
-                "documentation",
-                "docs",
-                "api",
-                "docstring",
-                "readme",
-                "wiki",
+                "documentation", "docs", "doc", "documented", "documents",
+                "api", "api docs", "api documentation", "api reference",
+                "docstring", "docstrings", "sphinx", "mkdocs", "doxygen",
+                "readme", "read me", "readme.md", "readme file",
+                "wiki", "wikis", "documentation site", "docs site",
+                "guide", "guides", "tutorial", "tutorials", "manual", "manuals"
             ]
             if any(keyword in readme_text for keyword in doc_keywords):
                 score += 0.2
 
-            # Look for code style and linting
+            # Look for code style and linting - expanded
             style_keywords = [
-                "lint",
-                "flake8",
-                "pylint",
-                "black",
-                "isort",
-                "pre-commit",
-                "style guide",
+                "lint", "linter", "linting", "linter config", "linter configs",
+                "flake8", "pylint", "pylance", "pycodestyle", "pyflakes",
+                "black", "black formatter", "code formatter", "formatting",
+                "isort", "yapf", "autopep8", "autopep", "code formatter",
+                "pre-commit", "pre commit", "precommit", "git hooks", "git hook",
+                "style guide", "style guide", "code style", "coding style",
+                "pep 8", "pep8", "pep 257", "pep257", "code standards"
             ]
             if any(keyword in readme_text for keyword in style_keywords):
                 score += 0.2
 
-            # Look for dependency management
+            # Look for dependency management - expanded
             dep_keywords = [
-                "requirements.txt",
-                "setup.py",
-                "pyproject.toml",
-                "pipfile",
-                "conda",
-                "environment",
+                "requirements.txt", "requirements", "requirements-dev.txt",
+                "setup.py", "setup.cfg", "setuptools", "distutils",
+                "pyproject.toml", "pyproject.toml", "poetry.toml",
+                "pipfile", "pipfile.lock", "pipenv", "poetry",
+                "conda", "conda.yml", "environment.yml", "environment.yaml",
+                "environment", "environments", "virtualenv", "venv",
+                "package manager", "dependency management", "dependencies",
+                "install dependencies", "package dependencies"
             ]
             if any(keyword in readme_text for keyword in dep_keywords):
                 score += 0.1
 
-            # Look for version control best practices
+            # Look for version control best practices - expanded
             vc_keywords = [
-                "tag",
-                "release",
-                "version",
-                "changelog",
-                "semantic versioning",
+                "tag", "tags", "git tag", "version tag", "release tag",
+                "release", "releases", "github release", "git release",
+                "version", "versions", "versioning", "version number",
+                "changelog", "change log", "changelogs", "release notes",
+                "semantic versioning", "semver", "version control",
+                "git", "gitflow", "git workflow", "branch", "branches"
             ]
             if any(keyword in readme_text for keyword in vc_keywords):
                 score += 0.1

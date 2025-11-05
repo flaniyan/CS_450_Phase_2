@@ -3,16 +3,25 @@ from pathlib import Path
 import re
 import os
 import json
+from starlette.datastructures import UploadFile
 import uvicorn
+import random
+import logging
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
+from botocore.exceptions import ClientError
 from .routes.index import router as api_router
-from .services.s3_service import list_models, upload_model, download_model, reset_registry, get_model_lineage_from_config, get_model_sizes
-from .services.rating import run_scorer, alias
+from .services.s3_service import list_models, upload_model, download_model, reset_registry, get_model_lineage_from_config, get_model_sizes, s3, ap_arn, model_ingestion
+from .services.rating import run_scorer, alias, analyze_model_content
+from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 class User(BaseModel):
     name: str
     is_admin: bool = False
@@ -36,7 +45,6 @@ def health():
 
 @app.get("/health/components")
 def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
-    from datetime import datetime, timezone
     if windowMinutes < 5 or windowMinutes > 1440:
         raise HTTPException(status_code=400, detail="windowMinutes must be between 5 and 1440")
     component = {
@@ -55,8 +63,9 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     return response
 
 @app.put("/authenticate")
-def authenticate(auth_request: AuthRequest):
+def authenticate(auth_request: AuthRequest, request: Request):
     try:
+        logger.info(f"Received authenticate request with headers: {dict(request.headers)}")
         if not auth_request.user or not auth_request.secret:
             raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
         auth_enabled = True
@@ -73,12 +82,16 @@ def authenticate(auth_request: AuthRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly.")
 
+@app.post("/login")
+def login(auth_request: AuthRequest, request: Request):
+    """Login endpoint - alias for authenticate endpoint"""
+    return authenticate(auth_request, request)
+
 @app.post("/artifacts")
 async def list_artifacts(request: Request, offset: str = None):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import list_models
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         if not isinstance(body, list):
             raise HTTPException(status_code=400, detail="Request body must be an array of ArtifactQuery objects")
@@ -111,7 +124,6 @@ async def list_artifacts(request: Request, offset: str = None):
                             "type": artifact_type_stored
                         })
             else:
-                import re
                 escaped_name = re.escape(name)
                 name_pattern = f"^{escaped_name}$"
                 result = list_models(name_regex=name_pattern, limit=1000)
@@ -164,8 +176,6 @@ def get_artifact_by_name(name: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import list_models
-        import re
         escaped_name = re.escape(name)
         name_pattern = f"^{escaped_name}$"
         result = list_models(name_regex=name_pattern, limit=1000)
@@ -188,8 +198,6 @@ async def search_artifacts_by_regex(request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import list_models
-        import re
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         if not isinstance(body, dict):
             form = await request.form()
@@ -224,15 +232,12 @@ def get_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import list_models, s3, ap_arn
-        from botocore.exceptions import ClientError
         if artifact_type == "model":
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 return {"metadata": {"name": artifact.get("name", id), "id": id, "type": artifact_type}, "data": {"url": artifact.get("url", f"https://huggingface.co/{artifact.get('name', id)}")}}
             version = None
             found = False
-            import re
             try:
                 result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                 if result.get("models"):
@@ -286,9 +291,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import model_ingestion, list_models
-        import random
-        import re
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         url = body.get("url", "")
         if not url:
@@ -307,7 +309,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     pass
                 try:
                     model_ingestion(model_id, version)
-                    from .services.rating import analyze_model_content, alias
                     rating = analyze_model_content(model_id)
                     net_score = alias(rating, "net_score", "NetScore", "netScore") or 0.0
                     if net_score < 0.5:
@@ -370,9 +371,6 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from .services.s3_service import s3, ap_arn, list_models
-        from botocore.exceptions import ClientError
-        import re
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         if "metadata" not in body or "data" not in body:
             raise HTTPException(status_code=400, detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.")
@@ -424,9 +422,6 @@ def delete_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        from botocore.exceptions import ClientError
-        from .services.s3_service import list_models, s3, ap_arn
-        import re
         global _artifact_storage
         deleted = False
         if id in _artifact_storage:
@@ -493,7 +488,6 @@ def get_artifact_cost(artifact_type: str, id: str, dependency: bool = False, req
         if not verify_auth_token(request):
             raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        import re
         if artifact_type not in ["model", "dataset", "code"]:
             raise HTTPException(status_code=400, detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.")
         if not re.match(r'^[a-zA-Z0-9\-]+$', id):
@@ -505,8 +499,6 @@ def get_artifact_cost(artifact_type: str, id: str, dependency: bool = False, req
                 if artifact.get("type") == "model":
                     found = True
             if not found:
-                from .services.s3_service import list_models, s3, ap_arn
-                from botocore.exceptions import ClientError
                 try:
                     result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                     if result.get("models"):
@@ -568,14 +560,10 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        import re
         if artifact_type not in ["model", "dataset", "code"]:
             raise HTTPException(status_code=400, detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.")
         if not re.match(r'^[a-zA-Z0-9\-]+$', id):
             raise HTTPException(status_code=400, detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.")
-        from .services.s3_service import list_models, s3, ap_arn
-        from botocore.exceptions import ClientError
-        from datetime import datetime, timezone
         if artifact_type == "model":
             escaped_name = re.escape(id)
             name_pattern = f"^{escaped_name}$"
@@ -627,11 +615,8 @@ def get_model_rate(id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        import re
         if not re.match(r'^[a-zA-Z0-9\-]+$', id):
             raise HTTPException(status_code=400, detail="There is missing field(s) in the artifact_id or it is formed improperly, or is invalid.")
-        from .services.s3_service import list_models, s3, ap_arn
-        from botocore.exceptions import ClientError
         found = False
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
@@ -656,7 +641,6 @@ def get_model_rate(id: str, request: Request):
                 pass
         if not found:
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
-        from .services.rating import analyze_model_content, alias
         rating = analyze_model_content(id)
         result = {
             "name": id,
@@ -700,11 +684,8 @@ def get_model_lineage(id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        import re
         if not re.match(r'^[a-zA-Z0-9\-]+$', id):
             raise HTTPException(status_code=400, detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.")
-        from .services.s3_service import list_models, s3, ap_arn
-        from botocore.exceptions import ClientError
         found = False
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
@@ -764,11 +745,8 @@ async def check_model_license(id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken")
     try:
-        import re
         if not re.match(r'^[a-zA-Z0-9\-]+$', id):
             raise HTTPException(status_code=400, detail="The license check request is malformed or references an unsupported usage context.")
-        from .services.s3_service import list_models, s3, ap_arn
-        from botocore.exceptions import ClientError
         found = False
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
@@ -793,7 +771,6 @@ async def check_model_license(id: str, request: Request):
                 pass
         if not found:
             raise HTTPException(status_code=404, detail="The artifact or GitHub project could not be found.")
-        from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         if not isinstance(body, dict):
             form = await request.form()
@@ -804,28 +781,28 @@ async def check_model_license(id: str, request: Request):
         use_case = body.get("use_case", "fine-tune+inference")
         try:
             model_license = extract_model_license(id)
+            if model_license is None:
+                raise HTTPException(status_code=404, detail="The artifact could not be found.")
             github_license = extract_github_license(github_url)
             if github_license is None:
                 raise HTTPException(status_code=404, detail="The GitHub project could not be found.")
-            if model_license is None or github_license is None:
-                raise HTTPException(status_code=404, detail="The artifact or GitHub project could not be found.")
             compatibility_result = check_license_compatibility(model_license, github_license, use_case)
-            return compatibility_result.get("compatible", False)
+            return {"compatible": compatibility_result.get("compatible", False)}
         except HTTPException:
             raise
-        except Exception:
-            raise HTTPException(status_code=404, detail="The artifact or GitHub project could not be found.")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail="External license information could not be retrieved.")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail="External license information could not be retrieved.")
+        raise HTTPException(status_code=500, detail=f"License check failed: {str(e)}")
 
 @app.get("/tracks")
 def get_tracks():
     try:
         planned_tracks = [
             "Performance track",
-            "Access control track"
+            "Access Control Track"
         ]
         return {"plannedTracks": planned_tracks}
     except Exception:
@@ -850,22 +827,25 @@ def get_tracks():
 #    except Exception as e:
 #        return {"error": f"Failed to get root: {str(e)}"}, 500
 
-@app.get("/artifact/ingest")
+@app.get("/ingest")
 def get_artifact_ingest(name: str = None, version: str = "main", artifact_type: str = "model"):
     try:
         if name:
             if artifact_type == "model":
-                from .services.s3_service import model_ingestion
                 result = model_ingestion(name, version)
                 return {"message": "Ingest successful", "details": result}
             else:
-                return {"message": "Ingest successful", "details": {"name": name, "type": artifact_type, "version": version}}
+                global _artifact_storage
+                artifact_id = str(random.randint(1000000000, 9999999999))
+                url = f"https://example.com/{artifact_type}/{name}"
+                _artifact_storage[artifact_id] = {"name": name, "type": artifact_type, "version": version, "id": artifact_id, "url": url}
+                return {"message": "Ingest successful", "details": {"name": name, "type": artifact_type, "version": version, "id": artifact_id, "url": url}}
         else:
             return {"message": "Provide name parameter to ingest artifact"}
     except Exception as e:
         return {"error": f"Ingest failed: {str(e)}"}, 500
 
-@app.post("/artifact/ingest")
+@app.post("/ingest")
 async def post_artifact_ingest(request: Request):
     try:
         form = await request.form()
@@ -881,11 +861,9 @@ async def post_artifact_ingest(request: Request):
             artifact_type = body.get("type", body.get("artifact_type", "model"))
         if name:
             if artifact_type == "model":
-                from .services.s3_service import model_ingestion
                 result = model_ingestion(name, version)
                 return {"message": "Ingest successful", "details": result}
             else:
-                import random
                 global _artifact_storage
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 url = f"https://example.com/{artifact_type}/{name}"
