@@ -11,7 +11,9 @@ class GitHubHandler:
     """Handler for GitHub repository metadata fetching using stdlib HTTP."""
 
     def __init__(self):
-        github_token = os.environ.get("GITHUB_TOKEN") or "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"
+        # GitHub token from environment variable for rate limit purposes
+        # If not set, requests will be rate-limited (60 requests/hour for unauthenticated)
+        github_token = os.environ.get("GITHUB_TOKEN")
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",

@@ -802,7 +802,7 @@ def get_tracks():
     try:
         planned_tracks = [
             "Performance track",
-            "Access control track"
+            "Access Control Track"
         ]
         return {"plannedTracks": planned_tracks}
     except Exception:
