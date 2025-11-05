@@ -31,12 +31,18 @@ class AuthRequest(BaseModel):
     user: User
     secret: Secret
 app = FastAPI(title="ACME API (Python)")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Register middleware FIRST to ensure it runs for all requests
 @app.middleware("http")
 async def log_request_body(request: Request, call_next):
     # Log ALL requests first, before any processing
-    logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
-    logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
+    # Use print() as fallback in case logger isn't working
+    try:
+        print(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===", flush=True)
+        logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
+        logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
+    except Exception as log_error:
+        print(f"=== MIDDLEWARE LOG ERROR: {str(log_error)} ===", flush=True)
     try:
         if request.url.path == "/authenticate":
             logger.info(f"=== AUTHENTICATE REQUEST DETECTED ===")
@@ -62,6 +68,9 @@ async def log_request_body(request: Request, call_next):
     except Exception as e:
         logger.error(f"=== MIDDLEWARE ERROR: {str(e)} ===", exc_info=True)
         raise
+
+# Add CORS middleware AFTER custom middleware
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
     auth_header = request.headers.get("X-Authorization", "")
@@ -92,7 +101,8 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
         component["timeline"] = []
     return response
 
-@app.put("/authenticate")
+@app.put("/authenticate", dependencies=[], openapi_extra={"security": []})
+@app.post("/authenticate", dependencies=[], openapi_extra={"security": []})
 async def authenticate(request: Request):
     try:
         logger.info(f"=== AUTHENTICATE ENDPOINT CALLED ===")
