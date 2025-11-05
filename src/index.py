@@ -32,6 +32,22 @@ class AuthRequest(BaseModel):
     secret: Secret
 app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+@app.middleware("http")
+async def log_request_body(request: Request, call_next):
+    if request.url.path == "/authenticate":
+        body = await request.body()
+        logger.info(f"=== RAW REQUEST BODY ===")
+        logger.info(f"Body bytes: {body}")
+        logger.info(f"Body length: {len(body)}")
+        logger.info(f"Content-Type: {request.headers.get('content-type')}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Path: {request.url.path}")
+        # Reset body for FastAPI to parse
+        async def receive():
+            return {"type": "http.request", "body": body}
+        request._receive = receive
+    response = await call_next(request)
+    return response
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
     auth_header = request.headers.get("X-Authorization", "")
