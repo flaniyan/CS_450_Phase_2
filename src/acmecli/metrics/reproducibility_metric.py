@@ -42,45 +42,58 @@ class ReproducibilityMetric:
         return 0.5
 
     def _has_demo(self, text: str) -> bool:
+        # Expanded markers for demo/usage indicators
         markers = (
-            "quickstart",
-            "usage",
-            "example",
-            "demo",
-            "how to run",
-            "getting started",
+            "quickstart", "quick start", "quick start guide", "getting started", "getting started guide",
+            "usage", "use", "how to", "how-to", "howto", "how to use", "how to run", "how to execute",
+            "example", "examples", "sample", "samples", "demo", "demos", "demo code",
+            "tutorial", "tutorials", "guide", "guides", "walkthrough", "walk through",
+            "run", "running", "execute", "execution", "how it works", "basic usage",
+            "code example", "code examples", "code sample", "usage example",
+            "installation", "install", "setup", "get started", "start here", "begin here",
+            "introduction", "intro", "overview", "basics", "basic example",
+            "python example", "python code", "python script", "python usage",
+            "inference", "infer", "predict", "prediction", "generate", "generation"
         )
 
-        code_fence = ("```" in text) or ("`python" in text) or ("```python" in text)
+        code_fence = ("```" in text) or ("`python" in text) or ("```python" in text) or ("```py" in text) or ("```python3" in text)
 
         has_marker = any(m in text for m in markers)
+        # Only exclude if explicitly negative
         for m in markers:
-            if f"no {m}" in text or f"not {m}" in text:
+            if f"no {m}" in text or f"not {m}" in text or f"without {m}" in text:
                 has_marker = False
                 break
 
-        has_python_cmd = ("python " in text) or ("python3 " in text) or (".py" in text)
-        return has_marker or code_fence or has_python_cmd
+        has_python_cmd = ("python " in text) or ("python3 " in text) or (".py" in text) or ("python -m" in text) or ("python -c" in text)
+        has_code_block = code_fence or ("<code>" in text) or ("code block" in text)
+        return has_marker or has_code_block or has_python_cmd
 
     def _has_simple_install(self, text: str) -> bool:
+        # Expanded simple installation patterns
         simple_patterns = (
-            "pip install ",
-            "pip3 install ",
-            "pip install -r requirements.txt",
+            "pip install ", "pip3 install ", "pip install -r", "pip install -e",
+            "pip install -r requirements.txt", "pip install -r requirements",
+            "pip install", "pip3 install", "python -m pip install",
+            "python -m pip install -r", "python3 -m pip install",
+            "easy_install", "python setup.py install", "python setup.py",
+            "pipenv install", "pipenv sync", "venv", "virtualenv",
+            "python -m venv", "python3 -m venv", "source activate",
+            "conda install", "conda env", "environment.yml", "environment.yaml"
         )
 
+        # Only consider truly heavy if it's the only option
         heavy = (
-            "conda create",
-            "mamba install",
-            "docker run",
-            "make ",
-            "cmake ",
-            "poetry install",
+            "conda create", "mamba create", "mamba install",
+            "docker build", "docker compose", "docker-compose",
+            "make install", "make build", "cmake build",
+            "poetry build", "poetry install --no-dev"
         )
 
-        return any(p in text for p in simple_patterns) and not any(
-            h in text for h in heavy
-        )
+        has_simple = any(p in text for p in simple_patterns)
+        has_heavy_only = any(h in text for h in heavy) and not has_simple
+        # Be lenient: if there's any simple pattern, give credit
+        return has_simple and not has_heavy_only
 
     def _extract_run_target(self, text: str):
         referenced = []
