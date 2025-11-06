@@ -30,7 +30,7 @@ jobs:
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
-      USE_OIDC: "true" # Set to "true" to use OIDC authentication
+      USE_OIDC: "false" # Set to "true" to use OIDC authentication (requires IAM role setup)
     permissions:
       id-token: write
       contents: read
@@ -48,6 +48,7 @@ jobs:
             ${{ runner.os }}-tf-
 
       - name: Configure AWS credentials (OIDC)
+        if: ${{ env.USE_OIDC == 'true' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-region: ${{ env.AWS_REGION }}

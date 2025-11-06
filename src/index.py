@@ -650,3 +650,22 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR)) if TEMPLATES_DIR.exists() else None
+
+# Register frontend routes
+if templates:
+    from .routes.frontend import set_templates, register_routes
+    set_templates(templates)
+    register_routes(app)
+
+# Add missing /license-check GET route
+@app.get("/license-check")
+def license_check_get(request: Request, name: str | None = None, version: str | None = None):
+    if not templates:
+        return {"message": "Frontend not found. Ensure frontend/templates exists."}
+    ctx = {
+        "request": request,
+        "name": name or "",
+        "version": version or "1.0.0",
+        "result": None,
+    }
+    return templates.TemplateResponse("license-check.html", ctx)
