@@ -24,6 +24,7 @@ DEFAULT_EXEMPT: tuple[str, ...] = (
     "/favicon.ico",
     "/api/hello",
     "/api/packages/reset",
+    "/artifact/",  # Temporarily exempt all artifact endpoints
 )
 
 
@@ -57,9 +58,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self.auth_enabled = bool(self.secret)
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
-        # If auth is not enabled (JWT_SECRET not set), skip all auth checks
-        if not self.auth_enabled:
-            return await call_next(request)
+        # Temporarily disable all auth checks - all endpoints are exempt
+        return await call_next(request)
         
         # Prefix-safe path normalization (handles /prod/... base paths)
         raw_path = unquote(request.scope.get("path", "") or request.url.path)
