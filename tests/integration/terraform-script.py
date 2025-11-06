@@ -2,12 +2,57 @@ import requests
 import sys
 import os
 import json
+from pathlib import Path
 
 BASE_URL = os.getenv("API_GATEWAY_URL", "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/")
-DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", r"C:\Users\emsil\Downloads\hugging-face-model_1.0.0_full_1.0.0_full.zip")
-DEFAULT_TEST_MODEL = os.getenv("TEST_MODEL_ID", "MiniMaxAI/MiniMax-M2")
+DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", r"C:\Users\mdali\Downloads\manual-upload-model_1.0.0_full.zip")
+DEFAULT_TEST_MODEL = os.getenv("TEST_MODEL_ID", "maya-research/maya1")
+AUTH_JSON_PATH = os.getenv("AUTH_JSON_PATH", "auth.json")
 
-def upload_test_model():
+def load_auth_json():
+    """Load authentication credentials from auth.json"""
+    auth_path = Path(AUTH_JSON_PATH)
+    if not auth_path.exists():
+        # Try relative to script directory
+        script_dir = Path(__file__).parent.parent.parent
+        auth_path = script_dir / "auth.json"
+        if not auth_path.exists():
+            raise FileNotFoundError(f"auth.json not found at {AUTH_JSON_PATH} or {auth_path}")
+    
+    with open(auth_path, 'r') as f:
+        return json.load(f)
+
+def get_auth_token():
+    """Authenticate using auth.json and return the token"""
+    try:
+        auth_data = load_auth_json()
+        url = f"{BASE_URL}authenticate"
+        if BASE_URL.endswith("/"):
+            url = f"{BASE_URL.rstrip('/')}/authenticate"
+        
+        print(f"Authenticating using auth.json...")
+        r = requests.put(url, json=auth_data, timeout=10)
+        
+        if r.status_code == 200:
+            # Token is returned as a plain string (not JSON)
+            token = r.text.strip().strip('"')
+            if token.startswith("bearer "):
+                token = token[7:]  # Remove "bearer " prefix if present
+            print(f"Authentication successful")
+            return token
+        else:
+            print(f"Authentication failed with status {r.status_code}: {r.text}")
+            return None
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return None
+    except Exception as e:
+        print(f"Failed to authenticate: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def upload_test_model(token=None):
     """Upload a test model using DEFAULT_UPLOAD_FILE via /artifact/model/{id}/upload"""
     if not DEFAULT_UPLOAD_FILE or not os.path.exists(DEFAULT_UPLOAD_FILE):
         if DEFAULT_UPLOAD_FILE:
@@ -20,8 +65,14 @@ def upload_test_model():
         with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
             file_content = f.read()
         files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
+        
+        headers = {}
+        if token:
+            headers["X-Authorization"] = f"bearer {token}"
+            headers["Authorization"] = f"Bearer {token}"
+        
         print(f"Uploading {DEFAULT_UPLOAD_FILE} to /artifact/model/{model_id}/upload...")
-        r = requests.post(url, files=files, timeout=30)
+        r = requests.post(url, files=files, headers=headers, timeout=30)
         print(f"Upload response status: {r.status_code}")
         print(f"Upload response: {r.text}")
         if r.status_code == 200:
@@ -38,15 +89,23 @@ def upload_test_model():
         traceback.print_exc()
         return None
 
-def ingest_test_model():
+def ingest_test_model(token=None):
     """Ingest a test model from HuggingFace"""
     try:
         model_id = os.getenv("INGEST_MODEL_ID", DEFAULT_TEST_MODEL)
         version = os.getenv("INGEST_MODEL_VERSION", "main")
         url = f"{BASE_URL}artifact/ingest"
+        
+        headers = {}
+        if token:
+            headers["X-Authorization"] = f"bearer {token}"
+            headers["Authorization"] = f"Bearer {token}"
+        
+        # Try form data first (as the endpoint checks form data first)
         data = {"name": model_id, "version": version}
+        
         print(f"Ingesting model {model_id} v{version} from HuggingFace...")
-        r = requests.post(url, data=data, timeout=300)
+        r = requests.post(url, data=data, headers=headers, timeout=300)
         print(f"Ingest response status: {r.status_code}")
         if r.status_code == 200:
             try:
@@ -73,11 +132,16 @@ def ingest_test_model():
         traceback.print_exc()
         return None
 
-def get_real_models():
-    """Fetch real models from S3 via API, or upload/ingest one if none exist"""
+def get_real_models(token=None):
+    """Fetch real models from S3 via API, or ingest/upload one if none exist"""
     try:
         url = f"{BASE_URL}artifact/directory"
-        r = requests.get(url, timeout=10)
+        headers = {}
+        if token:
+            headers["X-Authorization"] = f"bearer {token}"
+            headers["Authorization"] = f"Bearer {token}"
+        
+        r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
             models = data.get("artifacts", [])
@@ -87,22 +151,22 @@ def get_real_models():
                 model_version = model.get("version")
                 if model_name and model_version:
                     return model_name, model_version
-        print("No models found in directory, trying to upload or ingest a test model...")
-        uploaded = upload_test_model()
-        if uploaded:
-            model_id, version = uploaded
-            if model_id and version:
-                print(f"Successfully uploaded test model: {model_id} v{version}")
-                return model_id, version
-        print("Upload failed or no file specified, trying ingest from HuggingFace...")
-        ingested = ingest_test_model()
+        print("No models found in directory, trying to ingest or upload a test model...")
+        ingested = ingest_test_model(token)
         if ingested:
             model_id, version = ingested
             if model_id and version:
                 print(f"Successfully ingested test model: {model_id} v{version}")
                 return model_id, version
-        print("ERROR: Failed to get, upload, or ingest a real model. Cannot proceed without real S3 resources.")
-        print("Set UPLOAD_FILE_PATH environment variable or ensure models exist in S3.")
+        print("Ingest failed or no model specified, trying upload from file...")
+        uploaded = upload_test_model(token)
+        if uploaded:
+            model_id, version = uploaded
+            if model_id and version:
+                print(f"Successfully uploaded test model: {model_id} v{version}")
+                return model_id, version
+        print("ERROR: Failed to get, ingest, or upload a real model. Cannot proceed without real S3 resources.")
+        print("Set INGEST_MODEL_ID environment variable (e.g., 'maya-research/maya1') or UPLOAD_FILE_PATH, or ensure models exist in S3.")
         return None, None
     except Exception as e:
         print(f"Failed to fetch real models: {e}")
@@ -110,7 +174,7 @@ def get_real_models():
         traceback.print_exc()
         return None, None
 
-def test_endpoint(endpoint, method="GET", data=None, files=None):
+def test_endpoint(endpoint, method="GET", data=None, files=None, token=None):
     """Test an endpoint and return the result"""
     try:
         if BASE_URL.endswith("/") and endpoint.startswith("/"):
@@ -122,19 +186,25 @@ def test_endpoint(endpoint, method="GET", data=None, files=None):
         print(f"\n[TEST] {method} {endpoint}")
         print(f"URL: {url}")
         
+        # Prepare headers
+        headers = {}
+        if token:
+            headers["X-Authorization"] = f"bearer {token}"
+            headers["Authorization"] = f"Bearer {token}"
+        
         if method == "GET":
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, headers=headers, timeout=10)
         elif method == "POST":
             if files:
-                r = requests.post(url, files=files, timeout=10)
+                r = requests.post(url, files=files, headers=headers, timeout=10)
             else:
-                r = requests.post(url, json=data, timeout=10)
+                r = requests.post(url, json=data, headers=headers, timeout=10)
         elif method == "PUT":
-            r = requests.put(url, json=data, timeout=10)
+            r = requests.put(url, json=data, headers=headers, timeout=10)
         elif method == "DELETE":
-            r = requests.delete(url, timeout=10)
+            r = requests.delete(url, headers=headers, timeout=10)
         elif method == "OPTIONS":
-            r = requests.options(url, timeout=10)
+            r = requests.options(url, headers=headers, timeout=10)
         
         print(f"Status: {r.status_code}")
         print(f"Response: {r.text[:200]}...")  # First 200 chars
@@ -150,7 +220,14 @@ def test_endpoint(endpoint, method="GET", data=None, files=None):
 print("Starting API Gateway Tests")
 print("=" * 50)
 
-real_model_id, real_version = get_real_models()
+# Authenticate and get token using auth.json
+auth_token = get_auth_token()
+if not auth_token:
+    print("WARNING: Failed to get authentication token. Some endpoints may fail.")
+else:
+    print(f"Authentication token obtained (length: {len(auth_token)})")
+
+real_model_id, real_version = get_real_models(token=auth_token)
 if not real_model_id or not real_version:
     print("ERROR: Cannot proceed without real S3 resources. Exiting.")
     sys.exit(1)
@@ -205,7 +282,12 @@ for endpoint, method in endpoints:
     elif f"/artifact/{artifact_type}/{real_model_id}" == endpoint and method == "PUT":
         data = {"metadata": {"name": real_model_id}, "data": {"version": real_version}}
     elif endpoint == "/authenticate" and method == "PUT":
-        data = {"user": {"name": "ece30861defaultadminuser", "is_admin": True}, "secret": {"password": "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"}}
+        # Use auth.json for authentication
+        try:
+            data = load_auth_json()
+        except Exception as e:
+            print(f"Warning: Could not load auth.json: {e}")
+            data = None
     elif endpoint == "/artifact/ingest" and method == "POST":
         ingest_model_id = os.getenv("INGEST_MODEL_ID", DEFAULT_TEST_MODEL)
         ingest_version = os.getenv("INGEST_MODEL_VERSION", "main")
@@ -222,7 +304,15 @@ for endpoint, method in endpoints:
             files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
     elif f"/artifact/model/{real_model_id}/license-check" == endpoint and method == "POST":
         data = {"github_url": "https://github.com/test/repo"}
-    status, response = test_endpoint(endpoint, method, data=data, files=files)
+    
+    # Determine if endpoint requires authentication
+    # Public endpoints that don't need auth
+    public_endpoints = ["/", "/health", "/health/components", "/authenticate", "/login", "/tracks"]
+    requires_auth = not any(endpoint.startswith(public) for public in public_endpoints)
+    
+    # Use token for authenticated endpoints
+    token_to_use = auth_token if requires_auth else None
+    status, response = test_endpoint(endpoint, method, data=data, files=files, token=token_to_use)
     results.append((endpoint, method, status, response))
 
 print("\n" + "=" * 50)
