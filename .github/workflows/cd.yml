@@ -47,20 +47,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-tf-
 
-      - name: Debug OIDC Configuration
-        if: ${{ env.USE_OIDC == 'true' }}
-        run: |
-          echo "USE_OIDC: ${{ env.USE_OIDC }}"
-          echo "AWS_ROLE_TO_ASSUME secret exists: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}"
-          echo "AWS_REGION: ${{ env.AWS_REGION }}"
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: arn:aws:iam::838693051036:role/github-actions-oidc-role
           role-session-name: GitHubActions-CDPipeline
-      
 
       - name: Configure AWS credentials (Static)
         if: ${{ env.USE_OIDC != 'true' }}
@@ -149,12 +141,12 @@ jobs:
             --services $ECS_SERVICE \
             --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,deployments:deployments[*].{id:id,status:status,runningCount:runningCount,desiredCount:desiredCount}}' \
             --output table
-          
+
           echo "Starting wait for PRIMARY deployment to stabilize (max 15 minutes)..."
           MAX_ATTEMPTS=60
           ATTEMPT=0
           SLEEP_INTERVAL=15
-          
+
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
             echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking service status..."
@@ -205,7 +197,7 @@ jobs:
             
             sleep $SLEEP_INTERVAL
           done
-          
+
           echo "Service stabilization wait timed out after $MAX_ATTEMPTS attempts"
           echo "Checking final service status..."
           aws ecs describe-services \

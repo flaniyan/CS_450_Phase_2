@@ -6,18 +6,15 @@
       "Principal": {
         "Federated": "arn:aws:iam::838693051036:oidc-provider/token.actions.githubusercontent.com"
       },
-      "Action": "sts:AssumeRole",
+      "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:emsilver987/CS_450_Phase_2:*"
+          "token.actions.githubusercontent.com:sub": "repo:flaniyan/CS_450_Phase_2:*"
         }
       }
     }
   ]
 }
-
-
-
