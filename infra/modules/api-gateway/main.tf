@@ -1504,16 +1504,26 @@ resource "aws_iam_policy" "lambda_s3_policy" {
         }
       },
       {
-        Sid    = "RWPackagesWithKMS"
+        Sid    = "ReadPackages"
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:GetObjectTagging",
+          "s3:GetObjectTagging"
+        ]
+        Resource = ["arn:aws:s3:::${var.artifacts_bucket}/packages/*"]
+      },
+      {
+        Sid    = "WritePackagesWithKMS"
+        Effect = "Allow"
+        Action = [
           "s3:PutObject",
           "s3:PutObjectTagging",
           "s3:DeleteObject",
           "s3:AbortMultipartUpload",
-          "s3:ListMultipartUploadParts"
+          "s3:ListMultipartUploadParts",
+          "s3:CreateMultipartUpload",
+          "s3:CompleteMultipartUpload",
+          "s3:UploadPartCopy"
         ]
         Resource = ["arn:aws:s3:::${var.artifacts_bucket}/packages/*"]
         Condition = {
