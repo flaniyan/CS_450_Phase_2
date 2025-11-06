@@ -21,12 +21,13 @@ provider "aws" {
 }
 
 locals {
+  artifacts_bucket = "pkg-artifacts"
   ddb_tables_arnmap = {
-    users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
-    tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
-    packages  = "arn:aws:dynamodb:us-east-1:838693051036:table/packages"
-    uploads   = "arn:aws:dynamodb:us-east-1:838693051036:table/uploads"
-    downloads = "arn:aws:dynamodb:us-east-1:838693051036:table/downloads"
+    users     = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/users"
+    tokens    = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/tokens"
+    packages  = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/packages"
+    uploads   = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/uploads"
+    downloads = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/downloads"
   }
 }
 
@@ -41,33 +42,33 @@ locals {
 
 module "iam" {
   source            = "../../modules/iam"
-  artifacts_bucket  = "pkg-artifacts"
+  artifacts_bucket  = local.artifacts_bucket
   ddb_tables_arnmap = local.ddb_tables_arnmap
 }
 
 module "ecs" {
   source            = "../../modules/ecs"
-  artifacts_bucket  = "pkg-artifacts"
+  artifacts_bucket  = local.artifacts_bucket
   image_tag         = var.image_tag
   ddb_tables_arnmap = local.ddb_tables_arnmap
 }
 
 module "monitoring" {
   source                = "../../modules/monitoring"
-  artifacts_bucket      = "pkg-artifacts"
+  artifacts_bucket      = local.artifacts_bucket
   validator_service_url = module.ecs.validator_service_url
   ddb_tables_arnmap     = local.ddb_tables_arnmap
 }
 
 module "api_gateway" {
   source                = "../../modules/api-gateway"
-  artifacts_bucket      = "pkg-artifacts"
+  artifacts_bucket      = local.artifacts_bucket
   validator_service_url = module.ecs.validator_service_url
   kms_key_arn           = module.monitoring.kms_key_arn
   ddb_tables_arnmap     = local.ddb_tables_arnmap
 }
 
-output "artifacts_bucket" { value = "pkg-artifacts" }
+output "artifacts_bucket" { value = local.artifacts_bucket }
 output "group106_policy_arn" { value = module.iam.group106_policy_arn }
 output "ddb_tables" { value = local.ddb_tables_arnmap }
 output "validator_service_url" { value = module.ecs.validator_service_url }

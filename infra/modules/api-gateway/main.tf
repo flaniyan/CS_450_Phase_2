@@ -25,14 +25,15 @@ resource "aws_api_gateway_rest_api" "main_api" {
   }
 }
 
+# ===== ROOT LEVEL RESOURCES =====
+
 # Request Validator
-resource "aws_api_gateway_request_validator" "basic" {
-  name                        = "basic-validator"
+resource "aws_api_gateway_request_validator" "main_validator" {
+  name                        = "main-request-validator"
   rest_api_id                 = aws_api_gateway_rest_api.main_api.id
+  validate_request_body       = true
   validate_request_parameters = true
 }
-
-# ===== ROOT LEVEL RESOURCES =====
 
 # GET / (root path)
 resource "aws_api_gateway_method" "root_get" {
@@ -40,7 +41,7 @@ resource "aws_api_gateway_method" "root_get" {
   resource_id          = aws_api_gateway_rest_api.main_api.root_resource_id
   http_method          = "GET"
   authorization        = "NONE"
-  request_validator_id = aws_api_gateway_request_validator.basic.id
+  request_validator_id = aws_api_gateway_request_validator.main_validator.id
 }
 
 resource "aws_api_gateway_integration" "root_get" {
@@ -48,7 +49,8 @@ resource "aws_api_gateway_integration" "root_get" {
   resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
   http_method = aws_api_gateway_method.root_get.http_method
 
-  type = "MOCK"
+  type                 = "MOCK"
+  timeout_milliseconds = 29000
   request_templates = {
     "application/json" = jsonencode({ statusCode = 200 })
   }
@@ -335,7 +337,6 @@ resource "aws_api_gateway_integration" "health_components_get" {
   integration_http_method = "GET"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/health/components"
-  timeout_milliseconds    = 29000
 
   request_parameters = {
     "integration.request.querystring.windowMinutes"   = "method.request.querystring.windowMinutes"
@@ -1209,8 +1210,6 @@ resource "aws_api_gateway_integration_response" "artifact_type_options_200" {
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
-
-  depends_on = [aws_api_gateway_integration.artifact_type_options]
 }
 
 # CORS for /authenticate
@@ -1495,7 +1494,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lambda S3 Policy - Restrictive
+# Lambda S3 Policy
 resource "aws_iam_policy" "lambda_s3_policy" {
   name = "lambda-s3-packages-policy"
 
@@ -1536,7 +1535,7 @@ resource "aws_iam_policy" "lambda_s3_policy" {
   })
 }
 
-# Lambda DynamoDB Policy - Restrictive
+# Lambda DynamoDB Policy 
 resource "aws_iam_policy" "lambda_ddb_policy" {
   name = "lambda-ddb-policy"
 
