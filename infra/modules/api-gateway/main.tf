@@ -27,21 +27,12 @@ resource "aws_api_gateway_rest_api" "main_api" {
 
 # ===== ROOT LEVEL RESOURCES =====
 
-# Request Validator
-resource "aws_api_gateway_request_validator" "main_validator" {
-  name                        = "main-request-validator"
-  rest_api_id                 = aws_api_gateway_rest_api.main_api.id
-  validate_request_body       = true
-  validate_request_parameters = true
-}
-
 # GET / (root path)
 resource "aws_api_gateway_method" "root_get" {
-  rest_api_id          = aws_api_gateway_rest_api.main_api.id
-  resource_id          = aws_api_gateway_rest_api.main_api.root_resource_id
-  http_method          = "GET"
-  authorization        = "NONE"
-  request_validator_id = aws_api_gateway_request_validator.main_validator.id
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_rest_api.main_api.root_resource_id
+  http_method   = "GET"
+  authorization = "NONE"
 }
 
 resource "aws_api_gateway_integration" "root_get" {
@@ -49,8 +40,7 @@ resource "aws_api_gateway_integration" "root_get" {
   resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
   http_method = aws_api_gateway_method.root_get.http_method
 
-  type                 = "MOCK"
-  timeout_milliseconds = 29000
+  type = "MOCK"
   request_templates = {
     "application/json" = jsonencode({ statusCode = 200 })
   }
@@ -1358,6 +1348,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
 
   triggers = {
     redeployment = sha1(jsonencode([
+      timestamp(),  # Force redeployment when any change is made
       # Resources
       aws_api_gateway_resource.health.id,
       aws_api_gateway_resource.health_components.id,
