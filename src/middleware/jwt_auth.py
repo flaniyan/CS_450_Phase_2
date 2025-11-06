@@ -53,10 +53,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self.secret = os.getenv("JWT_SECRET")
         if self.algorithm != "HS256":
             raise ValueError("This middleware currently supports HS256 only.")
-        if not self.secret:
-            raise ValueError("JWT_SECRET must be set for HS256 verification.")
+        # Auth is optional: if JWT_SECRET is not set, skip auth checks
+        self.auth_enabled = bool(self.secret)
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        # If auth is not enabled (JWT_SECRET not set), skip all auth checks
+        if not self.auth_enabled:
+            return await call_next(request)
+        
         # Prefix-safe path normalization (handles /prod/... base paths)
         raw_path = unquote(request.scope.get("path", "") or request.url.path)
         root_prefix = request.scope.get("root_path", "") or request.headers.get("X-Forwarded-Prefix", "")
