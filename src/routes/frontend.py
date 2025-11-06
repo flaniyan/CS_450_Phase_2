@@ -92,8 +92,57 @@ def register_routes(app):
         }
         return templates.TemplateResponse("directory.html", ctx)
 
+    @app.get("/rate")
+    def rate_get(request: Request, name: str | None = None):
+        if not templates:
+            return {"message": "Frontend not found. Ensure frontend/templates exists."}
+        rating = None
+        if name:
+            row = run_scorer(name)
+            rating = {
+                "NetScore": (alias(row, "net_score", "NetScore", "netScore") or 0.0),
+                "RampUp": (
+                    alias(row, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0
+                ),
+                "Correctness": (
+                    alias(row, "code_quality", "CodeQuality", "score_code_quality")
+                    or 0.0
+                ),
+                "BusFactor": (
+                    alias(
+                        row, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
+                    )
+                    or 0.0
+                ),
+                "ResponsiveMaintainer": (
+                    alias(row, "pull_requests", "PullRequests", "score_pull_requests")
+                    or 0.0
+                ),
+                "LicenseScore": (
+                    alias(row, "license", "License", "score_license") or 0.0
+                ),
+                "Reproducibility": (
+                    alias(
+                        row,
+                        "reproducibility",
+                        "Reproducibility",
+                        "score_reproducibility",
+                    )
+                    or 0.0
+                ),
+                "Reviewedness": (
+                    alias(row, "reviewedness", "Reviewedness", "score_reviewedness")
+                    or 0.0
+                ),
+                "Treescore": (
+                    alias(row, "treescore", "Treescore", "score_treescore") or 0.0
+                ),
+            }
+        ctx = {"request": request, "name": name or "", "rating": rating}
+        return templates.TemplateResponse("rate.html", ctx)
+
     @app.get("/artifact/model/{id}/rate")
-    def rate(request: Request, id: str, name: str | None = None):
+    def rate_by_id(request: Request, id: str, name: str | None = None):
         if not templates:
             return {"message": "Frontend not found. Ensure frontend/templates exists."}
         rating = None
