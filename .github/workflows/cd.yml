@@ -47,23 +47,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-tf-
 
-      - name: Debug OIDC Configuration
-        if: ${{ env.USE_OIDC == 'true' }}
-        run: |
-          echo "USE_OIDC: ${{ env.USE_OIDC }}"
-          echo "AWS_ROLE_TO_ASSUME secret exists: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}"
-          echo "AWS_REGION: ${{ env.AWS_REGION }}"
-
-      - name: Debug OIDC context
-        if: ${{ env.USE_OIDC == 'true' }}
-        run: |
-          echo "ref=$GITHUB_REF"
-          echo "ref_name=$GITHUB_REF_NAME"
-          echo "repo=$GITHUB_REPOSITORY"
-          echo "actor=$GITHUB_ACTOR"
-          echo "event_name=$GITHUB_EVENT_NAME"
-          echo "workflow_ref=$GITHUB_WORKFLOW_REF"
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
