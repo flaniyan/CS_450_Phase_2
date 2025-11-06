@@ -73,6 +73,7 @@ module "api_gateway" {
   source                = "../../modules/api-gateway"
   artifacts_bucket      = "pkg-artifacts"
   validator_service_url = module.ecs.validator_service_url
+  kms_key_arn           = module.monitoring.kms_key_arn
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
