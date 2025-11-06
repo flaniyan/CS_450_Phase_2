@@ -358,7 +358,7 @@ resource "aws_api_gateway_integration" "artifacts_post" {
   }
 }
 
-# DELETE /reset
+# DELETE /reset (matches spec)
 resource "aws_api_gateway_method" "reset_delete" {
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
   resource_id   = aws_api_gateway_resource.reset.id
@@ -366,7 +366,7 @@ resource "aws_api_gateway_method" "reset_delete" {
   authorization = "NONE"
 
   request_parameters = {
-    "method.request.header.X-Authorization" = true
+    "method.request.header.X-Authorization" = false
   }
 }
 
@@ -378,10 +378,20 @@ resource "aws_api_gateway_integration" "reset_delete" {
   integration_http_method = "DELETE"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/reset"
+}
 
-  request_parameters = {
-    "integration.request.header.X-Authorization" = "method.request.header.X-Authorization"
-  }
+resource "aws_api_gateway_method_response" "reset_delete_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.reset.id
+  http_method = aws_api_gateway_method.reset_delete.http_method
+  status_code = "200"
+}
+
+resource "aws_api_gateway_integration_response" "reset_delete_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.reset.id
+  http_method = aws_api_gateway_method.reset_delete.http_method
+  status_code = aws_api_gateway_method_response.reset_delete_200.status_code
 }
 
 # PUT /authenticate
@@ -709,7 +719,7 @@ resource "aws_api_gateway_integration" "artifact_type_id_get" {
 
   integration_http_method = "GET"
   type                    = "HTTP_PROXY"
-  uri                     = "${var.validator_service_url}/artifacts/{artifact_type}/{id}"
+  uri                     = "${var.validator_service_url}/artifact/{artifact_type}/{id}"
 
   request_parameters = {
     "integration.request.path.artifact_type"     = "method.request.path.artifact_type"
@@ -739,7 +749,7 @@ resource "aws_api_gateway_integration" "artifact_type_id_put" {
 
   integration_http_method = "PUT"
   type                    = "HTTP_PROXY"
-  uri                     = "${var.validator_service_url}/artifacts/{artifact_type}/{id}"
+  uri                     = "${var.validator_service_url}/artifact/{artifact_type}/{id}"
 
   request_parameters = {
     "integration.request.path.artifact_type"     = "method.request.path.artifact_type"
@@ -748,7 +758,7 @@ resource "aws_api_gateway_integration" "artifact_type_id_put" {
   }
 }
 
-# DELETE /artifacts/{artifact_type}/{id}
+# DELETE /artifacts/{artifact_type}/{id} (matches spec)
 resource "aws_api_gateway_method" "artifact_type_id_delete" {
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
   resource_id   = aws_api_gateway_resource.artifact_type_id.id
@@ -769,7 +779,7 @@ resource "aws_api_gateway_integration" "artifact_type_id_delete" {
 
   integration_http_method = "DELETE"
   type                    = "HTTP_PROXY"
-  uri                     = "${var.validator_service_url}/artifacts/{artifact_type}/{id}"
+  uri                     = "${var.validator_service_url}/artifact/{artifact_type}/{id}"
 
   request_parameters = {
     "integration.request.path.artifact_type"     = "method.request.path.artifact_type"
