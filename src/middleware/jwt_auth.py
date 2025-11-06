@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Iterable
+from urllib.parse import unquote
 
 import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -13,6 +14,9 @@ from starlette.responses import JSONResponse
 # Public endpoints that should bypass auth
 DEFAULT_EXEMPT: tuple[str, ...] = (
     "/health",
+    "/reset",
+    "/tracks",
+    "/authenticate",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -53,7 +57,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             raise ValueError("JWT_SECRET must be set for HS256 verification.")
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
-        path = request.url.path
+        # Prefix-safe path normalization (handles /prod/... base paths)
+        raw_path = unquote(request.scope.get("path", "") or request.url.path)
+        root_prefix = request.scope.get("root_path", "") or request.headers.get("X-Forwarded-Prefix", "")
+        path = raw_path[len(root_prefix):] if root_prefix and raw_path.startswith(root_prefix) else raw_path
 
         if _is_exempt(path, self.exempt_paths):
             return await call_next(request)

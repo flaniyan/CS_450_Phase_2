@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 from .routes.index import router as api_router
+from .routes import system, auth, artifacts
 from .services.s3_service import list_models, upload_model, download_model, reset_registry, get_model_lineage_from_config, get_model_sizes
 from .services.rating import run_scorer, alias
 
@@ -27,25 +28,14 @@ class AuthRequest(BaseModel):
 app = FastAPI(title="ACME API (Python)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-@app.get("/health")
-def health():
-    return {"ok": True}
+# Wire up routers
+app.include_router(system.router)
+app.include_router(auth.router)
+app.include_router(artifacts.router)
 
 @app.get("/health/components")
 def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     return {"components": [{"id": "validator-service", "display_name": "Validator Service", "status": "ok", "observed_at": "2025-10-28T12:00:00Z", "details": {"uptime": "99.9%", "response_time": "45ms"}}], "window_minutes": windowMinutes, "include_timeline": includeTimeline}
-
-@app.put("/authenticate")
-def authenticate(auth_request: AuthRequest):
-    try:
-        if (auth_request.user.name == "ece30861defaultadminuser" and 
-            auth_request.secret.password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"):
-            token = "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example"
-            return token
-        else:
-            return {"error": "Invalid credentials"}, 401
-    except Exception as e:
-        return {"error": "Invalid request"}, 400
 
 @app.post("/artifacts")
 async def create_artifact(request: Request):
@@ -86,13 +76,7 @@ async def create_artifact(request: Request):
     except Exception as e:
         return {"error": f"Failed to create artifact: {str(e)}"}, 500
 
-@app.delete("/reset")
-def reset_system():
-    try:
-        result = reset_registry()
-        return {"message": "System reset successfully", "details": result}
-    except Exception as e:
-        return {"error": f"Reset failed: {str(e)}"}, 500
+# Reset endpoint is now in system.py router
 
 @app.get("/")
 def get_root(request: Request):
