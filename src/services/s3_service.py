@@ -4,6 +4,7 @@ import io
 import re
 import json
 import os
+import logging
 import urllib.request
 import urllib.error
 import requests
@@ -22,6 +23,9 @@ from ..acmecli.metrics import METRIC_FUNCTIONS
 
 region = os.getenv("AWS_REGION", "us-east-1")
 access_point_name = os.getenv("S3_ACCESS_POINT_NAME", "cs450-s3")
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Initialize AWS clients with error handling for development
 try:
@@ -237,8 +241,29 @@ def upload_model(
             status_code=503,
             detail="AWS services not available. Please check your AWS configuration.",
         )
+    if not file_content or len(file_content) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot upload empty file content"
+        )
     try:
-        s3_key = f"models/{model_id}/{version}/model.zip"
+        # Sanitize model_id and version for S3 key
+        safe_model_id = (
+            model_id.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+            .replace(":", "_")
+            .replace("\\", "_")
+            .replace("?", "_")
+            .replace("*", "_")
+            .replace('"', "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+        )
+        safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+        s3_key = f"models/{safe_model_id}/{safe_version}/model.zip"
+        
         s3.put_object(
             Bucket=ap_arn, Key=s3_key, Body=file_content, ContentType="application/zip"
         )
@@ -247,8 +272,25 @@ def upload_model(
         )
         return {"message": "Upload successful"}
     except Exception as e:
+        error_msg = str(e)
+        logger.error(f"AWS S3 upload failed for {model_id} v{version}: {error_msg}", exc_info=True)
         print(f"AWS S3 upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"AWS upload failed: {str(e)}")
+        # Provide more specific error messages
+        if "AccessDenied" in error_msg or "Forbidden" in error_msg:
+            raise HTTPException(
+                status_code=403,
+                detail=f"AWS S3 access denied. Check IAM permissions for bucket {ap_arn}"
+            )
+        elif "NoSuchBucket" in error_msg or "InvalidBucketName" in error_msg:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Invalid S3 bucket/access point: {ap_arn}"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"AWS upload failed: {error_msg}"
+            )
 
 
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
@@ -646,60 +688,114 @@ def download_file(url: str, timeout: int = 120) -> bytes | None:
 
 
 def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
-    clean_model_id = model_id
-    if model_id.startswith("https://huggingface.co/"):
-        clean_model_id = model_id.replace("https://huggingface.co/", "")
-    elif model_id.startswith("http://huggingface.co/"):
-        clean_model_id = model_id.replace("http://huggingface.co/", "")
-    api_url = f"https://huggingface.co/api/models/{clean_model_id}"
-    response = requests.get(api_url, timeout=30)
-    if response.status_code != 200:
+    try:
+        clean_model_id = model_id
+        if model_id.startswith("https://huggingface.co/"):
+            clean_model_id = model_id.replace("https://huggingface.co/", "")
+        elif model_id.startswith("http://huggingface.co/"):
+            clean_model_id = model_id.replace("http://huggingface.co/", "")
+        
+        api_url = f"https://huggingface.co/api/models/{clean_model_id}"
+        try:
+            response = requests.get(api_url, timeout=30)
+        except requests.exceptions.Timeout:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Timeout connecting to HuggingFace API for model {clean_model_id}"
+            )
+        except requests.exceptions.RequestException as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to connect to HuggingFace API: {str(e)}"
+            )
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=404, detail=f"Model {clean_model_id} not found on HuggingFace"
+            )
+        
+        try:
+            model_info = response.json()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Invalid response from HuggingFace API: {str(e)}"
+            )
+
+        all_files = []
+        for sibling in model_info.get("siblings", []):
+            if sibling.get("rfilename"):
+                all_files.append(sibling["rfilename"])
+
+        essential_files = []
+        for filename in all_files:
+            if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
+                essential_files.append(filename)
+            elif filename.startswith("README") or filename.startswith("readme"):
+                essential_files.append(filename)
+            elif (
+                filename == "config.json"
+                or filename == "LICENSE"
+                or filename == "license"
+                or filename == "LICENCE"
+                or filename == "licence"
+            ):
+                essential_files.append(filename)
+
+        if not essential_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No essential files found for model {clean_model_id}. Model may be empty or inaccessible."
+            )
+
+        urls_to_download = [
+            (
+                f"https://huggingface.co/{clean_model_id}/resolve/{version}/{filename}",
+                filename,
+            )
+            for filename in essential_files
+        ]
+
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {
+                    executor.submit(download_file, url[0], 120): url[1]
+                    for url in urls_to_download
+                }
+                downloaded_count = 0
+                for future in as_completed(futures):
+                    filename = futures[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            zip_file.writestr(filename, result)
+                            downloaded_count += 1
+                    except Exception as e:
+                        print(f"[DOWNLOAD] Warning: Failed to download {filename}: {e}")
+                
+                if downloaded_count == 0:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to download any files for model {clean_model_id}"
+                    )
+        
+        zip_content = output.getvalue()
+        if not zip_content or len(zip_content) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Downloaded zip file is empty for model {clean_model_id}"
+            )
+        
+        return zip_content
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading from HuggingFace for {model_id}: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=404, detail=f"Model {clean_model_id} not found on HuggingFace"
+            status_code=500,
+            detail=f"Failed to download model from HuggingFace: {str(e)}"
         )
-    model_info = response.json()
-
-    all_files = []
-    for sibling in model_info.get("siblings", []):
-        if sibling.get("rfilename"):
-            all_files.append(sibling["rfilename"])
-
-    essential_files = []
-    for filename in all_files:
-        if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
-            essential_files.append(filename)
-        elif filename.startswith("README") or filename.startswith("readme"):
-            essential_files.append(filename)
-        elif (
-            filename == "config.json"
-            or filename == "LICENSE"
-            or filename == "license"
-            or filename == "LICENCE"
-            or filename == "licence"
-        ):
-            essential_files.append(filename)
-
-    urls_to_download = [
-        (
-            f"https://huggingface.co/{clean_model_id}/resolve/{version}/{filename}",
-            filename,
-        )
-        for filename in essential_files
-    ]
-
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(download_file, url[0], 120): url[1]
-                for url in urls_to_download
-            }
-            for future in as_completed(futures):
-                filename = futures[future]
-                result = future.result()
-                if result:
-                    zip_file.writestr(filename, result)
-    return output.getvalue()
 
 
 def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
@@ -1017,4 +1113,9 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"[INGEST] ERROR in model_ingestion: {str(e)}")
+        print(f"[INGEST] TRACEBACK:\n{error_traceback}")
+        logger.error(f"Failed to ingest model {model_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to ingest model: {str(e)}")
