@@ -1523,6 +1523,7 @@ resource "aws_iam_policy" "lambda_s3_policy" {
           "s3:ListMultipartUploadParts",
           "s3:CreateMultipartUpload",
           "s3:CompleteMultipartUpload",
+          "s3:UploadPart",
           "s3:UploadPartCopy"
         ]
         Resource = ["arn:aws:s3:::${var.artifacts_bucket}/packages/*"]
