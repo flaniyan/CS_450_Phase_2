@@ -42,9 +42,11 @@ module "iam" {
 }
 
 module "ecs" {
-  source           = "../../modules/ecs"
-  artifacts_bucket = "pkg-artifacts"
-  image_tag        = var.image_tag
+  source                  = "../../modules/ecs"
+  artifacts_bucket        = "pkg-artifacts"
+  image_tag               = var.image_tag
+  validator_task_role_arn = aws_iam_role.validator_task.arn
+  jwt_secret_arn          = var.jwt_secret_arn
   ddb_tables_arnmap = {
     users     = "arn:aws:dynamodb:us-east-1:838693051036:table/users"
     tokens    = "arn:aws:dynamodb:us-east-1:838693051036:table/tokens"
