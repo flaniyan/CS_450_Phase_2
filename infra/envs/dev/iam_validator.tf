@@ -95,21 +95,21 @@ resource "aws_iam_role_policy_attachment" "validator_attach_kms" {
 
 # Validator — Secrets Manager (JWT secret)
 resource "aws_iam_policy" "validator_secrets_jwt_ro_managed" {
-  name   = "validator-secrets-jwt-ro"
+  name = "validator-secrets-jwt-ro"
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ],
         Resource = var.jwt_secret_arn
       },
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "kms:Decrypt",
           "kms:DescribeKey",
           "kms:GenerateDataKey*"
