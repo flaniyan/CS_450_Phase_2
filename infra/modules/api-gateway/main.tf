@@ -327,6 +327,7 @@ resource "aws_api_gateway_integration" "health_components_get" {
   integration_http_method = "GET"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/health/components"
+  timeout_milliseconds    = 29000
 
   request_parameters = {
     "integration.request.querystring.windowMinutes"   = "method.request.querystring.windowMinutes"
@@ -1200,6 +1201,8 @@ resource "aws_api_gateway_integration_response" "artifact_type_options_200" {
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
+
+  depends_on = [aws_api_gateway_integration.artifact_type_options]
 }
 
 # CORS for /authenticate
@@ -1348,7 +1351,6 @@ resource "aws_api_gateway_deployment" "main_deployment" {
 
   triggers = {
     redeployment = sha1(jsonencode([
-      timestamp(),  # Force redeployment when any change is made
       # Resources
       aws_api_gateway_resource.health.id,
       aws_api_gateway_resource.health_components.id,
