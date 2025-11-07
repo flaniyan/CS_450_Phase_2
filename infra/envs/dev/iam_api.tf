@@ -73,7 +73,7 @@ resource "aws_iam_policy" "api_kms_s3_managed" {
         "kms:GenerateDataKey*",
         "kms:DescribeKey"
       ],
-      Resource = var.kms_key_arn,
+      Resource = module.monitoring.kms_key_arn,
       Condition = {
         StringEquals = {
           "kms:ViaService" = "s3.us-east-1.amazonaws.com"
