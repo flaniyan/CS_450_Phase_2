@@ -71,7 +71,7 @@ resource "aws_iam_policy" "validator_kms_s3_ro_managed" {
         "kms:DescribeKey",
         "kms:GenerateDataKey*"
       ],
-      Resource  = var.kms_key_arn,
+      Resource  = module.monitoring.kms_key_arn,
       Condition = { StringEquals = { "kms:ViaService" = "s3.us-east-1.amazonaws.com" } }
     }]
   })
@@ -105,7 +105,7 @@ resource "aws_iam_policy" "validator_secrets_jwt_ro_managed" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ],
-        Resource = var.jwt_secret_arn
+        Resource = module.monitoring.jwt_secret_arn
       },
       {
         Effect = "Allow",

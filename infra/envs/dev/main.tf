@@ -40,6 +40,13 @@ locals {
 #   source = "../../modules/dynamodb"
 # }
 
+module "monitoring" {
+  source                = "../../modules/monitoring"
+  artifacts_bucket      = local.artifacts_bucket
+  validator_service_url = "http://placeholder"
+  ddb_tables_arnmap     = local.ddb_tables_arnmap
+}
+
 module "iam" {
   source            = "../../modules/iam"
   artifacts_bucket  = local.artifacts_bucket
@@ -51,13 +58,6 @@ module "ecs" {
   artifacts_bucket  = local.artifacts_bucket
   image_tag         = var.image_tag
   ddb_tables_arnmap = local.ddb_tables_arnmap
-}
-
-module "monitoring" {
-  source                = "../../modules/monitoring"
-  artifacts_bucket      = local.artifacts_bucket
-  validator_service_url = module.ecs.validator_service_url
-  ddb_tables_arnmap     = local.ddb_tables_arnmap
 }
 
 module "api_gateway" {

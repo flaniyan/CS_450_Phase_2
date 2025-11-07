@@ -127,7 +127,7 @@ jobs:
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}" -var="jwt_secret_arn=${{ secrets.JWT_SECRET_ARN }}" -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}" -var="kms_key_arn=${{ secrets.KMS_KEY_ARN }}"
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}"
 
       - name: Terraform apply
         shell: bash
