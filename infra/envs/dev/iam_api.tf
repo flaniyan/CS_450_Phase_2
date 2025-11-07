@@ -59,7 +59,6 @@ resource "aws_iam_policy" "api_s3_packages_rw_managed" {
 }
 
 # API Service - KMS Policy (required for S3 KMS encryption)
-# Replace Resource "*" with the KMS key ARN input
 resource "aws_iam_policy" "api_kms_s3_managed" {
   name = "api-kms-s3-dev"
   policy = jsonencode({
