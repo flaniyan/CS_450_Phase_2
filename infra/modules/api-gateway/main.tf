@@ -63,6 +63,8 @@ resource "aws_api_gateway_integration_response" "root_get_200" {
   http_method = aws_api_gateway_method.root_get.http_method
   status_code = aws_api_gateway_method_response.root_get_200.status_code
 
+  depends_on = [aws_api_gateway_integration.root_get]
+
   response_parameters = {
     "method.response.header.Content-Type" = "'application/json'"
   }
@@ -396,6 +398,8 @@ resource "aws_api_gateway_integration_response" "reset_delete_200" {
   resource_id = aws_api_gateway_resource.reset.id
   http_method = aws_api_gateway_method.reset_delete.http_method
   status_code = aws_api_gateway_method_response.reset_delete_200.status_code
+
+  depends_on = [aws_api_gateway_integration.reset_delete]
 }
 
 # PUT /authenticate
@@ -548,6 +552,8 @@ resource "aws_api_gateway_integration_response" "admin_options_200" {
   http_method = aws_api_gateway_method.admin_options.http_method
   status_code = aws_api_gateway_method_response.admin_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.admin_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
@@ -592,6 +598,8 @@ resource "aws_api_gateway_integration_response" "directory_options_200" {
   resource_id = aws_api_gateway_resource.directory.id
   http_method = aws_api_gateway_method.directory_options.http_method
   status_code = aws_api_gateway_method_response.directory_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.directory_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -638,6 +646,8 @@ resource "aws_api_gateway_integration_response" "upload_options_200" {
   resource_id = aws_api_gateway_resource.upload.id
   http_method = aws_api_gateway_method.upload_options.http_method
   status_code = aws_api_gateway_method_response.upload_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.upload_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -1146,6 +1156,8 @@ resource "aws_api_gateway_integration_response" "artifacts_options_200" {
   http_method = aws_api_gateway_method.artifacts_options.http_method
   status_code = aws_api_gateway_method_response.artifacts_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.artifacts_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
@@ -1194,6 +1206,8 @@ resource "aws_api_gateway_integration_response" "artifact_type_options_200" {
   resource_id = aws_api_gateway_resource.artifact_type.id
   http_method = aws_api_gateway_method.artifact_type_options.http_method
   status_code = aws_api_gateway_method_response.artifact_type_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.artifact_type_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
@@ -1244,6 +1258,8 @@ resource "aws_api_gateway_integration_response" "authenticate_options_200" {
   http_method = aws_api_gateway_method.authenticate_options.http_method
   status_code = aws_api_gateway_method_response.authenticate_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.authenticate_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
     "method.response.header.Access-Control-Allow-Methods" = "'PUT,OPTIONS'"
@@ -1292,6 +1308,8 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
   resource_id = aws_api_gateway_resource.artifact_byregex.id
   http_method = aws_api_gateway_method.artifact_byregex_options.http_method
   status_code = aws_api_gateway_method_response.artifact_byregex_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.artifact_byregex_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
