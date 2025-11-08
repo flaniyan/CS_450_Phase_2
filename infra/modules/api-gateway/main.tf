@@ -9,10 +9,6 @@ variable "kms_key_arn" {
   type        = string
   description = "KMS key ARN for S3 encryption"
 }
-variable "aws_account_id" {
-  type        = string
-  description = "AWS account ID for logging resources"
-}
 
 # API Gateway
 resource "aws_api_gateway_rest_api" "main_api" {
@@ -27,196 +23,6 @@ resource "aws_api_gateway_rest_api" "main_api" {
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
-}
-
-# ===== LOGGING RESOURCES =====
-
-resource "aws_s3_bucket" "api_access_logs" {
-  bucket        = "${var.artifacts_bucket}-apigw-logs"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "api_access_logs" {
-  bucket = aws_s3_bucket.api_access_logs.id
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_cloudwatch_log_group" "api_access" {
-  name              = "/aws/apigateway/${aws_api_gateway_rest_api.main_api.name}-prod"
-  retention_in_days = 14
-}
-
-resource "aws_iam_role" "apigw_cloudwatch" {
-  name = "apigw-cloudwatch-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = { Service = "apigateway.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "apigw_cloudwatch_policy" {
-  role       = aws_iam_role.apigw_cloudwatch.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
-}
-
-resource "aws_api_gateway_account" "account" {
-  cloudwatch_role_arn = aws_iam_role.apigw_cloudwatch.arn
-}
-
-resource "aws_iam_role" "firehose_role" {
-  name = "apigw-access-logs-firehose"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = { Service = "firehose.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-      Condition = {
-        StringEquals = {
-          "sts:ExternalId" = var.aws_account_id
-        }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "firehose_role_policy" {
-  role = aws_iam_role.firehose_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = [
-          "s3:AbortMultipartUpload",
-          "s3:GetBucketLocation",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:ListBucketMultipartUploads",
-          "s3:PutObject",
-          "s3:PutObjectAcl"
-        ]
-        Resource = [
-          aws_s3_bucket.api_access_logs.arn,
-          "${aws_s3_bucket.api_access_logs.arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/kinesisfirehose/*"
-      }
-    ]
-  })
-}
-
-resource "aws_kinesis_firehose_delivery_stream" "api_access_logs" {
-  name        = "apigw-access-logs"
-  destination = "extended_s3"
-
-  extended_s3_configuration {
-    role_arn   = aws_iam_role.firehose_role.arn
-    bucket_arn = aws_s3_bucket.api_access_logs.arn
-    prefix     = "year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-    compression_format = "GZIP"
-  }
-
-  depends_on = [
-    aws_s3_bucket_server_side_encryption_configuration.api_access_logs
-  ]
-}
-
-resource "aws_iam_role" "cloudwatch_to_firehose" {
-  name = "cloudwatch-to-firehose-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = { Service = "logs.${var.aws_region}.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "cloudwatch_to_firehose_policy" {
-  role = aws_iam_role.cloudwatch_to_firehose.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = [
-        "firehose:PutRecord",
-        "firehose:PutRecordBatch"
-      ]
-      Resource = aws_kinesis_firehose_delivery_stream.api_access_logs.arn
-    }]
-  })
-}
-
-resource "aws_cloudwatch_log_subscription_filter" "api_access_to_firehose" {
-  name            = "apigw-access-to-firehose"
-  log_group_name  = aws_cloudwatch_log_group.api_access.name
-  filter_pattern  = ""
-  destination_arn = aws_kinesis_firehose_delivery_stream.api_access_logs.arn
-  role_arn        = aws_iam_role.cloudwatch_to_firehose.arn
-
-  depends_on = [
-    aws_iam_role_policy.cloudwatch_to_firehose_policy,
-    aws_kinesis_firehose_delivery_stream.api_access_logs
-  ]
-}
-
-resource "aws_s3_bucket_policy" "api_access_logs" {
-  bucket = aws_s3_bucket.api_access_logs.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowFirehoseDelivery"
-        Effect    = "Allow"
-        Principal = { Service = "firehose.amazonaws.com" }
-        Action    = [
-          "s3:AbortMultipartUpload",
-          "s3:GetBucketLocation",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:ListBucketMultipartUploads",
-          "s3:PutObject"
-        ]
-        Resource = [
-          aws_s3_bucket.api_access_logs.arn,
-          "${aws_s3_bucket.api_access_logs.arn}/*"
-        ]
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = var.aws_account_id
-          },
-          ArnLike = {
-            "aws:SourceArn" = aws_kinesis_firehose_delivery_stream.api_access_logs.arn
-          }
-        }
-      }
-    ]
-  })
-
-  depends_on = [aws_kinesis_firehose_delivery_stream.api_access_logs]
 }
 
 # ===== ROOT LEVEL RESOURCES =====
@@ -1662,41 +1468,11 @@ resource "aws_api_gateway_stage" "main_stage" {
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
   stage_name    = "prod"
 
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api_access.arn
-    format = jsonencode({
-      requestId          = "$context.requestId"
-      ip                 = "$context.identity.sourceIp"
-      userAgent          = "$context.identity.userAgent"
-      requestTime        = "$context.requestTime"
-      httpMethod         = "$context.httpMethod"
-      resourcePath       = "$context.resourcePath"
-      protocol           = "$context.protocol"
-      status             = "$context.status"
-      responseLength     = "$context.responseLength"
-      integrationLatency = "$context.integrationLatency"
-      responseLatency    = "$context.responseLatency"
-    })
-  }
-
-  method_settings {
-    metrics_enabled    = true
-    logging_level      = "INFO"
-    data_trace_enabled = true
-    resource_path      = "/*"
-    http_method        = "*"
-  }
-
   tags = {
     Name        = "acme-api-prod"
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
-
-  depends_on = [
-    aws_api_gateway_account.account,
-    aws_cloudwatch_log_group.api_access
-  ]
 }
 
 # ===== LAMBDA IAM ROLE AND POLICIES =====
