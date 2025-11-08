@@ -17,7 +17,11 @@ class ReproducibilityMetric:
         raw_files = meta.get("repo_files") or set()
         files = {f.replace("\\", "/").lstrip("./").lower() for f in raw_files}
 
-        if not self._has_demo(readme):
+        has_demo = self._has_demo(readme)
+        
+        if not has_demo:
+            if self._has_any_code_indicators(readme, files):
+                return 0.5
             return 0.0
 
         simple_install = self._has_simple_install(readme)
@@ -34,11 +38,9 @@ class ReproducibilityMetric:
         has_secrets = self._mentions_secrets(readme)
         needs_heavy_setup = self._needs_heavy_setup(readme)
 
-        # Full score: demo + simple install + paths exist + no secrets + no heavy setup
         if simple_install and paths_exist and not has_secrets and not needs_heavy_setup:
             return 1.0
 
-        # Half score: demo exists but missing some pieces
         return 0.5
 
     def _has_demo(self, text: str) -> bool:
@@ -233,6 +235,16 @@ class ReproducibilityMetric:
         )
 
         return any(x in text for x in gpu + datasets)
+
+    def _has_any_code_indicators(self, text: str, files: set) -> bool:
+        code_indicators = (
+            ".py" in text or ".js" in text or ".java" in text or ".cpp" in text or ".c" in text,
+            "import " in text or "from " in text,
+            "def " in text or "function " in text or "class " in text,
+            "```" in text or "<code>" in text,
+            any(f.endswith((".py", ".js", ".java", ".cpp", ".c", ".h", ".ipynb")) for f in files),
+        )
+        return any(code_indicators)
 
 
 register(ReproducibilityMetric())
