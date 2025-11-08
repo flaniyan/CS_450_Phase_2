@@ -6,19 +6,9 @@ class ReviewednessMetric:
 
     def score(self, meta: dict) -> float:
         github_url = (meta.get("github_url") or "").strip()
-        base_score = 0.0
-
-        # Calculate base score from available indicators (no hardcoding)
-        if github_url:
-            base_score += 0.3  # Credit for having GitHub URL
-        else:
-            # Check for GitHub-related indicators
-            full_name = meta.get("full_name", "")
-            readme_text = str(meta.get("readme_text", "")).lower()
-            if "/" in full_name:
-                base_score += 0.2  # Credit for org/repo format
-            if "github" in readme_text:
-                base_score += 0.1  # Credit for GitHub mention in README
+        
+        if not github_url:
+            return -1.0
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []
@@ -27,39 +17,44 @@ class ReviewednessMetric:
         def is_code_file(name: str) -> bool:
             n = (name or "").lower()
             noncode_ext = (
-                ".safetensors",
-                ".bin",
-                ".pt",
-                ".pth",
-                ".onnx",
-                ".ckpt",
-                ".h5",
-                ".tar",
-                ".gz",
-                ".zip",
-                ".7z",
-                ".npz",
-                ".npy",
-                ".csv",
-                ".tsv",
-                ".parquet",
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".gif",
-                ".bmp",
-                ".webp",
-                ".svg",
-                ".mp4",
-                ".mp3",
-                ".wav",
-                ".flac",
-                ".pdf",
-                ".doc",
-                ".docx",
-                ".ppt",
-                ".pptx",
+                ".safetensors", ".bin", ".pt", ".pth", ".onnx", ".ckpt", ".h5",
+                ".tar", ".gz", ".zip", ".7z", ".rar", ".bz2", ".xz",
+                ".npz", ".npy", ".pkl", ".pickle", ".joblib",
+                ".csv", ".tsv", ".parquet", ".feather", ".arrow",
+                ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
+                ".ico", ".tiff", ".tif", ".heic", ".heif",
+                ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv",
+                ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
+                ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+                ".odt", ".ods", ".odp",
+                ".ttf", ".otf", ".woff", ".woff2", ".eot",
+                ".db", ".sqlite", ".sqlite3", ".db3",
+                ".log", ".txt", ".md", ".rst", ".org",
+                ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+                ".exe", ".dll", ".so", ".dylib", ".a", ".lib",
+                ".iso", ".img", ".dmg",
             )
+            code_ext = (
+                ".py", ".pyw", ".pyx", ".pyi",
+                ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+                ".java", ".class", ".jar",
+                ".cpp", ".cxx", ".cc", ".c", ".h", ".hpp", ".hxx",
+                ".cs", ".vb",
+                ".go", ".rs", ".swift", ".kt", ".scala",
+                ".php", ".rb", ".pl", ".pm",
+                ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
+                ".r", ".R", ".m", ".matlab",
+                ".sql", ".plsql", ".tsql",
+                ".html", ".htm", ".xhtml", ".css", ".scss", ".sass", ".less",
+                ".vue", ".svelte", ".elm",
+                ".lua", ".tcl", ".vim", ".el",
+                ".makefile", ".cmake", ".dockerfile",
+                ".tf", ".tfvars", ".hcl",
+                ".gradle", ".maven", ".pom",
+                ".ipynb", ".rmd",
+            )
+            if any(n.endswith(ext) for ext in code_ext):
+                return True
             return not any(n.endswith(ext) for ext in noncode_ext)
 
         reviewed_add = 0
@@ -98,37 +93,13 @@ class ReviewednessMetric:
                 add = int(c.get("additions") or 0)
             total_add += add
 
-        # Calculate score based on available data (no hardcoding)
         if total_add == 0:
-            # Only non-code files - consider all reviewed
             if pr_count > 0 or commit_count > 0:
-                return min(1.0, base_score + 0.7)  # High score for having activity
-            # No activity but have GitHub URL
-            if github_url:
-                return min(1.0, base_score + 0.4)  # Credit for having repo
-            return min(1.0, base_score + 0.2)  # Minimal credit
+                return 1.0
+            return -1.0
 
-        # Calculate ratio of reviewed additions to total additions
-        if total_add > 0:
-            ratio = reviewed_add / float(total_add)
-            ratio = max(0.0, min(1.0, ratio))
-        else:
-            ratio = 0.0
-
-        # Add bonuses based on available data (proportional, not hardcoded)
-        if reviewed_add > 0:
-            # Bonus for having reviewed code (proportional to amount)
-            review_bonus = min(0.3, (reviewed_add / max(total_add, 1)) * 0.3)
-            ratio += review_bonus
-
-        if pr_count > 0:
-            # Bonus for having PR-based workflow (proportional to PR count)
-            pr_bonus = min(0.2, (pr_count / max(pr_count + commit_count, 1)) * 0.2)
-            ratio += pr_bonus
-
-        # Combine base score with calculated ratio
-        final_score = base_score + (ratio * (1.0 - base_score))
-        return max(0.0, min(1.0, final_score))
+        ratio = reviewed_add / float(total_add)
+        return max(0.0, min(1.0, ratio))
 
 
 register(ReviewednessMetric())
