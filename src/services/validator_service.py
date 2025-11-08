@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import os
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -64,48 +65,57 @@ def get_validator_script(pkg_name: str, version: str) -> Optional[str]:
         return None
 
 
+def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> Dict[str, Any]:
+    safe_globals = {
+        "__builtins__": {
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "list": list,
+            "dict": dict,
+            "tuple": tuple,
+            "set": set,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "any": any,
+            "all": all,
+            "enumerate": enumerate,
+            "zip": zip,
+            "range": range,
+            "print": print,
+        }
+    }
+
+    exec(script_content, safe_globals)
+
+    if "validate" in safe_globals:
+        result = safe_globals["validate"](package_data)
+        return {"valid": True, "result": result}
+    else:
+        return {"valid": False, "error": "No validate function found"}
+
+
 def execute_validator(
     script_content: str, package_data: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Execute validator script safely"""
-    try:
-        # Create a safe execution environment
-        safe_globals = {
-            "__builtins__": {
-                "len": len,
-                "str": str,
-                "int": int,
-                "float": float,
-                "bool": bool,
-                "list": list,
-                "dict": dict,
-                "tuple": tuple,
-                "set": set,
-                "min": min,
-                "max": max,
-                "sum": sum,
-                "any": any,
-                "all": all,
-                "enumerate": enumerate,
-                "zip": zip,
-                "range": range,
-                "print": print,
+    """Execute validator script safely with a timeout to prevent DoS."""
+    timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="validator") as executor:
+        future = executor.submit(_run_validator_script, script_content, package_data)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            logging.error("Validator execution timed out after %s seconds", timeout)
+            return {
+                "valid": False,
+                "error": f"Validator execution timed out after {timeout} seconds",
             }
-        }
-
-        # Execute the validator script
-        exec(script_content, safe_globals)
-
-        # Call the validate function if it exists
-        if "validate" in safe_globals:
-            result = safe_globals["validate"](package_data)
-            return {"valid": True, "result": result}
-        else:
-            return {"valid": False, "error": "No validate function found"}
-
-    except Exception as e:
-        logging.error(f"Validator execution error: {e}")
-        return {"valid": False, "error": str(e)}
+        except Exception as e:
+            logging.error(f"Validator execution error: {e}", exc_info=True)
+            return {"valid": False, "error": str(e)}
 
 
 def log_download_event(
