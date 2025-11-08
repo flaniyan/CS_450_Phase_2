@@ -88,7 +88,7 @@ run_tests() {
         $PYTHON_CMD -m pip install --quiet -e . || true
     fi
     
-    if ! $PYTHON_CMD -m coverage run --source=acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
+    if ! SKIP_PROCESSPOOL_TESTS=1 $PYTHON_CMD -m coverage run --source=acmecli -m pytest tests/unit -q --disable-warnings > pytest_output.log 2>&1; then
         coverage_report=$($PYTHON_CMD -m coverage report -m 2>&1 || true)
         passed=$(grep -Eo '[0-9]+ passed' pytest_output.log | grep -Eo '[0-9]+' || echo 0)
         failed=$(grep -Eo '[0-9]+ failed' pytest_output.log | grep -Eo '[0-9]+' || echo 0)

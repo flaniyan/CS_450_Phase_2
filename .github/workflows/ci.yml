@@ -32,3 +32,5 @@ jobs:
         run: ./run install
       - name: Run tests
         run: ./run test
+      - name: Run validator timeout tests
+        run: python -m pytest tests/unit/test_validator_timeout.py

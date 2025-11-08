@@ -2,6 +2,9 @@ import os
 
 import pytest
 
+if os.getenv("SKIP_PROCESSPOOL_TESTS") == "1":
+    pytest.skip("Skipped under coverage run", allow_module_level=True)
+
 from src.services.validator_service import execute_validator
 
 
