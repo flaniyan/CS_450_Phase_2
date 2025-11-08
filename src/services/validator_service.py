@@ -104,22 +104,23 @@ def execute_validator(
 ) -> Dict[str, Any]:
     """Execute validator script safely with a timeout to prevent DoS."""
     timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
-    ctx = get_context("fork")
-    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
-        future = executor.submit(_run_validator_script, script_content, package_data)
-        try:
-            return future.result(timeout=timeout)
-        except TimeoutError:
-            logging.error("Validator execution timed out after %s seconds", timeout)
-            future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-            return {
-                "valid": False,
-                "error": f"Validator execution timed out after {timeout} seconds",
-            }
-        except Exception as e:
-            logging.error(f"Validator execution error: {e}", exc_info=True)
-            return {"valid": False, "error": str(e)}
+    ctx = get_context("spawn")
+    executor = ProcessPoolExecutor(max_workers=1, mp_context=ctx)
+    future = executor.submit(_run_validator_script, script_content, package_data)
+    try:
+        return future.result(timeout=timeout)
+    except TimeoutError:
+        logging.error("Validator execution timed out after %s seconds", timeout)
+        future.cancel()
+        return {
+            "valid": False,
+            "error": f"Validator execution timed out after {timeout} seconds",
+        }
+    except Exception as e:
+        logging.error(f"Validator execution error: {e}", exc_info=True)
+        return {"valid": False, "error": str(e)}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def log_download_event(
