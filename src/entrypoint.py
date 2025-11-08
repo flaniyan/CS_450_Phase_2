@@ -14,4 +14,3 @@ enable_auth = os.getenv("ENABLE_AUTH", "").lower() == "true"
 jwt_secret = os.getenv("JWT_SECRET")
 if enable_auth or jwt_secret:
     app.add_middleware(JWTAuthMiddleware, exempt_paths=DEFAULT_EXEMPT)
-

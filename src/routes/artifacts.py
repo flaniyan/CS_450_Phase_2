@@ -34,14 +34,14 @@ def ingest(payload: Union[Artifact, List[Artifact]] = Body(...)):
     ingested_count = 0
     for a in items:
         # Convert Pydantic model to dict properly (serialize datetime to ISO string)
-        if hasattr(a, 'model_dump'):
-            artifact_dict = a.model_dump(mode='json')
+        if hasattr(a, "model_dump"):
+            artifact_dict = a.model_dump(mode="json")
         else:
             artifact_dict = dict(a)
         # Ensure datetime is serialized
-        if 'created_at' in artifact_dict:
-            if isinstance(artifact_dict['created_at'], datetime):
-                artifact_dict['created_at'] = artifact_dict['created_at'].isoformat()
+        if "created_at" in artifact_dict:
+            if isinstance(artifact_dict["created_at"], datetime):
+                artifact_dict["created_at"] = artifact_dict["created_at"].isoformat()
         if artifact_dict.get("id") not in existing:
             _INMEM_DB.setdefault("artifacts", []).append(artifact_dict)
             existing.add(artifact_dict.get("id"))
@@ -72,4 +72,3 @@ def by_id(artifact_id: str):
         if a.get("id") == artifact_id:
             return a
     raise HTTPException(status_code=404, detail="Not found")
-

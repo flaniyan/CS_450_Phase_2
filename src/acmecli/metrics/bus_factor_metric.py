@@ -99,7 +99,12 @@ def score_bus_factor(model_data_or_maintainers) -> float:
         return BusFactorMetric().score(model_data_or_maintainers).value
     else:
         # Backward compatibility for list input
-        return BusFactorMetric().score({"contributors": {m: 1 for m in model_data_or_maintainers}}).value
+        return (
+            BusFactorMetric()
+            .score({"contributors": {m: 1 for m in model_data_or_maintainers}})
+            .value
+        )
+
 
 def score_bus_factor_with_latency(model_data_or_maintainers) -> Tuple[float, int]:
     """Legacy function for backward compatibility."""

@@ -27,10 +27,10 @@ def reset():
     ensure_default_admin()
     return {"status": "ok"}
 
+
 @router.delete("/reset")  # Add this to match spec
 def reset_delete():
     _INMEM_DB["artifacts"].clear()
     purge_tokens()
     ensure_default_admin()
     return {"status": "ok"}
-

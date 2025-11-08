@@ -11,46 +11,57 @@ class GitHubHandler:
     """Handler for GitHub repository metadata fetching using stdlib HTTP."""
 
     def __init__(self):
-        # GitHub token from environment variable for rate limit purposes
-        # If not set, requests will be rate-limited (60 requests/hour for unauthenticated)
-        # With token: 5000 requests/hour
         github_token = os.environ.get("GITHUB_TOKEN")
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",
         }
         if github_token:
-            # Use Bearer format (preferred) but also support token format for compatibility
-            if github_token.startswith("ghp_") or github_token.startswith("github_pat_"):
+            if github_token.startswith("ghp_") or github_token.startswith(
+                "github_pat_"
+            ):
                 self._headers["Authorization"] = f"Bearer {github_token}"
             else:
                 self._headers["Authorization"] = f"token {github_token}"
-            logging.info("GitHub token found in environment variable - using authenticated requests (5000 req/hour)")
+            logging.info(
+                "GitHub token found in environment variable - using authenticated requests (5000 req/hour)"
+            )
         else:
-            logging.warning("GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits.")
+            logging.warning(
+                "GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits."
+            )
 
     def _get_json(self, url: str) -> Dict[str, Any]:
         request = Request(url, headers=self._headers)
         try:
             with urlopen(request, timeout=10) as response:
-                # Check rate limit headers
                 remaining = response.headers.get("X-RateLimit-Remaining")
                 if remaining:
                     remaining_int = int(remaining)
                     if remaining_int < 10:
-                        logging.warning("GitHub API rate limit low: %s requests remaining", remaining_int)
+                        logging.warning(
+                            "GitHub API rate limit low: %s requests remaining",
+                            remaining_int,
+                        )
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as http_err:
-            # Handle rate limit errors specifically
             if http_err.code == 403:
-                # Check if it's a rate limit error
                 rate_limit_reset = http_err.headers.get("X-RateLimit-Reset")
                 if rate_limit_reset:
-                    logging.error("GitHub API rate limit exceeded. Reset at: %s", rate_limit_reset)
+                    logging.error(
+                        "GitHub API rate limit exceeded. Reset at: %s", rate_limit_reset
+                    )
                 else:
-                    logging.error("GitHub API forbidden (403) for %s: %s. Check GITHUB_TOKEN environment variable.", url, http_err)
+                    logging.error(
+                        "GitHub API forbidden (403) for %s: %s. Check GITHUB_TOKEN environment variable.",
+                        url,
+                        http_err,
+                    )
             elif http_err.code == 401:
-                logging.error("GitHub API unauthorized (401) for %s. Check GITHUB_TOKEN environment variable.", url)
+                logging.error(
+                    "GitHub API unauthorized (401) for %s. Check GITHUB_TOKEN environment variable.",
+                    url,
+                )
             else:
                 logging.error("HTTP error fetching %s: %s", url, http_err)
         except URLError as url_err:
@@ -111,12 +122,22 @@ class GitHubHandler:
 
         # Extract repo files list for reproducibility metric (optimized - only top-level + key directories)
         try:
-            contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents?per_page=100"
+            contents_url = (
+                f"https://api.github.com/repos/{owner}/{repo}/contents?per_page=100"
+            )
             contents_data = self._get_json(contents_url)
             repo_files = set()
             if isinstance(contents_data, list):
                 # Only extract files from top-level and key directories (examples, scripts, demo) to reduce API calls
-                key_dirs = ["examples", "scripts", "demo", "demos", "src", "tests", "test"]
+                key_dirs = [
+                    "examples",
+                    "scripts",
+                    "demo",
+                    "demos",
+                    "src",
+                    "tests",
+                    "test",
+                ]
                 for item in contents_data:
                     if item.get("type") == "file":
                         file_path = item.get("path", "")
@@ -167,7 +188,7 @@ class GitHubHandler:
                     merged_at = pr.get("merged_at")
                     state = pr.get("state", "open")
                     is_merged = merged_at is not None and state == "closed"
-                    
+
                     pr_info = {
                         "merged": is_merged,
                         "approved": False,
@@ -209,7 +230,7 @@ class GitHubHandler:
                 for commit in commits_data[:5]:  # Reduced to 5 for faster ingestion
                     commit_info = {"additions": 0, "files": []}
                     commit_sha = commit.get("sha")
-                    
+
                     # If we've hit rate limits, skip detailed fetches and use summary data
                     if rate_limit_hit:
                         stats = commit.get("stats", {})
@@ -217,7 +238,7 @@ class GitHubHandler:
                             commit_info["additions"] = stats.get("additions", 0)
                         direct_commits.append(commit_info)
                         continue
-                    
+
                     if commit_sha:
                         try:
                             commit_detail_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}"
@@ -237,13 +258,19 @@ class GitHubHandler:
                             # Check if it's a rate limit error
                             if http_err.code == 403:
                                 rate_limit_hit = True
-                                logging.warning("GitHub API rate limit hit, using summary data for remaining commits")
+                                logging.warning(
+                                    "GitHub API rate limit hit, using summary data for remaining commits"
+                                )
                                 # Use summary stats from commit list if available
                                 stats = commit.get("stats", {})
                                 if stats:
                                     commit_info["additions"] = stats.get("additions", 0)
                             else:
-                                logging.warning("Failed to fetch commit detail for %s: %s", commit_sha[:8], http_err)
+                                logging.warning(
+                                    "Failed to fetch commit detail for %s: %s",
+                                    commit_sha[:8],
+                                    http_err,
+                                )
                                 stats = commit.get("stats", {})
                                 if stats:
                                     commit_info["additions"] = stats.get("additions", 0)
@@ -252,7 +279,11 @@ class GitHubHandler:
                             stats = commit.get("stats", {})
                             if stats:
                                 commit_info["additions"] = stats.get("additions", 0)
-                            logging.warning("Failed to fetch commit detail for %s: %s", commit_sha[:8], commit_error)
+                            logging.warning(
+                                "Failed to fetch commit detail for %s: %s",
+                                commit_sha[:8],
+                                commit_error,
+                            )
                             # Continue with partial data rather than failing completely
                     direct_commits.append(commit_info)
             if "github" not in meta:
