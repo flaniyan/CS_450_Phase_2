@@ -19,7 +19,7 @@ A user could still access package endpoints with an expired or tampered JWT.
 | **5. Why was that choice made?**         | Limited familiarity with API Gateway authorizers and reuse patterns.                      |
 
 **Root Cause:** Authentication not centralized across all endpoints.  
-**Fix (Completed Nov 2025):** Introduced a shared `verify_auth_token` helper that calls `verify_jwt_token`, rejects forged or expired tokens with HTTP 403, and attaches claims to `request.state`.
+**Fix:** Introduced a shared `verify_auth_token` helper that calls `verify_jwt_token`, rejects forged or expired tokens with HTTP 403, and attaches claims to `request.state`.
 
 ---
 
@@ -37,7 +37,7 @@ Lambda functions could access all S3 objects or DynamoDB tables rather than leas
 | **5. Why was that omitted?**                 | Team unfamiliar with Terraform’s `aws_iam_policy_document` blocks. |
 
 **Root Cause:** Over-permissive IAM role design.  
-**Fix (Completed Nov 2025):** Terraform now provisions IAM policies scoped to specific S3 prefixes (`packages/*`, `validator/inputs/*`), DynamoDB tables, and KMS keys. Terratest guard ensures no `Action="*"` / `Resource="*"` in policy docs.
+**Fix:** Terraform now provisions IAM policies scoped to specific S3 prefixes (`packages/*`, `validator/inputs/*`), DynamoDB tables, and KMS keys. Terratest guard ensures no `Action="*"` / `Resource="*"` in policy docs.
 
 ---
 
@@ -73,7 +73,7 @@ A malicious validator script could loop indefinitely, consuming CPU and blocking
 | **5. Why was this misunderstood?**   | Lack of detailed reading of ECS task-definition runtime limits.      |
 
 **Root Cause:** Missing per-validator timeout enforcement.  
-**Fix (Completed Nov 2025):** `execute_validator` launches validators in a subprocess with configurable timeout (`VALIDATOR_TIMEOUT_SEC`, default 5 s). If the script hangs, the child process is terminated and the API responds with a timeout error. Regression tests live in `tests/unit/test_validator_timeout.py`.
+**Fix:** `execute_validator` launches validators in a subprocess with configurable timeout (`VALIDATOR_TIMEOUT_SEC`, default 5 s). If the script hangs, the child process is terminated and the API responds with a timeout error. Regression tests live in `tests/unit/test_validator_timeout.py`.
 
 ---
 
