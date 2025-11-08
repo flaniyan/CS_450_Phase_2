@@ -112,7 +112,7 @@ resource "aws_iam_policy" "validator_secrets_jwt_ro_managed" {
           "kms:DescribeKey",
           "kms:GenerateDataKey*"
         ],
-        Resource = "*",
+        Resource = module.monitoring.kms_key_arn,
         Condition = {
           StringEquals = {
             "kms:ViaService" = "secretsmanager.us-east-1.amazonaws.com"
