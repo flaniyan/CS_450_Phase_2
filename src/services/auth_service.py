@@ -25,6 +25,14 @@ JWT_MAX_USES = int(os.getenv("JWT_MAX_USES", "1000"))
 USERS_TABLE = os.getenv("DDB_TABLE_USERS", "users")
 TOKENS_TABLE = os.getenv("DDB_TABLE_TOKENS", "tokens")
 
+DEFAULT_ADMIN_USERNAME = "ece30861defaultadminuser"
+DEFAULT_ADMIN_PASSWORD_PRIMARY = "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages"
+DEFAULT_ADMIN_PASSWORD_ALTERNATE = "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"
+DEFAULT_ADMIN_PASSWORDS = {
+    DEFAULT_ADMIN_PASSWORD_PRIMARY,
+    DEFAULT_ADMIN_PASSWORD_ALTERNATE,
+}
+
 security = HTTPBearer()
 
 # --------- Models ----------
@@ -161,6 +169,89 @@ def create_user(user_data: UserRegistration) -> Dict[str, Any]:
     }
     dynamodb.Table(USERS_TABLE).put_item(Item=item)
     return item
+
+
+def ensure_default_admin() -> bool:
+    """
+    Ensure the default admin account exists with the expected credentials.
+    Returns True if the account exists or was created/updated, False otherwise.
+    """
+    try:
+        admin = get_user_by_username(DEFAULT_ADMIN_USERNAME)
+        if admin:
+            roles = set(admin.get("roles", []))
+            needs_update = False
+            update_parts = []
+            expr_attr_vals = {}
+            expr_attr_names = {}
+
+            if "admin" not in roles:
+                roles.add("admin")
+                needs_update = True
+                update_parts.append("#roles = :roles")
+                expr_attr_vals[":roles"] = list(roles)
+                expr_attr_names["#roles"] = "roles"
+
+            if not admin.get("password_hash"):
+                needs_update = True
+                update_parts.append("#password_hash = :password_hash")
+                expr_attr_vals[":password_hash"] = hash_password(DEFAULT_ADMIN_PASSWORD_PRIMARY)
+                expr_attr_names["#password_hash"] = "password_hash"
+
+            update_parts.append("#updated_at = :updated_at")
+            expr_attr_vals[":updated_at"] = datetime.now(timezone.utc).isoformat()
+            expr_attr_names["#updated_at"] = "updated_at"
+
+            if needs_update:
+                table = dynamodb.Table(USERS_TABLE)
+                kwargs = {
+                    "Key": {"user_id": admin["user_id"]},
+                    "UpdateExpression": "SET " + ", ".join(update_parts),
+                    "ExpressionAttributeValues": expr_attr_vals,
+                    "ExpressionAttributeNames": expr_attr_names,
+                }
+                table.update_item(**kwargs)
+                logger.info("Default admin account refreshed.")
+            return True
+
+        # Create the account if it does not exist
+        create_user(
+            UserRegistration(
+                username=DEFAULT_ADMIN_USERNAME,
+                password=DEFAULT_ADMIN_PASSWORD_PRIMARY,
+                roles=["admin"],
+            )
+        )
+        logger.info("Default admin account created.")
+        return True
+    except HTTPException as http_exc:
+        if http_exc.status_code == 409:
+            logger.info("Default admin already exists.")
+            return True
+        logger.warning("Failed to ensure default admin: %s", http_exc.detail)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to ensure default admin: %s", exc, exc_info=True)
+    return False
+
+
+def purge_tokens() -> bool:
+    """
+    Remove all issued tokens. Used during system reset to invalidate sessions.
+    """
+    try:
+        table = dynamodb.Table(TOKENS_TABLE)
+        scan_kwargs = {"ProjectionExpression": "token_id"}
+        response = table.scan(**scan_kwargs)
+        while True:
+            for item in response.get("Items", []):
+                table.delete_item(Key={"token_id": item["token_id"]})
+            if "LastEvaluatedKey" not in response:
+                break
+            response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"], **scan_kwargs)
+        return True
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to purge tokens: %s", exc, exc_info=True)
+        return False
 
 # --------- Routers ----------
 auth_public = APIRouter(prefix="/auth")                 # public namespaced routes

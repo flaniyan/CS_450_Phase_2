@@ -18,13 +18,7 @@ STATIC_TOKEN = (
     "example"
 )
 
-@public_auth.put(
-    "/authenticate",
-    dependencies=[],
-    openapi_extra={"security": []},
-    response_class=PlainTextResponse
-)
-async def authenticate(request: Request):
+async def _authenticate(request: Request):
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -46,6 +40,24 @@ async def authenticate(request: Request):
 
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
+@public_auth.put(
+    "/authenticate",
+    dependencies=[],
+    openapi_extra={"security": []},
+    response_class=PlainTextResponse
+)
+async def authenticate_put(request: Request):
+    return await _authenticate(request)
+
+@public_auth.post(
+    "/authenticate",
+    dependencies=[],
+    openapi_extra={"security": []},
+    response_class=PlainTextResponse
+)
+async def authenticate_post(request: Request):
+    return await _authenticate(request)
+
 @public_auth.post(
     "/login",
     dependencies=[],
@@ -53,4 +65,4 @@ async def authenticate(request: Request):
     response_class=PlainTextResponse
 )
 async def login_alias(request: Request):
-    return await authenticate(request)
+    return await _authenticate(request)
