@@ -66,6 +66,7 @@ module "api_gateway" {
   validator_service_url = module.ecs.validator_service_url
   kms_key_arn           = module.monitoring.kms_key_arn
   ddb_tables_arnmap     = local.ddb_tables_arnmap
+  aws_account_id        = var.aws_account_id
 }
 
 output "artifacts_bucket" { value = local.artifacts_bucket }
