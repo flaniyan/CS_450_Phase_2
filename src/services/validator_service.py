@@ -7,8 +7,8 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import os
 from datetime import datetime, timezone
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
 from multiprocessing import get_context
+from multiprocessing.queues import Queue
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -94,7 +94,14 @@ def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> 
 
     if "validate" in safe_globals:
         result = safe_globals["validate"](package_data)
-        return {"valid": True, "result": result}
+    return {"valid": True, "result": result}
+
+
+def _validator_worker(script: str, data: Dict[str, Any], queue: Queue):
+    try:
+        queue.put({"status": "ok", "result": _run_validator_script(script, data)})
+    except Exception as exc:
+        queue.put({"status": "error", "error": str(exc)})
     else:
         return {"valid": False, "error": "No validate function found"}
 
@@ -105,22 +112,27 @@ def execute_validator(
     """Execute validator script safely with a timeout to prevent DoS."""
     timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
     ctx = get_context("spawn")
-    executor = ProcessPoolExecutor(max_workers=1, mp_context=ctx)
-    future = executor.submit(_run_validator_script, script_content, package_data)
-    try:
-        return future.result(timeout=timeout)
-    except TimeoutError:
+    queue: Queue = ctx.Queue()
+    process = ctx.Process(target=_validator_worker, args=(script_content, package_data, queue))
+    process.start()
+    process.join(timeout)
+
+    if process.is_alive():
         logging.error("Validator execution timed out after %s seconds", timeout)
-        future.cancel()
+        process.terminate()
+        process.join()
         return {
             "valid": False,
             "error": f"Validator execution timed out after {timeout} seconds",
         }
-    except Exception as e:
-        logging.error(f"Validator execution error: {e}", exc_info=True)
-        return {"valid": False, "error": str(e)}
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+
+    if not queue.empty():
+        message = queue.get()
+        if message.get("status") == "ok":
+            return message["result"]
+        return {"valid": False, "error": message.get("error", "Unknown validator error")}
+
+    return {"valid": False, "error": "Validator returned no result"}
 
 
 def log_download_event(
