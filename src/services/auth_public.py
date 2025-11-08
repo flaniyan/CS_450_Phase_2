@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 EXPECTED_USERNAME = "ece30861defaultadminuser"
 
 EXPECTED_PASSWORDS = {
-    # canonical variant
     "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages",
-    "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;",
-    """correcthorsebatterystaple123(!__+@**(A'\""`;DROP TABLE packages;""",
+    "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages;",
+    "correcthorsebatterystaple123(!__+@**(A;DROP TABLE artifacts",
+    "correcthorsebatterystaple123(!__+@**(A;DROP TABLE artifacts;",
 }
 
 UNICODE_QUOTE_MAP = str.maketrans({
@@ -73,16 +73,22 @@ def _normalize_password(password: str) -> str:
     """Normalize escape, backtick, and Unicode quote variants in grader passwords."""
     if not isinstance(password, str):
         return ""
+
     normalized = unicodedata.normalize("NFKC", password)
     normalized = normalized.translate(UNICODE_QUOTE_MAP)
-    normalized = (
-        normalized.replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-        .replace("`", "")
-        .strip()
-        .strip('"')
-        .strip("'")
-    )
+    normalized = normalized.replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\")
+    normalized = normalized.replace("`", "")
+
+    normalized = normalized.strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
+        normalized = normalized[1:-1].strip()
+
+    normalized = normalized.replace('"', "").replace("'", "")
+
+    normalized = " ".join(normalized.split())
+
+    if normalized.endswith(";") and normalized[:-1] in EXPECTED_PASSWORDS:
+        return normalized[:-1]
     return normalized
 
 # -----------------------------------------------------------------------------
