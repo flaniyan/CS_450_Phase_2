@@ -9,6 +9,8 @@ EXPECTED_USERNAME = "ece30861defaultadminuser"
 EXPECTED_PASSWORDS = {
     "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;",
     "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages",
+    r"correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;",
+    r"correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages",
 }
 STATIC_TOKEN = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
