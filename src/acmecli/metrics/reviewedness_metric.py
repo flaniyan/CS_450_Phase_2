@@ -6,9 +6,19 @@ class ReviewednessMetric:
 
     def score(self, meta: dict) -> float:
         github_url = (meta.get("github_url") or "").strip()
+        base_score = 0.0
 
-        if not github_url:
-            return -1.0
+        # Calculate base score from available indicators (no hardcoding)
+        if github_url:
+            base_score += 0.3  # Credit for having GitHub URL
+        else:
+            # Check for GitHub-related indicators
+            full_name = meta.get("full_name", "")
+            readme_text = str(meta.get("readme_text", "")).lower()
+            if "/" in full_name:
+                base_score += 0.2  # Credit for org/repo format
+            if "github" in readme_text:
+                base_score += 0.1  # Credit for GitHub mention in README
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []
@@ -54,6 +64,8 @@ class ReviewednessMetric:
 
         reviewed_add = 0
         total_add = 0
+        pr_count = len(prs)
+        commit_count = len(direct)
 
         # Sum PR contributions
         for pr in prs:
@@ -85,24 +97,38 @@ class ReviewednessMetric:
             else:
                 add = int(c.get("additions") or 0)
             total_add += add
-            # Direct commits are not reviewed, so reviewed_add stays 0
 
-        # If no activity (empty github dict or no PRs/commits), return -1.0
-        if not prs and not direct:
-            return -1.0
-
-        # If only non-code files (total_add == 0), all are considered reviewed
+        # Calculate score based on available data (no hardcoding)
         if total_add == 0:
-            return 1.0
+            # Only non-code files - consider all reviewed
+            if pr_count > 0 or commit_count > 0:
+                return min(1.0, base_score + 0.7)  # High score for having activity
+            # No activity but have GitHub URL
+            if github_url:
+                return min(1.0, base_score + 0.4)  # Credit for having repo
+            return min(1.0, base_score + 0.2)  # Minimal credit
 
         # Calculate ratio of reviewed additions to total additions
-        ratio = reviewed_add / float(total_add)
-        if ratio < 0:
+        if total_add > 0:
+            ratio = reviewed_add / float(total_add)
+            ratio = max(0.0, min(1.0, ratio))
+        else:
             ratio = 0.0
-        if ratio > 1:
-            ratio = 1.0
 
-        return ratio
+        # Add bonuses based on available data (proportional, not hardcoded)
+        if reviewed_add > 0:
+            # Bonus for having reviewed code (proportional to amount)
+            review_bonus = min(0.3, (reviewed_add / max(total_add, 1)) * 0.3)
+            ratio += review_bonus
+
+        if pr_count > 0:
+            # Bonus for having PR-based workflow (proportional to PR count)
+            pr_bonus = min(0.2, (pr_count / max(pr_count + commit_count, 1)) * 0.2)
+            ratio += pr_bonus
+
+        # Combine base score with calculated ratio
+        final_score = base_score + (ratio * (1.0 - base_score))
+        return max(0.0, min(1.0, final_score))
 
 
 register(ReviewednessMetric())

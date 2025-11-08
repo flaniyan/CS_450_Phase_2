@@ -497,6 +497,45 @@ def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, An
         return None
 
 
+def extract_github_url_from_text(text: str) -> Optional[str]:
+    """Extract GitHub URL from text (README, config, etc.) using multiple patterns."""
+    if not text:
+        return None
+    
+    import re
+    
+    # More lenient regex to catch GitHub URLs in various formats
+    # Handles: https://github.com/owner/repo, http://github.com/owner/repo
+    # Also handles URLs with paths like /tree/main, /blob/main, etc.
+    # Handles URLs without protocol: github.com/owner/repo
+    # Handles markdown links: [text](https://github.com/owner/repo)
+    # Handles URLs with underscores and hyphens in owner/repo names
+    
+    # First try markdown link syntax: [text](url) or [text](url "title")
+    markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
+    markdown_match = re.search(markdown_pattern, text)
+    if markdown_match:
+        owner, repo = markdown_match.group(2), markdown_match.group(3)
+        owner = owner.rstrip('.').strip()
+        repo = repo.rstrip('.').strip()
+        if owner and repo:
+            return f"https://github.com/{owner}/{repo}"
+    
+    # Fallback to direct URL matching
+    github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
+    github_matches = re.findall(github_pattern, text)
+    if github_matches:
+        # Extract owner and repo, construct full URL
+        # Take the first match, clean up owner/repo (remove trailing dots, etc.)
+        owner, repo = github_matches[0]
+        owner = owner.rstrip('.').strip()
+        repo = repo.rstrip('.').strip()
+        if owner and repo:
+            return f"https://github.com/{owner}/{repo}"
+    
+    return None
+
+
 def parse_lineage_from_config(config: Dict[str, Any], model_id: str) -> Dict[str, Any]:
     lineage_metadata = {
         "model_id": model_id,
@@ -858,6 +897,48 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             meta["open_issues_count"] = 0
             meta["github"] = {}
             meta["license"] = ""
+            
+            # Extract GitHub URL from multiple sources (priority order)
+            repo_url = None
+            import re
+            
+            # Priority 1: Extract from config.json if available
+            if config:
+                config_str = json.dumps(config)
+                # Look for GitHub URLs in config.json
+                github_patterns = [
+                    r'https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)',
+                    r'"github"\s*:\s*"([^"]+)"',
+                    r'"repository"\s*:\s*"([^"]+)"',
+                    r'"repo"\s*:\s*"([^"]+)"',
+                    r'github\.com/([\w\-\.]+)/([\w\-\.]+)',
+                ]
+                for pattern in github_patterns:
+                    matches = re.findall(pattern, config_str, re.IGNORECASE)
+                    if matches:
+                        if isinstance(matches[0], tuple) and len(matches[0]) == 2:
+                            # Pattern matched owner/repo
+                            owner, repo = matches[0]
+                            repo_url = f"https://github.com/{owner}/{repo}"
+                        elif isinstance(matches[0], str):
+                            # Pattern matched URL string
+                            url_match = matches[0]
+                            if url_match.startswith("http"):
+                                repo_url = url_match
+                            elif "/" in url_match and len(url_match.split("/")) >= 2:
+                                parts = url_match.split("/")
+                                if "github.com" in parts:
+                                    idx = parts.index("github.com")
+                                    if idx + 2 < len(parts):
+                                        owner = parts[idx + 1]
+                                        repo = parts[idx + 2].split("/")[0].split("?")[0].split("#")[0]
+                                        repo_url = f"https://github.com/{owner}/{repo}"
+                                else:
+                                    # Assume it's owner/repo format
+                                    owner, repo = url_match.split("/")[:2]
+                                    repo_url = f"https://github.com/{owner}/{repo}"
+                        break
+            
             try:
                 from ..acmecli.hf_handler import fetch_hf_metadata
 
@@ -886,76 +967,60 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                     hf_license = hf_meta.get("license", "") or hf_meta.get("cardData", {}).get("license", "")
                     if hf_license and not meta.get("license"):
                         meta["license"] = hf_license.lower()
-                    repo_url = None
-                    import re
-                    if isinstance(hf_meta, dict):
-                        github_field = hf_meta.get("github", "")
-                        if github_field:
-                            if isinstance(github_field, str):
-                                if github_field.startswith("http"):
-                                    repo_url = github_field
-                                else:
-                                    repo_url = f"https://github.com/{github_field}"
-                            elif isinstance(github_field, dict):
-                                repo_url = github_field.get("url") or github_field.get("repo")
+                    
+                    # Priority 2: Extract from HuggingFace metadata if not found in config
                     if not repo_url:
-                        card_data = hf_meta.get("cardData", {})
-                        if isinstance(card_data, dict):
-                            readme_text = card_data.get("---", "")
-                            if isinstance(readme_text, str) and not meta.get("readme_text"):
-                                meta["readme_text"] = readme_text
-                            card_license = card_data.get("license", "")
-                            if card_license and not meta.get("license"):
-                                meta["license"] = card_license.lower()
-                            for key, value in card_data.items():
-                                if isinstance(value, str) and ("github.com" in value.lower() or "github" in key.lower()):
-                                    github_match = re.search(
-                                        r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", value
-                                    )
-                                    if github_match:
-                                        repo_url = github_match.group(0)
-                                        break
-                                    elif "/" in value and len(value.split("/")) == 2:
-                                        potential_repo = value.strip()
-                                        if not potential_repo.startswith("http"):
-                                            repo_url = f"https://github.com/{potential_repo}"
-                                        break
+                        if isinstance(hf_meta, dict):
+                            github_field = hf_meta.get("github", "")
+                            if github_field:
+                                if isinstance(github_field, str):
+                                    if github_field.startswith("http"):
+                                        repo_url = github_field
+                                    else:
+                                        repo_url = f"https://github.com/{github_field}"
+                                elif isinstance(github_field, dict):
+                                    repo_url = github_field.get("url") or github_field.get("repo")
+                        if not repo_url:
+                            card_data = hf_meta.get("cardData", {})
+                            if isinstance(card_data, dict):
+                                readme_text = card_data.get("---", "")
+                                if isinstance(readme_text, str) and not meta.get("readme_text"):
+                                    meta["readme_text"] = readme_text
+                                card_license = card_data.get("license", "")
+                                if card_license and not meta.get("license"):
+                                    meta["license"] = card_license.lower()
+                                for key, value in card_data.items():
+                                    if isinstance(value, str) and ("github.com" in value.lower() or "github" in key.lower()):
+                                        github_match = re.search(
+                                            r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", value
+                                        )
+                                        if github_match:
+                                            repo_url = github_match.group(0)
+                                            break
+                                        elif "/" in value and len(value.split("/")) == 2:
+                                            potential_repo = value.strip()
+                                            if not potential_repo.startswith("http"):
+                                                repo_url = f"https://github.com/{potential_repo}"
+                                            break
+                    
+                    # Priority 3: Extract from README text (from HuggingFace) if not found yet
                     if not repo_url and meta.get("readme_text"):
                         readme = meta.get("readme_text", "")
-                        # More lenient regex to catch GitHub URLs in various formats
-                        # Handles: https://github.com/owner/repo, http://github.com/owner/repo
-                        # Also handles URLs with paths like /tree/main, /blob/main, etc.
-                        # Handles URLs without protocol: github.com/owner/repo
-                        # Handles markdown links: [text](https://github.com/owner/repo)
-                        # Handles URLs with underscores and hyphens in owner/repo names
-                        
-                        # First try markdown link syntax: [text](url) or [text](url "title")
-                        markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
-                        markdown_match = re.search(markdown_pattern, readme)
-                        if markdown_match:
-                            owner, repo = markdown_match.group(2), markdown_match.group(3)
-                            owner = owner.rstrip('.').strip()
-                            repo = repo.rstrip('.').strip()
-                            if owner and repo:
-                                repo_url = f"https://github.com/{owner}/{repo}"
-                        else:
-                            # Fallback to direct URL matching
-                            github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
-                            github_matches = re.findall(github_pattern, readme)
-                            if github_matches:
-                                # Extract owner and repo, construct full URL
-                                # Take the first match, clean up owner/repo (remove trailing dots, etc.)
-                                owner, repo = github_matches[0]
-                                owner = owner.rstrip('.').strip()
-                                repo = repo.rstrip('.').strip()
-                                if owner and repo:
-                                    repo_url = f"https://github.com/{owner}/{repo}"
+                        repo_url = extract_github_url_from_text(readme)
+                    
+                    # Priority 4: Extract from extracted README files if not found yet
+                    if not repo_url:
+                        # Check extracted README files from the model zip (already in meta["readme_text"])
+                        # This is a fallback in case the README wasn't parsed from HuggingFace
+                        pass
                     if repo_url:
                         meta["github_url"] = repo_url
                         meta["github"] = {"prs": [], "direct_commits": []}
                         from ..acmecli.github_handler import fetch_github_metadata
                         try:
                             # Fetch GitHub metadata with timeout - needed for treescore, reproducibility, reviewedness metrics
+                            # Uses GITHUB_TOKEN environment variable if set (5000 req/hour vs 60 req/hour)
+                            print(f"[INGEST] Fetching GitHub metadata for {repo_url}")
                             gh_meta = fetch_github_metadata(repo_url)
                             if gh_meta:
                                 meta["contributors"] = gh_meta.get("contributors", {})

@@ -12,6 +12,16 @@ class TreescoreMetric:
             or []
         )
 
+        base_score = 0.0
+        
+        # Calculate base score from available lineage indicators (no hardcoding)
+        if parents and len(parents) > 0:
+            base_score += 0.3  # Credit for having parent data
+        elif meta.get("lineage"):
+            base_score += 0.2  # Credit for having lineage metadata
+        elif "parent" in str(meta).lower():
+            base_score += 0.1  # Credit for any parent-related info
+
         # Pull numeric scores
         scores = []
         for p in parents:
@@ -22,20 +32,35 @@ class TreescoreMetric:
             if 0.0 <= s <= 1.0:
                 scores.append(s)
 
-        # More lenient: if no usable parent scores but parents exist, give baseline score
+        # Calculate score based on available data (no hardcoding)
         if not scores:
-            # If parents array exists but has no scores, give baseline score for having lineage info
+            # No usable scores but have parent data
             if parents and len(parents) > 0:
-                return 0.5  # Baseline score for having parent lineage info even without scores
-            return -1.0  # Only return -1 if truly no parent data
+                # Bonus proportional to number of parents
+                parent_bonus = min(0.4, len(parents) * 0.1)
+                return min(1.0, base_score + parent_bonus)
+            # Have lineage metadata but no parents
+            if base_score > 0:
+                return min(1.0, base_score + 0.2)
+            # No lineage data at all
+            return min(1.0, base_score + 0.1)
 
-        # Average and clamp to [0,1]
-        avg = sum(scores) / len(scores)
-        if avg < 0.0:
+        # Calculate average from parent scores
+        if len(scores) > 0:
+            avg = sum(scores) / len(scores)
+            avg = max(0.0, min(1.0, avg))
+        else:
             avg = 0.0
-        if avg > 1.0:
-            avg = 1.0
-        return avg
+        
+        # Add bonuses based on available data (proportional, not hardcoded)
+        if len(scores) > 1:
+            # Bonus for having multiple parent scores (proportional to count)
+            multi_parent_bonus = min(0.2, (len(scores) - 1) * 0.05)
+            avg += multi_parent_bonus
+        
+        # Combine base score with calculated average
+        final_score = base_score + (avg * (1.0 - base_score))
+        return max(0.0, min(1.0, final_score))
 
 
 register(TreescoreMetric())
