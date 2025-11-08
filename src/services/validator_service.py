@@ -13,11 +13,14 @@ from multiprocessing.queues import Queue
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
 s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+cloudwatch = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
 # Environment variables
 ARTIFACTS_BUCKET = os.getenv("ARTIFACTS_BUCKET", "pkg-artifacts")
 PACKAGES_TABLE = os.getenv("DDB_TABLE_PACKAGES", "packages")
 DOWNLOADS_TABLE = os.getenv("DDB_TABLE_DOWNLOADS", "downloads")
+METRIC_NAMESPACE = os.getenv("VALIDATOR_METRIC_NAMESPACE", "ValidatorService")
+METRIC_NAME_TIMEOUT = os.getenv("VALIDATOR_TIMEOUT_METRIC_NAME", "validator.timeout.count")
 
 app = FastAPI(title="Package Validator Service", version="1.0.0")
 security = HTTPBearer()
@@ -121,6 +124,20 @@ def execute_validator(
         logging.error("Validator execution timed out after %s seconds", timeout)
         process.terminate()
         process.join()
+        try:
+            cloudwatch.put_metric_data(
+                Namespace=METRIC_NAMESPACE,
+                MetricData=[
+                    {
+                        "MetricName": METRIC_NAME_TIMEOUT,
+                        "Timestamp": datetime.now(timezone.utc),
+                        "Value": 1,
+                        "Unit": "Count",
+                    }
+                ],
+            )
+        except Exception as metric_error:
+            logging.warning("Failed to publish timeout metric: %s", metric_error)
         return {
             "valid": False,
             "error": f"Validator execution timed out after {timeout} seconds",
