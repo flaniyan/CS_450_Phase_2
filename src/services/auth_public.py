@@ -42,7 +42,7 @@ async def authenticate(request: Request):
 
     if (
         name == "ece30861defaultadminuser" and
-        password == "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;"
+        password == "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages"
     ):
         # Return a plain text token (not JSON, no "bearer" prefix)
         token = (
