@@ -17,7 +17,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from botocore.exceptions import ClientError
 from .routes.index import router as api_router
-from .services.auth_public import public_auth as authenticate_router
+from .services.auth_public import (
+    public_auth as authenticate_router,
+    STATIC_TOKEN as PUBLIC_STATIC_TOKEN,
+)
 from .services.auth_service import (
     auth_public as auth_ns_public,
     auth_private as auth_ns_private,
@@ -285,8 +288,8 @@ def reset_system(request: Request):
             if not is_admin:
                 raise HTTPException(status_code=401, detail="You do not have permission to reset the registry.")
         else:
-            # If token verification fails, check if it's the default admin token
-            if "ece30861defaultadminuser" not in token.lower():
+            # Allow the public static token issued by /authenticate
+            if token != PUBLIC_STATIC_TOKEN:
                 raise HTTPException(status_code=401, detail="You do not have permission to reset the registry.")
     except HTTPException:
         raise

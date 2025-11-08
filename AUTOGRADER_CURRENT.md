@@ -3,6 +3,6 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2
 
 Once you run autograder you can then see exactly what is failing and why
 
-We are currenlty 3/84 on autograder
-- stuck on reset and login
-- Ethan is trying to fix login
+We are currenlty 4/84 on autograder
+- Login has been fixed
+- Working on reset
