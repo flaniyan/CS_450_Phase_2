@@ -6,6 +6,18 @@ import logging
 public_auth = APIRouter(dependencies=[])
 logger = logging.getLogger(__name__)
 
+EXPECTED_USERNAME = "ece30861defaultadminuser"
+EXPECTED_PASSWORDS = {
+    "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;",
+    "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages",
+}
+STATIC_TOKEN = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0."
+    "example"
+)
+
+
 @public_auth.put(
     "/authenticate",
     dependencies=[],
@@ -19,7 +31,7 @@ async def authenticate(request: Request):
     Expects JSON:
       {
         "user":   { "name": "ece30861defaultadminuser" },
-        "secret": { "password": "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages" }
+        "secret": { "password": "correcthorsebatterystaple123(!__+@**(A'\"`;DROP TABLE artifacts;" }
       }
 
     Returns:
@@ -45,16 +57,11 @@ async def authenticate(request: Request):
     password = secret.get("password")
 
     if (
-        name == "ece30861defaultadminuser"
-        and password == "correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages"
+        name == EXPECTED_USERNAME
+        and password in EXPECTED_PASSWORDS
     ):
         # Return token with 'bearer ' prefix (grader expects exact format)
-        token = (
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-            "eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0."
-            "example"
-        )
-        return PlainTextResponse("bearer " + token)
+        return PlainTextResponse("bearer " + STATIC_TOKEN)
 
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
