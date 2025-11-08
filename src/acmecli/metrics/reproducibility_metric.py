@@ -42,65 +42,56 @@ class ReproducibilityMetric:
         return 0.5
 
     def _has_demo(self, text: str) -> bool:
-        # Expanded markers for demo/usage indicators
         markers = (
-            "quickstart",
-            "quick start",
-            "quick start guide",
-            "getting started",
-            "getting started guide",
-            "usage",
-            "use",
-            "how to",
-            "how-to",
-            "howto",
-            "how to use",
-            "how to run",
-            "how to execute",
-            "example",
-            "examples",
-            "sample",
-            "samples",
-            "demo",
-            "demos",
-            "demo code",
-            "tutorial",
-            "tutorials",
-            "guide",
-            "guides",
-            "walkthrough",
-            "walk through",
-            "run",
-            "running",
-            "execute",
-            "execution",
-            "how it works",
-            "basic usage",
-            "code example",
-            "code examples",
-            "code sample",
-            "usage example",
-            "installation",
-            "install",
-            "setup",
-            "get started",
-            "start here",
-            "begin here",
-            "introduction",
-            "intro",
-            "overview",
-            "basics",
-            "basic example",
-            "python example",
-            "python code",
-            "python script",
-            "python usage",
-            "inference",
-            "infer",
-            "predict",
-            "prediction",
-            "generate",
-            "generation",
+            "quickstart", "quick start", "quick start guide", "quickstart guide",
+            "getting started", "getting started guide", "get started", "get started guide",
+            "usage", "use", "usage guide", "usage example", "usage examples",
+            "how to", "how-to", "howto", "how to use", "how to run", "how to execute",
+            "how to use this", "how to run this", "how to test", "how to test this",
+            "example", "examples", "example code", "example usage", "example usage code",
+            "sample", "samples", "sample code", "sample usage",
+            "demo", "demos", "demo code", "demo script", "demo example", "demo usage",
+            "demonstration", "demonstration code", "demonstration script",
+            "tutorial", "tutorials", "tutorial code", "tutorial example",
+            "guide", "guides", "user guide", "usage guide", "developer guide",
+            "walkthrough", "walk through", "walkthrough guide",
+            "run", "running", "run this", "run the model", "run the code",
+            "execute", "execution", "execute this", "execute the code",
+            "how it works", "how this works", "how to make it work",
+            "basic usage", "basic example", "basic demo", "basic tutorial",
+            "code example", "code examples", "code sample", "code samples",
+            "usage example", "usage examples", "usage sample",
+            "installation", "install", "install guide", "installation guide",
+            "setup", "setup guide", "setup instructions", "setup example",
+            "start here", "begin here", "start", "begin",
+            "introduction", "intro", "introduction guide",
+            "overview", "overview guide", "model overview",
+            "basics", "basics guide", "basic tutorial",
+            "python example", "python code", "python script", "python usage",
+            "python demo", "python tutorial", "python guide",
+            "inference", "infer", "inference example", "inference code",
+            "inference script", "run inference", "inference demo",
+            "predict", "prediction", "predict example", "prediction example",
+            "generate", "generation", "generate example", "generation example",
+            "test", "testing", "test example", "test code", "test script",
+            "try", "try this", "try it", "try the model",
+            "notebook", "notebooks", "jupyter notebook", "colab notebook",
+            "colab", "google colab", "colab example",
+            "script", "scripts", "example script", "demo script",
+            "code snippet", "code snippets", "snippet", "snippets",
+            "workflow", "workflows", "example workflow",
+            "recipe", "recipes", "example recipe",
+            "playground", "playground example", "interactive demo",
+            "interactive example", "interactive tutorial",
+            "hands-on", "hands on", "hands-on example",
+            "practical example", "practical guide",
+            "real-world", "real world", "real-world example",
+            "use case", "use cases", "use case example",
+            "application", "applications", "application example",
+            "implementation", "implementations", "implementation example",
+            "integration", "integrations", "integration example",
+            "deployment", "deploy", "deployment example",
+            "production", "production example", "production usage",
         )
 
         code_fence = (
@@ -124,38 +115,53 @@ class ReproducibilityMetric:
             or (".py" in text)
             or ("python -m" in text)
             or ("python -c" in text)
+            or ("python.exe" in text)
+            or ("python3.exe" in text)
+            or ("from " in text and "import " in text)
+            or ("import " in text and ("torch" in text or "tensorflow" in text or "transformers" in text))
         )
-        has_code_block = code_fence or ("<code>" in text) or ("code block" in text)
-        return has_marker or has_code_block or has_python_cmd
+        has_code_block = (
+            code_fence
+            or ("<code>" in text)
+            or ("code block" in text)
+            or ("```" in text)
+            or ("<pre>" in text)
+            or ("<script>" in text)
+            or ("code:" in text)
+            or ("code example:" in text)
+        )
+        has_notebook = (
+            ".ipynb" in text
+            or "jupyter notebook" in text
+            or "colab notebook" in text
+            or "google colab" in text
+        )
+        return has_marker or has_code_block or has_python_cmd or has_notebook
 
     def _has_simple_install(self, text: str) -> bool:
-        # Expanded simple installation patterns
         simple_patterns = (
-            "pip install ",
-            "pip3 install ",
-            "pip install -r",
-            "pip install -e",
-            "pip install -r requirements.txt",
-            "pip install -r requirements",
-            "pip install",
-            "pip3 install",
-            "python -m pip install",
-            "python -m pip install -r",
-            "python3 -m pip install",
-            "easy_install",
-            "python setup.py install",
-            "python setup.py",
-            "pipenv install",
-            "pipenv sync",
-            "venv",
-            "virtualenv",
-            "python -m venv",
-            "python3 -m venv",
-            "source activate",
-            "conda install",
-            "conda env",
-            "environment.yml",
-            "environment.yaml",
+            "pip install ", "pip3 install ", "pip install -r", "pip install -e",
+            "pip install -r requirements.txt", "pip install -r requirements",
+            "pip install", "pip3 install", "pip install --user",
+            "python -m pip install", "python -m pip install -r",
+            "python3 -m pip install", "python3 -m pip install -r",
+            "easy_install", "easy_install ", "easy_install -m",
+            "python setup.py install", "python setup.py", "python setup.py --user",
+            "python3 setup.py install", "python3 setup.py",
+            "pipenv install", "pipenv sync", "pipenv install --dev",
+            "venv", "virtualenv", "python -m venv", "python3 -m venv",
+            "python -m virtualenv", "python3 -m virtualenv",
+            "source activate", "source venv/bin/activate",
+            "conda install", "conda env", "conda create", "conda activate",
+            "environment.yml", "environment.yaml", "requirements.txt",
+            "requirements", "requirements-dev.txt", "requirements-dev",
+            "pip freeze", "pip list", "pip show",
+            "npm install", "npm install --save", "yarn install",
+            "gem install", "bundle install",
+            "go get", "go install",
+            "cargo install", "cargo build",
+            "mvn install", "mvn compile",
+            "gradle install", "gradle build",
         )
 
         # Only consider truly heavy if it's the only option
