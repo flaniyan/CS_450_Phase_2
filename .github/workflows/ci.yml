@@ -30,5 +30,13 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: ./run install
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
       - name: Run tests
-        run: ./run test
+        run: |
+          ./run test
+          .venv/bin/pip install httpx
+          .venv/bin/python -m pytest tests/unit/test_validator_timeout.py
+          go test ./tests/terraform
