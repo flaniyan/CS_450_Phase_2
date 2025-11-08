@@ -44,7 +44,7 @@ class LicenseMetric:
         score = 0.0
         license_name = meta.get("license", "").lower()
         readme_text = meta.get("readme_text", "").lower()
-        
+
         # Also check license_text if available
         license_text = meta.get("license_text", "").lower()
         all_text = readme_text + " " + license_text
@@ -58,10 +58,16 @@ class LicenseMetric:
             elif any(lic in license_name for lic in self.COMPATIBLE_LICENSES):
                 score += 0.8
             # Potentially compatible (medium scores)
-            elif any(lic in license_name for lic in ["gpl-2", "lgpl-2", "gpl2", "gpl 2"]):
+            elif any(
+                lic in license_name for lic in ["gpl-2", "lgpl-2", "gpl2", "gpl 2"]
+            ):
                 score += 0.6
             # Less compatible but still open source (lower scores)
-            elif "gpl-3" in license_name or "gpl3" in license_name or "gpl 3" in license_name:
+            elif (
+                "gpl-3" in license_name
+                or "gpl3" in license_name
+                or "gpl 3" in license_name
+            ):
                 score += 0.3
             elif any(lic in license_name for lic in ["gpl", "copyleft", "open source"]):
                 score += 0.2
@@ -71,34 +77,67 @@ class LicenseMetric:
         # Check README/license text for license information - expanded keywords
         if all_text:
             license_keywords = [
-                "license", "licensing", "licence", "copyright", "terms", "legal",
-                "licenses", "licenced", "licensing terms", "license agreement"
+                "license",
+                "licensing",
+                "licence",
+                "copyright",
+                "terms",
+                "legal",
+                "licenses",
+                "licenced",
+                "licensing terms",
+                "license agreement",
             ]
             if any(keyword in all_text for keyword in license_keywords):
                 score += 0.1
 
             # Look for specific license mentions in README - expanded
             readme_compatible = [
-                "mit", "mit license", "mit licence",
-                "bsd", "bsd license", "bsd licence",
-                "apache", "apache license", "apache 2.0", "apache 2",
-                "lgpl", "lgpl-2.1", "lgpl 2.1", "lgplv2.1", "lgpl v2.1",
-                "mozilla public license", "mpl", "mpl 2.0",
+                "mit",
+                "mit license",
+                "mit licence",
+                "bsd",
+                "bsd license",
+                "bsd licence",
+                "apache",
+                "apache license",
+                "apache 2.0",
+                "apache 2",
+                "lgpl",
+                "lgpl-2.1",
+                "lgpl 2.1",
+                "lgplv2.1",
+                "lgpl v2.1",
+                "mozilla public license",
+                "mpl",
+                "mpl 2.0",
                 "gnu lesser general public license",
             ]
             if any(lic in all_text for lic in readme_compatible):
                 score += 0.2
             # Check for LGPLv2.1 patterns specifically
             lgpl_patterns = [
-                "license: lgplv2.1", "license: lgpl-2.1", "license: lgpl 2.1",
-                "lgplv2.1", "lgpl-2.1", "lgpl 2.1", "gnu lesser general public license version 2.1",
-                "lgplv2", "lgpl-2", "lgpl 2", "gnu lgpl v2.1"
+                "license: lgplv2.1",
+                "license: lgpl-2.1",
+                "license: lgpl 2.1",
+                "lgplv2.1",
+                "lgpl-2.1",
+                "lgpl 2.1",
+                "gnu lesser general public license version 2.1",
+                "lgplv2",
+                "lgpl-2",
+                "lgpl 2",
+                "gnu lgpl v2.1",
             ]
             if any(pattern in all_text for pattern in lgpl_patterns):
                 score += 0.3
 
         # Penalty for no license information at all (more lenient)
-        if not license_name and "license" not in all_text and "copyright" not in all_text:
+        if (
+            not license_name
+            and "license" not in all_text
+            and "copyright" not in all_text
+        ):
             score = max(0.0, score - 0.2)  # Reduced penalty
 
         value = min(1.0, max(0.0, score))

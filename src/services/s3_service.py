@@ -242,10 +242,7 @@ def upload_model(
             detail="AWS services not available. Please check your AWS configuration.",
         )
     if not file_content or len(file_content) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot upload empty file content"
-        )
+        raise HTTPException(status_code=400, detail="Cannot upload empty file content")
     try:
         # Sanitize model_id and version for S3 key
         safe_model_id = (
@@ -263,7 +260,7 @@ def upload_model(
         )
         safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
         s3_key = f"models/{safe_model_id}/{safe_version}/model.zip"
-        
+
         s3.put_object(
             Bucket=ap_arn, Key=s3_key, Body=file_content, ContentType="application/zip"
         )
@@ -273,23 +270,24 @@ def upload_model(
         return {"message": "Upload successful"}
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"AWS S3 upload failed for {model_id} v{version}: {error_msg}", exc_info=True)
+        logger.error(
+            f"AWS S3 upload failed for {model_id} v{version}: {error_msg}",
+            exc_info=True,
+        )
         print(f"AWS S3 upload failed: {e}")
         # Provide more specific error messages
         if "AccessDenied" in error_msg or "Forbidden" in error_msg:
             raise HTTPException(
                 status_code=403,
-                detail=f"AWS S3 access denied. Check IAM permissions for bucket {ap_arn}"
+                detail=f"AWS S3 access denied. Check IAM permissions for bucket {ap_arn}",
             )
         elif "NoSuchBucket" in error_msg or "InvalidBucketName" in error_msg:
             raise HTTPException(
-                status_code=503,
-                detail=f"Invalid S3 bucket/access point: {ap_arn}"
+                status_code=503, detail=f"Invalid S3 bucket/access point: {ap_arn}"
             )
         else:
             raise HTTPException(
-                status_code=500,
-                detail=f"AWS upload failed: {error_msg}"
+                status_code=500, detail=f"AWS upload failed: {error_msg}"
             )
 
 
@@ -501,38 +499,27 @@ def extract_github_url_from_text(text: str) -> Optional[str]:
     """Extract GitHub URL from text (README, config, etc.) using multiple patterns."""
     if not text:
         return None
-    
+
     import re
-    
-    # More lenient regex to catch GitHub URLs in various formats
-    # Handles: https://github.com/owner/repo, http://github.com/owner/repo
-    # Also handles URLs with paths like /tree/main, /blob/main, etc.
-    # Handles URLs without protocol: github.com/owner/repo
-    # Handles markdown links: [text](https://github.com/owner/repo)
-    # Handles URLs with underscores and hyphens in owner/repo names
-    
-    # First try markdown link syntax: [text](url) or [text](url "title")
+
     markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
     markdown_match = re.search(markdown_pattern, text)
     if markdown_match:
         owner, repo = markdown_match.group(2), markdown_match.group(3)
-        owner = owner.rstrip('.').strip()
-        repo = repo.rstrip('.').strip()
+        owner = owner.rstrip(".").strip()
+        repo = repo.rstrip(".").strip()
         if owner and repo:
             return f"https://github.com/{owner}/{repo}"
-    
-    # Fallback to direct URL matching
+
     github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
     github_matches = re.findall(github_pattern, text)
     if github_matches:
-        # Extract owner and repo, construct full URL
-        # Take the first match, clean up owner/repo (remove trailing dots, etc.)
         owner, repo = github_matches[0]
-        owner = owner.rstrip('.').strip()
-        repo = repo.rstrip('.').strip()
+        owner = owner.rstrip(".").strip()
+        repo = repo.rstrip(".").strip()
         if owner and repo:
             return f"https://github.com/{owner}/{repo}"
-    
+
     return None
 
 
@@ -733,32 +720,33 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
             clean_model_id = model_id.replace("https://huggingface.co/", "")
         elif model_id.startswith("http://huggingface.co/"):
             clean_model_id = model_id.replace("http://huggingface.co/", "")
-        
+
         api_url = f"https://huggingface.co/api/models/{clean_model_id}"
         try:
             response = requests.get(api_url, timeout=30)
         except requests.exceptions.Timeout:
             raise HTTPException(
                 status_code=504,
-                detail=f"Timeout connecting to HuggingFace API for model {clean_model_id}"
+                detail=f"Timeout connecting to HuggingFace API for model {clean_model_id}",
             )
         except requests.exceptions.RequestException as e:
             raise HTTPException(
                 status_code=503,
-                detail=f"Failed to connect to HuggingFace API: {str(e)}"
+                detail=f"Failed to connect to HuggingFace API: {str(e)}",
             )
-        
+
         if response.status_code != 200:
             raise HTTPException(
-                status_code=404, detail=f"Model {clean_model_id} not found on HuggingFace"
+                status_code=404,
+                detail=f"Model {clean_model_id} not found on HuggingFace",
             )
-        
+
         try:
             model_info = response.json()
         except ValueError as e:
             raise HTTPException(
                 status_code=502,
-                detail=f"Invalid response from HuggingFace API: {str(e)}"
+                detail=f"Invalid response from HuggingFace API: {str(e)}",
             )
 
         all_files = []
@@ -784,7 +772,7 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
         if not essential_files:
             raise HTTPException(
                 status_code=400,
-                detail=f"No essential files found for model {clean_model_id}. Model may be empty or inaccessible."
+                detail=f"No essential files found for model {clean_model_id}. Model may be empty or inaccessible.",
             )
 
         urls_to_download = [
@@ -812,28 +800,31 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
                             downloaded_count += 1
                     except Exception as e:
                         print(f"[DOWNLOAD] Warning: Failed to download {filename}: {e}")
-                
+
                 if downloaded_count == 0:
                     raise HTTPException(
                         status_code=500,
-                        detail=f"Failed to download any files for model {clean_model_id}"
+                        detail=f"Failed to download any files for model {clean_model_id}",
                     )
-        
+
         zip_content = output.getvalue()
         if not zip_content or len(zip_content) == 0:
             raise HTTPException(
                 status_code=500,
-                detail=f"Downloaded zip file is empty for model {clean_model_id}"
+                detail=f"Downloaded zip file is empty for model {clean_model_id}",
             )
-        
+
         return zip_content
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error downloading from HuggingFace for {model_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error downloading from HuggingFace for {model_id}: {str(e)}",
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to download model from HuggingFace: {str(e)}"
+            detail=f"Failed to download model from HuggingFace: {str(e)}",
         )
 
 
@@ -897,21 +888,18 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             meta["open_issues_count"] = 0
             meta["github"] = {}
             meta["license"] = ""
-            
-            # Extract GitHub URL from multiple sources (priority order)
+
             repo_url = None
             import re
-            
-            # Priority 1: Extract from config.json if available
+
             if config:
                 config_str = json.dumps(config)
-                # Look for GitHub URLs in config.json
                 github_patterns = [
-                    r'https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)',
+                    r"https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
                     r'"github"\s*:\s*"([^"]+)"',
                     r'"repository"\s*:\s*"([^"]+)"',
                     r'"repo"\s*:\s*"([^"]+)"',
-                    r'github\.com/([\w\-\.]+)/([\w\-\.]+)',
+                    r"github\.com/([\w\-\.]+)/([\w\-\.]+)",
                 ]
                 for pattern in github_patterns:
                     matches = re.findall(pattern, config_str, re.IGNORECASE)
@@ -931,14 +919,19 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                                     idx = parts.index("github.com")
                                     if idx + 2 < len(parts):
                                         owner = parts[idx + 1]
-                                        repo = parts[idx + 2].split("/")[0].split("?")[0].split("#")[0]
+                                        repo = (
+                                            parts[idx + 2]
+                                            .split("/")[0]
+                                            .split("?")[0]
+                                            .split("#")[0]
+                                        )
                                         repo_url = f"https://github.com/{owner}/{repo}"
                                 else:
                                     # Assume it's owner/repo format
                                     owner, repo = url_match.split("/")[:2]
                                     repo_url = f"https://github.com/{owner}/{repo}"
                         break
-            
+
             try:
                 from ..acmecli.hf_handler import fetch_hf_metadata
 
@@ -953,22 +946,32 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                     if hf_meta.get("modelId"):
                         meta["full_name"] = hf_meta.get("modelId", model_id)
                     # Extract description for better scoring
-                    description = hf_meta.get("description", "") or hf_meta.get("cardData", {}).get("description", "")
+                    description = hf_meta.get("description", "") or hf_meta.get(
+                        "cardData", {}
+                    ).get("description", "")
                     if description and not meta.get("readme_text"):
                         meta["readme_text"] = description
                     elif description and meta.get("readme_text"):
                         # Append description to readme if not already present
-                        if description.lower() not in meta.get("readme_text", "").lower():
-                            meta["readme_text"] = description + "\n\n" + meta.get("readme_text", "")
+                        if (
+                            description.lower()
+                            not in meta.get("readme_text", "").lower()
+                        ):
+                            meta["readme_text"] = (
+                                description + "\n\n" + meta.get("readme_text", "")
+                            )
                     # Extract tags/topics for better scoring
-                    tags = hf_meta.get("tags", []) or hf_meta.get("cardData", {}).get("tags", [])
+                    tags = hf_meta.get("tags", []) or hf_meta.get("cardData", {}).get(
+                        "tags", []
+                    )
                     if tags:
                         meta["tags"] = tags
-                    hf_license = hf_meta.get("license", "") or hf_meta.get("cardData", {}).get("license", "")
+                    hf_license = hf_meta.get("license", "") or hf_meta.get(
+                        "cardData", {}
+                    ).get("license", "")
                     if hf_license and not meta.get("license"):
                         meta["license"] = hf_license.lower()
-                    
-                    # Priority 2: Extract from HuggingFace metadata if not found in config
+
                     if not repo_url:
                         if isinstance(hf_meta, dict):
                             github_field = hf_meta.get("github", "")
@@ -979,47 +982,52 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                                     else:
                                         repo_url = f"https://github.com/{github_field}"
                                 elif isinstance(github_field, dict):
-                                    repo_url = github_field.get("url") or github_field.get("repo")
+                                    repo_url = github_field.get(
+                                        "url"
+                                    ) or github_field.get("repo")
                         if not repo_url:
                             card_data = hf_meta.get("cardData", {})
                             if isinstance(card_data, dict):
                                 readme_text = card_data.get("---", "")
-                                if isinstance(readme_text, str) and not meta.get("readme_text"):
+                                if isinstance(readme_text, str) and not meta.get(
+                                    "readme_text"
+                                ):
                                     meta["readme_text"] = readme_text
                                 card_license = card_data.get("license", "")
                                 if card_license and not meta.get("license"):
                                     meta["license"] = card_license.lower()
                                 for key, value in card_data.items():
-                                    if isinstance(value, str) and ("github.com" in value.lower() or "github" in key.lower()):
+                                    if isinstance(value, str) and (
+                                        "github.com" in value.lower()
+                                        or "github" in key.lower()
+                                    ):
                                         github_match = re.search(
-                                            r"https?://github\.com/[\w\-\.]+/[\w\-\.]+", value
+                                            r"https?://github\.com/[\w\-\.]+/[\w\-\.]+",
+                                            value,
                                         )
                                         if github_match:
                                             repo_url = github_match.group(0)
                                             break
-                                        elif "/" in value and len(value.split("/")) == 2:
+                                        elif (
+                                            "/" in value and len(value.split("/")) == 2
+                                        ):
                                             potential_repo = value.strip()
                                             if not potential_repo.startswith("http"):
                                                 repo_url = f"https://github.com/{potential_repo}"
                                             break
-                    
-                    # Priority 3: Extract from README text (from HuggingFace) if not found yet
+
                     if not repo_url and meta.get("readme_text"):
                         readme = meta.get("readme_text", "")
                         repo_url = extract_github_url_from_text(readme)
-                    
-                    # Priority 4: Extract from extracted README files if not found yet
+
                     if not repo_url:
-                        # Check extracted README files from the model zip (already in meta["readme_text"])
-                        # This is a fallback in case the README wasn't parsed from HuggingFace
                         pass
                     if repo_url:
                         meta["github_url"] = repo_url
                         meta["github"] = {"prs": [], "direct_commits": []}
                         from ..acmecli.github_handler import fetch_github_metadata
+
                         try:
-                            # Fetch GitHub metadata with timeout - needed for treescore, reproducibility, reviewedness metrics
-                            # Uses GITHUB_TOKEN environment variable if set (5000 req/hour vs 60 req/hour)
                             print(f"[INGEST] Fetching GitHub metadata for {repo_url}")
                             gh_meta = fetch_github_metadata(repo_url)
                             if gh_meta:
@@ -1047,12 +1055,18 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                                 ):
                                     meta["readme_text"] = gh_meta.get("readme_text", "")
                                 if gh_meta.get("repo_files"):
-                                    meta["repo_files"] = meta.get("repo_files", set()) | gh_meta.get("repo_files", set())
+                                    meta["repo_files"] = meta.get(
+                                        "repo_files", set()
+                                    ) | gh_meta.get("repo_files", set())
                                 if gh_meta.get("github"):
                                     meta["github"] = gh_meta.get("github", {})
                         except Exception as gh_fetch_error:
-                            print(f"[INGEST] Warning: Could not fetch GitHub metadata for {repo_url}: {gh_fetch_error}")
-                            print(f"[INGEST] Note: github_url is set but GitHub API data unavailable (may be rate limited)")
+                            print(
+                                f"[INGEST] Warning: Could not fetch GitHub metadata for {repo_url}: {gh_fetch_error}"
+                            )
+                            print(
+                                f"[INGEST] Note: github_url is set but GitHub API data unavailable (may be rate limited)"
+                            )
                 if config:
                     base_model = (
                         config.get("_name_or_path")
@@ -1067,10 +1081,12 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                             # Simplified parent lookup - just use the parent ID from config
                             # Skip expensive parent model analysis to speed up ingestion
                             parent_score = None
-                            
+
                             # Always set parents array - even if score is None, treescore needs the parent info
                             if parent_score is not None:
-                                meta["parents"] = [{"score": parent_score, "id": parent_id}]
+                                meta["parents"] = [
+                                    {"score": parent_score, "id": parent_id}
+                                ]
                             else:
                                 # If no score found, set to None but still include parent in lineage
                                 meta["parents"] = [{"score": None, "id": parent_id}]
@@ -1179,6 +1195,7 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         import traceback
+
         error_traceback = traceback.format_exc()
         print(f"[INGEST] ERROR in model_ingestion: {str(e)}")
         print(f"[INGEST] TRACEBACK:\n{error_traceback}")

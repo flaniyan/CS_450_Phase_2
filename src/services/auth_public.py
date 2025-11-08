@@ -21,18 +21,21 @@ EXPECTED_PASSWORDS = {
     "correcthorsebatterystaple123(!__+@**(A;DROP TABLE artifacts;",
 }
 
-UNICODE_QUOTE_MAP = str.maketrans({
-    "\u2018": "'",
-    "\u2019": "'",
-    "\u201c": '"',
-    "\u201d": '"',
-})
+UNICODE_QUOTE_MAP = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+    }
+)
 
 STATIC_TOKEN = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
     "eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0."
     "example"
 )
+
 
 # -----------------------------------------------------------------------------
 # Core logic
@@ -46,13 +49,13 @@ async def _authenticate(request: Request):
         logger.warning(f"Bad JSON from client: {raw!r} ({exc})")
         raise HTTPException(
             status_code=400,
-            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly"
+            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly",
         )
 
     if not isinstance(body, dict):
         raise HTTPException(
             status_code=400,
-            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly"
+            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly",
         )
 
     user = body.get("user") or {}
@@ -76,11 +79,17 @@ def _normalize_password(password: str) -> str:
 
     normalized = unicodedata.normalize("NFKC", password)
     normalized = normalized.translate(UNICODE_QUOTE_MAP)
-    normalized = normalized.replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\")
+    normalized = (
+        normalized.replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\")
+    )
     normalized = normalized.replace("`", "")
 
     normalized = normalized.strip()
-    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
+    if (
+        len(normalized) >= 2
+        and normalized[0] == normalized[-1]
+        and normalized[0] in {"'", '"'}
+    ):
         normalized = normalized[1:-1].strip()
 
     normalized = normalized.replace('"', "").replace("'", "")
@@ -90,6 +99,7 @@ def _normalize_password(password: str) -> str:
     if normalized.endswith(";") and normalized[:-1] in EXPECTED_PASSWORDS:
         return normalized[:-1]
     return normalized
+
 
 # -----------------------------------------------------------------------------
 # Routes

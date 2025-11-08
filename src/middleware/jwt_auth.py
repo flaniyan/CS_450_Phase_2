@@ -49,7 +49,6 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.exempt_paths = tuple(exempt_paths)
 
-        
         self.algorithm = os.getenv("JWT_ALGORITHM", "HS256")
         self.secret = os.getenv("JWT_SECRET")
         if self.algorithm != "HS256":
@@ -60,11 +59,17 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
         # Temporarily disable all auth checks - all endpoints are exempt
         return await call_next(request)
-        
+
         # Prefix-safe path normalization (handles /prod/... base paths)
         raw_path = unquote(request.scope.get("path", "") or request.url.path)
-        root_prefix = request.scope.get("root_path", "") or request.headers.get("X-Forwarded-Prefix", "")
-        path = raw_path[len(root_prefix):] if root_prefix and raw_path.startswith(root_prefix) else raw_path
+        root_prefix = request.scope.get("root_path", "") or request.headers.get(
+            "X-Forwarded-Prefix", ""
+        )
+        path = (
+            raw_path[len(root_prefix) :]
+            if root_prefix and raw_path.startswith(root_prefix)
+            else raw_path
+        )
 
         if _is_exempt(path, self.exempt_paths):
             return await call_next(request)
@@ -86,7 +91,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 
             options = {"require": ["exp"], "verify_exp": True}
             if not aud:
-                options["verify_aud"] = False 
+                options["verify_aud"] = False
 
             claims = jwt.decode(
                 token,

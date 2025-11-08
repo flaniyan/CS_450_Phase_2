@@ -8,7 +8,8 @@ class SizeMetric:
     """Metric to assess model size compatibility with different hardware platforms."""
 
     name = "size_score"
-#check for CD
+
+    # check for CD
     def score(self, meta: dict) -> MetricValue:
         t0 = time.perf_counter()
 
