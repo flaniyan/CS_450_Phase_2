@@ -5,6 +5,10 @@ variable "aws_region" {
   type    = string 
   default = "us-east-1"
 }
+variable "kms_key_arn" { 
+  type        = string
+  description = "KMS key ARN for S3 encryption"
+}
 
 # API Gateway
 resource "aws_api_gateway_rest_api" "main_api" {
@@ -58,6 +62,8 @@ resource "aws_api_gateway_integration_response" "root_get_200" {
   resource_id = aws_api_gateway_rest_api.main_api.root_resource_id
   http_method = aws_api_gateway_method.root_get.http_method
   status_code = aws_api_gateway_method_response.root_get_200.status_code
+
+  depends_on = [aws_api_gateway_integration.root_get]
 
   response_parameters = {
     "method.response.header.Content-Type" = "'application/json'"
@@ -392,6 +398,8 @@ resource "aws_api_gateway_integration_response" "reset_delete_200" {
   resource_id = aws_api_gateway_resource.reset.id
   http_method = aws_api_gateway_method.reset_delete.http_method
   status_code = aws_api_gateway_method_response.reset_delete_200.status_code
+
+  depends_on = [aws_api_gateway_integration.reset_delete]
 }
 
 # PUT /authenticate
@@ -544,6 +552,8 @@ resource "aws_api_gateway_integration_response" "admin_options_200" {
   http_method = aws_api_gateway_method.admin_options.http_method
   status_code = aws_api_gateway_method_response.admin_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.admin_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
@@ -588,6 +598,8 @@ resource "aws_api_gateway_integration_response" "directory_options_200" {
   resource_id = aws_api_gateway_resource.directory.id
   http_method = aws_api_gateway_method.directory_options.http_method
   status_code = aws_api_gateway_method_response.directory_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.directory_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -634,6 +646,8 @@ resource "aws_api_gateway_integration_response" "upload_options_200" {
   resource_id = aws_api_gateway_resource.upload.id
   http_method = aws_api_gateway_method.upload_options.http_method
   status_code = aws_api_gateway_method_response.upload_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.upload_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -1142,6 +1156,8 @@ resource "aws_api_gateway_integration_response" "artifacts_options_200" {
   http_method = aws_api_gateway_method.artifacts_options.http_method
   status_code = aws_api_gateway_method_response.artifacts_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.artifacts_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
@@ -1190,6 +1206,8 @@ resource "aws_api_gateway_integration_response" "artifact_type_options_200" {
   resource_id = aws_api_gateway_resource.artifact_type.id
   http_method = aws_api_gateway_method.artifact_type_options.http_method
   status_code = aws_api_gateway_method_response.artifact_type_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.artifact_type_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
@@ -1240,6 +1258,8 @@ resource "aws_api_gateway_integration_response" "authenticate_options_200" {
   http_method = aws_api_gateway_method.authenticate_options.http_method
   status_code = aws_api_gateway_method_response.authenticate_options_200.status_code
 
+  depends_on = [aws_api_gateway_integration.authenticate_options]
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
     "method.response.header.Access-Control-Allow-Methods" = "'PUT,OPTIONS'"
@@ -1288,6 +1308,8 @@ resource "aws_api_gateway_integration_response" "artifact_byregex_options_200" {
   resource_id = aws_api_gateway_resource.artifact_byregex.id
   http_method = aws_api_gateway_method.artifact_byregex_options.http_method
   status_code = aws_api_gateway_method_response.artifact_byregex_options_200.status_code
+
+  depends_on = [aws_api_gateway_integration.artifact_byregex_options]
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Authorization'"
@@ -1481,8 +1503,61 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_policy" "lambda_policy" {
-  name = "lambda-package-policy"
+# Lambda S3 Policy
+resource "aws_iam_policy" "lambda_s3_policy" {
+  name = "lambda-s3-packages-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ListPackagesPrefix"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = ["arn:aws:s3:::${var.artifacts_bucket}"]
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["packages/*"]
+          }
+        }
+      },
+      {
+        Sid    = "ReadPackages"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectTagging"
+        ]
+        Resource = ["arn:aws:s3:::${var.artifacts_bucket}/packages/*"]
+      },
+      {
+        Sid    = "WritePackagesWithKMS"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectTagging",
+          "s3:DeleteObject",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:CreateMultipartUpload",
+          "s3:CompleteMultipartUpload",
+          "s3:UploadPart",
+          "s3:UploadPartCopy"
+        ]
+        Resource = ["arn:aws:s3:::${var.artifacts_bucket}/packages/*"]
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-server-side-encryption" = "aws:kms"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Lambda DynamoDB Policy 
+resource "aws_iam_policy" "lambda_ddb_policy" {
+  name = "lambda-ddb-policy"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1490,30 +1565,36 @@ resource "aws_iam_policy" "lambda_policy" {
       {
         Effect = "Allow"
         Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket",
-          "s3:CreateMultipartUpload",
-          "s3:AbortMultipartUpload",
-          "s3:CompleteMultipartUpload",
-          "s3:UploadPart",
-          "s3:UploadPartCopy"
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:DescribeTable"
         ]
         Resource = [
-          "arn:aws:s3:::${var.artifacts_bucket}",
-          "arn:aws:s3:::${var.artifacts_bucket}/*"
+          for table_arn in values(var.ddb_tables_arnmap) : table_arn
         ]
       },
       {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:DescribeTable"
+        ]
+        Resource = [
+          for table_arn in values(var.ddb_tables_arnmap) : "${table_arn}/index/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
           "dynamodb:DeleteItem",
-          "dynamodb:Query",
-          "dynamodb:Scan"
+          "dynamodb:BatchWriteItem"
         ]
         Resource = values(var.ddb_tables_arnmap)
       }
@@ -1521,9 +1602,44 @@ resource "aws_iam_policy" "lambda_policy" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
+# Lambda KMS Policy
+resource "aws_iam_policy" "lambda_kms_policy" {
+  name = "lambda-kms-s3-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ]
+      Resource = var.kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_s3_attachment" {
   role       = aws_iam_role.lambda_role.name
-  policy_arn = aws_iam_policy.lambda_policy.arn
+  policy_arn = aws_iam_policy.lambda_s3_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_ddb_attachment" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.lambda_ddb_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_kms_attachment" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
 # ===== OUTPUTS =====

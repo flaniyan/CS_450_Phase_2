@@ -5,3 +5,8 @@ variable "image_tag" {
   default     = "latest"
   description = "Docker image tag for the validator service"
 }
+variable "aws_account_id" {
+  type        = string
+  description = "AWS account ID"
+  default     = "838693051036"
+}

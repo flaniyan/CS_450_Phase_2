@@ -39,6 +39,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
+      - name: Ensure Terraform plugin cache dir exists
+        run: mkdir -p ~/.terraform.d/plugin-cache
+
       - name: Cache Terraform plugins
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
