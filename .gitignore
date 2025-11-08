@@ -142,6 +142,9 @@ Thumbs.db
 pytest_output.log
 *.log
 
+#zips
+*.zip
+
 # Large model files (exceed GitHub's 100MB limit)
 real_models/*.zip
 
