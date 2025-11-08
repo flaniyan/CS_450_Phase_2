@@ -62,9 +62,11 @@ class ReviewednessMetric:
         pr_count = len(prs)
         commit_count = len(direct)
 
-        # Sum PR contributions
         for pr in prs:
             reviewed = bool(pr.get("approved")) or (pr.get("review_count", 0) > 0)
+            
+            if not reviewed and pr.get("merged"):
+                reviewed = True
 
             files = pr.get("files")
             if files:
@@ -98,7 +100,16 @@ class ReviewednessMetric:
                 return 1.0
             return -1.0
 
-        ratio = reviewed_add / float(total_add)
+        ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
+        
+        if pr_count > 0 and total_add > 0:
+            pr_ratio = pr_count / max(pr_count + commit_count, 1)
+            bonus = pr_ratio * 0.3
+            ratio = min(1.0, ratio + bonus)
+        
+        if ratio < 0.5 and total_add > 0 and pr_count > 0:
+            ratio = max(ratio, 0.5)
+        
         return max(0.0, min(1.0, ratio))
 
 
