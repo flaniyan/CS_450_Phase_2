@@ -3,6 +3,107 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2
 
 Once you run autograder you can then see exactly what is failing and why
 
-We are currenlty 4/84 on autograder
-- Login has been fixed
-- Working on reset
+We are currenlty 25/84 on autograder
+
+
+RECENT LOG:
+{
+  "Artifact Read Test Group": {
+    "Get Artifact By ID Test Artifact 0": 0,
+    "Get Artifact By ID Test Artifact 1": 0,
+    "Get Artifact By ID Test Artifact 10": 0,
+    "Get Artifact By ID Test Artifact 11": 0,
+    "Get Artifact By ID Test Artifact 12": 0,
+    "Get Artifact By ID Test Artifact 13": 0,
+    "Get Artifact By ID Test Artifact 14": 0,
+    "Get Artifact By ID Test Artifact 15": 0,
+    "Get Artifact By ID Test Artifact 16": 0,
+    "Get Artifact By ID Test Artifact 17": 0,
+    "Get Artifact By ID Test Artifact 18": 0,
+    "Get Artifact By ID Test Artifact 19": 0,
+    "Get Artifact By ID Test Artifact 2": 0,
+    "Get Artifact By ID Test Artifact 20": 0,
+    "Get Artifact By ID Test Artifact 21": 0,
+    "Get Artifact By ID Test Artifact 3": 0,
+    "Get Artifact By ID Test Artifact 4": 0,
+    "Get Artifact By ID Test Artifact 5": 0,
+    "Get Artifact By ID Test Artifact 6": 0,
+    "Get Artifact By ID Test Artifact 7": 0,
+    "Get Artifact By ID Test Artifact 8": 0,
+    "Get Artifact By ID Test Artifact 9": 0,
+    "Get Artifact By Name Test Artifact 0": 0,
+    "Get Artifact By Name Test Artifact 1": 1,
+    "Get Artifact By Name Test Artifact 10": 0,
+    "Get Artifact By Name Test Artifact 11": 1,
+    "Get Artifact By Name Test Artifact 12": 0,
+    "Get Artifact By Name Test Artifact 13": 0,
+    "Get Artifact By Name Test Artifact 14": 0,
+    "Get Artifact By Name Test Artifact 15": 0,
+    "Get Artifact By Name Test Artifact 16": 1,
+    "Get Artifact By Name Test Artifact 17": 1,
+    "Get Artifact By Name Test Artifact 18": 0,
+    "Get Artifact By Name Test Artifact 19": 0,
+    "Get Artifact By Name Test Artifact 2": 0,
+    "Get Artifact By Name Test Artifact 20": 0,
+    "Get Artifact By Name Test Artifact 21": 0,
+    "Get Artifact By Name Test Artifact 3": 0,
+    "Get Artifact By Name Test Artifact 4": 0,
+    "Get Artifact By Name Test Artifact 5": 0,
+    "Get Artifact By Name Test Artifact 6": 0,
+    "Get Artifact By Name Test Artifact 7": 0,
+    "Get Artifact By Name Test Artifact 8": 0,
+    "Get Artifact By Name Test Artifact 9": 0,
+    "Invalid Package Read Test": 0,
+    "Total": "4 / 45 "
+  },
+  "Regex Tests Group": {
+    "Exact Match Name Regex Test": 0,
+    "Extra Chars Name Regex Test": 0,
+    "Random String Regex Test": 0,
+    "Total": "0 / 6 (3 hidden)"
+  },
+  "Setup and Reset Test Group": {
+    "Check No Artifacts after Reset": 1,
+    "Check if access control track is present": 1,
+    "Get Authentication Header Test": 1,
+    "System Health Test": 1,
+    "System Reset Test": 1,
+    "System Tracks Test": 1,
+    "Total": "6 / 6 "
+  },
+  "Total": "25 / 84 ",
+  "Upload Packages Test Group": {
+    "Get All Artifacts Query Test": 0,
+    "Get Code Query Test": 1,
+    "Get Dataset Query Test": 1,
+    "Get Model Query Test": 0,
+    "Total": "15 / 27 ",
+    "Upload code Artifact 1 via Ingest": 1,
+    "Upload code Artifact 2 via Ingest": 1,
+    "Upload code Artifact 3 via Ingest": 1,
+    "Upload code Artifact 4 via Ingest": 1,
+    "Upload code Artifact 5 via Ingest": 1,
+    "Upload code Artifact 6 via Ingest": 1,
+    "Upload code Artifact 7 via Ingest": 1,
+    "Upload code Artifact 8 via Ingest": 1,
+    "Upload dataset Artifact 1 via Ingest": 1,
+    "Upload dataset Artifact 2 via Ingest": 1,
+    "Upload dataset Artifact 3 via Ingest": 1,
+    "Upload dataset Artifact 4 via Ingest": 1,
+    "Upload dataset Artifact 5 via Ingest": 1,
+    "Upload model Artifact 1 via Ingest": 0,
+    "Upload model Artifact 2 via Ingest": 0,
+    "Upload model Artifact 3 via Ingest": 0,
+    "Upload model Artifact 4 via Ingest": 0,
+    "Upload model Artifact 5 via Ingest": 0,
+    "Upload model Artifact 6 via Ingest": 0,
+    "Upload model Artifact 7 via Ingest": 0,
+    "Upload model Artifact 8 via Ingest": 0,
+    "Upload model Artifact 9 via Ingest": 0
+  },
+  "autograder_run_log": "data/106/run/phase2/autograder_08-11-19-25.log",
+  "end_time": "2025-11-08 19:26:59.799846",
+  "run_time": "61.427629 seconds",
+  "start_time": "2025-11-08 19:25:58.372217",
+  "system_run_log": "data/106/run/phase2/autograder_08-11-19-25.sysout.log"
+}
