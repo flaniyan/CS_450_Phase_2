@@ -7,8 +7,8 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import os
 from datetime import datetime, timezone
+from concurrent.futures import ProcessPoolExecutor, TimeoutError
 import multiprocessing
-import signal
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -104,41 +104,22 @@ def execute_validator(
 ) -> Dict[str, Any]:
     """Execute validator script safely with a timeout to prevent DoS."""
     timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
-    
-    def _worker(queue, script, data):
-        try:
-            result = _run_validator_script(script, data)
-            queue.put(result)
-        except Exception as e:
-            queue.put({"valid": False, "error": str(e)})
-    
     ctx = multiprocessing.get_context("spawn")
-    queue = ctx.Queue()
-    process = ctx.Process(target=_worker, args=(queue, script_content, package_data))
-    
-    try:
-        process.start()
-        process.join(timeout=timeout)
-        
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=1)
-            if process.is_alive():
-                process.kill()
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
+        future = executor.submit(_run_validator_script, script_content, package_data)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
             logging.error("Validator execution timed out after %s seconds", timeout)
+            future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
             return {
                 "valid": False,
                 "error": f"Validator execution timed out after {timeout} seconds",
             }
-        
-        if not queue.empty():
-            return queue.get_nowait()
-        return {"valid": False, "error": "No result from validator"}
-    except Exception as e:
-        if process.is_alive():
-            process.terminate()
-        logging.error(f"Validator execution error: {e}", exc_info=True)
-        return {"valid": False, "error": str(e)}
+        except Exception as e:
+            logging.error(f"Validator execution error: {e}", exc_info=True)
+            return {"valid": False, "error": str(e)}
 
 
 def log_download_event(
