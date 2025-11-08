@@ -1,12 +1,17 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+
 # 🧩 Five Whys Analysis — Trustworthy Module Registry
+
 =======
+
 # 🧩 Five Whys Analysis
->>>>>>> 3e5b6f144d5ac92802d2ae2a7086fdbe1a4bc7a5
-=======
+
+> > > > > > > # 3e5b6f144d5ac92802d2ae2a7086fdbe1a4bc7a5
+
 # 🧩 Five Whys Analysis — Trustworthy Module Registry
->>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
+
+> > > > > > > eda6b84d50b63949d957cac35c29c2f1018e278d
 
 This document applies the **Five Whys** root-cause method to four potential security issues discovered during STRIDE analysis.  
 Each issue traces its failure chain to an underlying cause and proposes an actionable mitigation.
@@ -82,7 +87,7 @@ A malicious validator script could loop indefinitely, consuming CPU and blocking
 | **5. Why was this misunderstood?**   | Lack of detailed reading of ECS task-definition runtime limits.      |
 
 **Root Cause:** Missing per-validator timeout enforcement.  
-**Fix:** Run validators inside **isolated Node.js worker threads** with a `setTimeout` kill (≤ 5 s) or configure **ECS task `stopTimeout`** to 5 seconds max.
+**Fix (Completed Nov 2025):** Validator scripts now run inside a dedicated subprocess with a configurable timeout (`VALIDATOR_TIMEOUT_SEC`, default 5 s). If the script exceeds the limit, the child process terminates and the API returns a timeout error. Regression tests are in `tests/unit/test_validator_timeout.py`.
 
 ---
 
