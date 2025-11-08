@@ -18,7 +18,12 @@ from pydantic import BaseModel
 from botocore.exceptions import ClientError
 from .routes.index import router as api_router
 from .services.auth_public import public_auth as authenticate_router
-from .services.auth_service import auth_public as auth_ns_public, auth_private as auth_ns_private
+from .services.auth_service import (
+    auth_public as auth_ns_public,
+    auth_private as auth_ns_private,
+    ensure_default_admin,
+    purge_tokens,
+)
 from .services.s3_service import list_models, upload_model, download_model, reset_registry, get_model_lineage_from_config, get_model_sizes, s3, ap_arn, model_ingestion
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import extract_model_license, extract_github_license, check_license_compatibility
@@ -98,6 +103,7 @@ async def startup_event():
         if hasattr(route, "path") and hasattr(route, "methods"):
             logger.info(f"Route: {list(route.methods)} {route.path}")
     logger.info("=== END REGISTERED ROUTES ===")
+    ensure_default_admin()
 _artifact_storage = {}
 def verify_auth_token(request: Request) -> bool:
     """Verify auth token from either Authorization or X-Authorization header"""
@@ -293,6 +299,8 @@ def reset_system(request: Request):
         global _artifact_storage
         _artifact_storage.clear()
         result = reset_registry()
+        purge_tokens()
+        ensure_default_admin()
         return Response(status_code=200)
     except HTTPException:
         raise
