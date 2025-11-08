@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import os
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor, TimeoutError
-import multiprocessing
+from multiprocessing import get_context
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -104,7 +104,7 @@ def execute_validator(
 ) -> Dict[str, Any]:
     """Execute validator script safely with a timeout to prevent DoS."""
     timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
-    ctx = multiprocessing.get_context("spawn")
+    ctx = get_context("fork")
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
         future = executor.submit(_run_validator_script, script_content, package_data)
         try:
