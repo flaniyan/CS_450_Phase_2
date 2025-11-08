@@ -1,5 +1,3 @@
-# Validator — DynamoDB
-
 data "aws_iam_policy_document" "validator_ddb_min_rw" {
   statement {
     sid    = "DDBRead"

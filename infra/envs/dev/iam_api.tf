@@ -1,4 +1,3 @@
-# API Service - DynamoDB Policy
 data "aws_iam_policy_document" "api_ddb_rw" {
   statement {
     effect  = "Allow"
