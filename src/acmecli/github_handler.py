@@ -13,21 +13,46 @@ class GitHubHandler:
     def __init__(self):
         # GitHub token from environment variable for rate limit purposes
         # If not set, requests will be rate-limited (60 requests/hour for unauthenticated)
+        # With token: 5000 requests/hour
         github_token = os.environ.get("GITHUB_TOKEN")
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",
         }
         if github_token:
-            self._headers["Authorization"] = f"token {github_token}"
+            # Use Bearer format (preferred) but also support token format for compatibility
+            if github_token.startswith("ghp_") or github_token.startswith("github_pat_"):
+                self._headers["Authorization"] = f"Bearer {github_token}"
+            else:
+                self._headers["Authorization"] = f"token {github_token}"
+            logging.info("GitHub token found in environment variable - using authenticated requests (5000 req/hour)")
+        else:
+            logging.warning("GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits.")
 
     def _get_json(self, url: str) -> Dict[str, Any]:
         request = Request(url, headers=self._headers)
         try:
             with urlopen(request, timeout=10) as response:
+                # Check rate limit headers
+                remaining = response.headers.get("X-RateLimit-Remaining")
+                if remaining:
+                    remaining_int = int(remaining)
+                    if remaining_int < 10:
+                        logging.warning("GitHub API rate limit low: %s requests remaining", remaining_int)
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as http_err:
-            logging.error("HTTP error fetching %s: %s", url, http_err)
+            # Handle rate limit errors specifically
+            if http_err.code == 403:
+                # Check if it's a rate limit error
+                rate_limit_reset = http_err.headers.get("X-RateLimit-Reset")
+                if rate_limit_reset:
+                    logging.error("GitHub API rate limit exceeded. Reset at: %s", rate_limit_reset)
+                else:
+                    logging.error("GitHub API forbidden (403) for %s: %s. Check GITHUB_TOKEN environment variable.", url, http_err)
+            elif http_err.code == 401:
+                logging.error("GitHub API unauthorized (401) for %s. Check GITHUB_TOKEN environment variable.", url)
+            else:
+                logging.error("HTTP error fetching %s: %s", url, http_err)
         except URLError as url_err:
             logging.error("Network error fetching %s: %s", url, url_err)
         except Exception as exc:
