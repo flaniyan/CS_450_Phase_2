@@ -153,12 +153,12 @@ jobs:
             --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,deployments:deployments[*].{id:id,status:status,runningCount:runningCount,desiredCount:desiredCount}}' \
             --output table
           
-          echo "Using AWS CLI wait command (max 15 minutes)..."
+          echo "Using AWS CLI wait command (default timeout ~15 minutes)..."
           # Use AWS CLI's built-in wait command which handles deployment transitions correctly
-          if aws ecs wait services-stable \
+          # Note: wait commands use default polling (15s interval, ~15min timeout)
+          if timeout 900 aws ecs wait services-stable \
             --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --max-attempts 60; then
+            --services $ECS_SERVICE; then
             echo "Service stabilized successfully!"
             aws ecs describe-services \
               --cluster $ECS_CLUSTER \
