@@ -66,26 +66,45 @@ class HFHandler:
             request = Request(page_url, headers=self._headers)
             with urlopen(request, timeout=10) as response:
                 html_content = response.read().decode("utf-8", errors="ignore")
-                # Look for GitHub links in the HTML
+                # Look for GitHub links in the HTML using multiple patterns
                 import re
-                github_patterns = [
-                    r'href=["\'](https?://github\.com/[\w\-\.]+/[\w\-\.]+)["\']',
-                    r'github\.com/([\w\-\.]+)/([\w\-\.]+)',
-                ]
-                for pattern in github_patterns:
-                    matches = re.findall(pattern, html_content, re.IGNORECASE)
-                    if matches:
-                        if isinstance(matches[0], tuple):
-                            owner, repo = matches[0]
-                            github_url = f"https://github.com/{owner}/{repo}"
-                        else:
-                            github_url = matches[0]
-                        if github_url and "github.com" in github_url:
-                            if "github" not in meta:
-                                meta["github"] = github_url
-                            elif not meta.get("github"):
-                                meta["github"] = github_url
-                            break
+                github_url = None
+                
+                # Pattern 1: Direct href links: <a href="https://github.com/owner/repo">
+                href_pattern = r'href=["\'](https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s"\']*)?)["\']'
+                href_matches = re.findall(href_pattern, html_content, re.IGNORECASE)
+                if href_matches:
+                    for match in href_matches:
+                        full_url = match[0]
+                        owner, repo = match[1], match[2]
+                        # Clean up the URL to just owner/repo
+                        github_url = f"https://github.com/{owner}/{repo}"
+                        logging.info(f"Found GitHub URL in HTML href: {github_url}")
+                        break
+                
+                # Pattern 2: Plain GitHub URLs in text
+                if not github_url:
+                    plain_pattern = r'(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)'
+                    plain_matches = re.findall(plain_pattern, html_content, re.IGNORECASE)
+                    if plain_matches:
+                        # Filter out common false positives
+                        false_positives = ["github.com/", "github.com/explore", "github.com/about"]
+                        for owner, repo in plain_matches:
+                            potential_url = f"https://github.com/{owner}/{repo}"
+                            if potential_url.lower() not in [fp.lower() for fp in false_positives]:
+                                github_url = potential_url
+                                logging.info(f"Found GitHub URL in HTML text: {github_url}")
+                                break
+                
+                if github_url and "github.com" in github_url:
+                    # Clean up the URL (remove trailing slashes, fragments, etc.)
+                    github_url = github_url.rstrip("/").split("#")[0].split("?")[0]
+                    if "github" not in meta:
+                        meta["github"] = github_url
+                        logging.info(f"Set GitHub URL from HTML: {github_url}")
+                    elif not meta.get("github"):
+                        meta["github"] = github_url
+                        logging.info(f"Set GitHub URL from HTML (replacing empty): {github_url}")
         except Exception as e:
             logging.debug("Could not fetch model page HTML for GitHub link: %s", e)
         
