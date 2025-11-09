@@ -439,7 +439,7 @@ def run_acme_metrics(
             print(f"Error running metric {metric_name}: {e}")
             results[metric_name] = MetricValue(metric_name, 0.0, 0)
     net_score, net_score_latency = compute_net_score(results)
-    scores = {"net_score": net_score, "aggregation_latency": net_score_latency / 1000.0}
+    scores = {"net_score": round(float(net_score), 2), "aggregation_latency": round(net_score_latency / 1000.0, 2)}
     metric_mapping = {
         "ramp_up_time": "ramp_up",
         "license": "license",
@@ -461,26 +461,26 @@ def run_acme_metrics(
             if hasattr(metric_value, "value"):
                 val = metric_value.value
                 if isinstance(val, dict) and len(val) > 0:
-                    scores[output_name] = float(sum(val.values()) / len(val))
+                    scores[output_name] = round(float(sum(val.values()) / len(val)), 2)
                 else:
-                    scores[output_name] = float(val) if val is not None else 0.0
+                    scores[output_name] = round(float(val) if val is not None else 0.0, 2)
                 if hasattr(metric_value, "latency_ms"):
                     scores[f"{output_name}_latency"] = int(metric_value.latency_ms)
             elif isinstance(metric_value, dict) and len(metric_value) > 0:
-                scores[output_name] = float(
+                scores[output_name] = round(float(
                     sum(metric_value.values()) / len(metric_value)
-                )
+                ), 2)
             elif isinstance(metric_value, (int, float)):
-                scores[output_name] = float(metric_value)
+                scores[output_name] = round(float(metric_value), 2)
             else:
-                scores[output_name] = 0.0
+                scores[output_name] = round(0.0, 2)
         else:
-            scores[output_name] = 0.0
+            scores[output_name] = round(0.0, 2)
     
     if "size_score" in results:
         size_result = results["size_score"]
         if hasattr(size_result, "value") and isinstance(size_result.value, dict):
-            scores["size_score"] = size_result.value
+            scores["size_score"] = {platform: round(float(score), 2) for platform, score in size_result.value.items()}
         if hasattr(size_result, "latency_ms"):
             scores["size_score_latency"] = int(size_result.latency_ms)
     

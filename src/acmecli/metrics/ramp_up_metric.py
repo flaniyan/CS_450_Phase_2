@@ -115,7 +115,7 @@ class RampUpMetric:
         if meta:
             score = max(score, 0.5)
 
-        value = min(1.0, max(0.5, score))
+        value = round(float(min(1.0, max(0.5, score))), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

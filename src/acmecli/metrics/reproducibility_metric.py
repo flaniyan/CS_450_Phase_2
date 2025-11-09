@@ -51,6 +51,7 @@ class ReproducibilityMetric:
             else:
                 value = 0.5
         
+        value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

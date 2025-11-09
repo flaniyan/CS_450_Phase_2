@@ -669,25 +669,66 @@ def get_artifact(artifact_type: str, id: str, request: Request):
 
 @app.post("/artifact/{artifact_type}")
 async def create_artifact_by_type(artifact_type: str, request: Request):
+    """
+    Register a new artifact by providing a downloadable source url.
+    This endpoint handles ingestion of models, datasets, and code artifacts.
+    For models: Downloads, validates, rates, and uploads to S3.
+    For datasets/code: Validates and stores artifact metadata.
+    """
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
-    try:
-        body = (
-            await request.json()
-            if request.headers.get("content-type") == "application/json"
-            else {}
+    
+    # Validate artifact_type
+    if artifact_type not in ["model", "dataset", "code"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid artifact_type: {artifact_type}. Must be one of: model, dataset, code",
         )
-        url = body.get("url", "")
-        if not url:
+    
+    try:
+        # Parse JSON body (required by spec - ArtifactData)
+        try:
+            body = await request.json()
+        except Exception as json_error:
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
             )
+        
+        # Extract url from body (required field per ArtifactData schema)
+        url = body.get("url", "")
+        if not url or not isinstance(url, str) or not url.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
+            )
+        
+        # Extract version if provided (for backward compatibility with model ingestion)
+        version = body.get("version", "main")
+        
+        # Extract name from URL if needed
+        name = None
+        if artifact_type == "model" and "huggingface.co" in url:
+            clean_url = url.replace("https://huggingface.co/", "").replace(
+                "http://huggingface.co/", ""
+            )
+            if "/tree/" in clean_url:
+                clean_url = clean_url.split("/tree/")[0]
+            elif "/resolve/" in clean_url:
+                clean_url = clean_url.split("/resolve/")[0]
+            name = clean_url.strip("/")
+        else:
+            name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
-            if "huggingface.co" in url:
+            # Determine model_id from name or URL
+            model_id = None
+            
+            # If URL is provided, extract model_id from it (URL takes precedence)
+            if url and "huggingface.co" in url:
+                # URL provided - extract model_id from HuggingFace URL
                 # Extract model_id from HuggingFace URL properly
                 # Examples:
                 # https://huggingface.co/google-bert/bert-base-uncased -> google-bert/bert-base-uncased
@@ -701,7 +742,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 elif "/resolve/" in clean_url:
                     clean_url = clean_url.split("/resolve/")[0]
                 model_id = clean_url.strip("/")
-                version = body.get("version", "main")
+                if not model_id:
+                    model_id = name if name else "unknown-model"
 
                 # Check if artifact already exists
                 try:
@@ -730,7 +772,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                             detail="Artifact is not registered due to the disqualified rating.",
                         )
 
-                    # Generate artifact ID and return success
+                    # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
                     return Response(
                         content=json.dumps(
@@ -758,7 +800,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         status_code=500, detail=f"Failed to ingest model: {str(e)}"
                     )
             else:
-                model_id = url.split("/")[-1] if url else f"{artifact_type}-new"
+                # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
+                model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 return Response(
                     content=json.dumps(
@@ -774,24 +817,41 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     media_type="application/json",
                     status_code=201,
                 )
-        else:
+        elif artifact_type in ["dataset", "code"]:
+            # For dataset and code artifacts, perform ingestion
             global _artifact_storage
+            artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
+            
+            # Check if artifact already exists
             for existing_id, existing_artifact in _artifact_storage.items():
                 if (
                     existing_artifact.get("url") == url
+                    and existing_artifact.get("type") == artifact_type
+                ) or (
+                    existing_artifact.get("name") == artifact_name
                     and existing_artifact.get("type") == artifact_type
                 ):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
                     )
+            
+            # If URL not provided but name is, construct URL
+            if not url:
+                url = f"https://example.com/{artifact_type}/{artifact_name}"
+            
+            # For dataset/code ingestion, we validate and store
+            # In a full implementation, you might download, validate structure, etc.
+            # For now, we perform basic validation and storage
             artifact_id = str(random.randint(1000000000, 9999999999))
-            artifact_name = url.split("/")[-1] if url else f"{artifact_type}-new"
+            
             _artifact_storage[artifact_id] = {
                 "name": artifact_name,
                 "type": artifact_type,
+                "version": version,
                 "id": artifact_id,
                 "url": url,
             }
+            
             return Response(
                 content=json.dumps(
                     {
@@ -805,6 +865,11 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 ),
                 media_type="application/json",
                 status_code=201,
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported artifact_type: {artifact_type}. Must be one of: model, dataset, code",
             )
     except HTTPException:
         raise
@@ -1313,53 +1378,44 @@ def get_model_rate(id: str, request: Request):
         result = {
             "name": id,
             "category": alias(rating, "category") or "unknown",
-            "net_score": alias(rating, "net_score", "NetScore", "netScore") or 0.0,
-            "ramp_up_time": alias(
+            "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
+            "ramp_up_time": round(float(alias(
                 rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
-            )
-            or 0.0,
-            "bus_factor": alias(
+            ) or 0.0), 2),
+            "bus_factor": round(float(alias(
                 rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
-            )
-            or 0.0,
-            "performance_claims": alias(
+            ) or 0.0), 2),
+            "performance_claims": round(float(alias(
                 rating,
                 "performance_claims",
                 "PerformanceClaims",
                 "score_performance_claims",
-            )
-            or 0.0,
-            "license": alias(rating, "license", "License", "score_license") or 0.0,
-            "dataset_and_code_score": alias(
+            ) or 0.0), 2),
+            "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
+            "dataset_and_code_score": round(float(alias(
                 rating,
                 "dataset_code",
                 "DatasetCode",
                 "score_available_dataset_and_code",
-            )
-            or 0.0,
-            "dataset_quality": alias(
+            ) or 0.0), 2),
+            "dataset_quality": round(float(alias(
                 rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
-            )
-            or 0.0,
-            "code_quality": alias(
+            ) or 0.0), 2),
+            "code_quality": round(float(alias(
                 rating, "code_quality", "CodeQuality", "score_code_quality"
-            )
-            or 0.0,
-            "reproducibility": alias(
+            ) or 0.0), 2),
+            "reproducibility": round(float(alias(
                 rating, "reproducibility", "Reproducibility", "score_reproducibility"
-            )
-            or 0.0,
-            "reviewedness": alias(
+            ) or 0.0), 2),
+            "reviewedness": round(float(alias(
                 rating, "reviewedness", "Reviewedness", "score_reviewedness"
-            )
-            or 0.0,
-            "tree_score": alias(rating, "treescore", "Treescore", "score_treescore")
-            or 0.0,
+            ) or 0.0), 2),
+            "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
             "size_score": {
-                "raspberry_pi": alias(rating, "size_score", "raspberry_pi") or 0.0,
-                "jetson_nano": alias(rating, "size_score", "jetson_nano") or 0.0,
-                "desktop_pc": alias(rating, "size_score", "desktop_pc") or 0.0,
-                "aws_server": alias(rating, "size_score", "aws_server") or 0.0,
+                "raspberry_pi": round(float(alias(rating, "size_score", "raspberry_pi") or 0.0), 2),
+                "jetson_nano": round(float(alias(rating, "size_score", "jetson_nano") or 0.0), 2),
+                "desktop_pc": round(float(alias(rating, "size_score", "desktop_pc") or 0.0), 2),
+                "aws_server": round(float(alias(rating, "size_score", "aws_server") or 0.0), 2),
             },
         }
         return result
@@ -1636,138 +1692,138 @@ def get_tracks():
 #        return {"error": f"Failed to get root: {str(e)}"}, 500
 
 
-@app.get("/ingest")
-def get_artifact_ingest(
-    name: str = None, version: str = "main", artifact_type: str = "model"
-):
-    try:
-        if name:
-            if artifact_type == "model":
-                result = model_ingestion(name, version)
-                return {"message": "Ingest successful", "details": result}
-            else:
-                global _artifact_storage
-                artifact_id = str(random.randint(1000000000, 9999999999))
-                url = f"https://example.com/{artifact_type}/{name}"
-                _artifact_storage[artifact_id] = {
-                    "name": name,
-                    "type": artifact_type,
-                    "version": version,
-                    "id": artifact_id,
-                    "url": url,
-                }
-                return {
-                    "message": "Ingest successful",
-                    "details": {
-                        "name": name,
-                        "type": artifact_type,
-                        "version": version,
-                        "id": artifact_id,
-                        "url": url,
-                    },
-                }
-        else:
-            return {"message": "Provide name parameter to ingest artifact"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in GET /ingest endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ingest failed: {str(e)}")
+# @app.get("/ingest")
+# def get_artifact_ingest(
+#     name: str = None, version: str = "main", artifact_type: str = "model"
+# ):
+#     try:
+#         if name:
+#             if artifact_type == "model":
+#                 result = model_ingestion(name, version)
+#                 return {"message": "Ingest successful", "details": result}
+#             else:
+#                 global _artifact_storage
+#                 artifact_id = str(random.randint(1000000000, 9999999999))
+#                 url = f"https://example.com/{artifact_type}/{name}"
+#                 _artifact_storage[artifact_id] = {
+#                     "name": name,
+#                     "type": artifact_type,
+#                     "version": version,
+#                     "id": artifact_id,
+#                     "url": url,
+#                 }
+#                 return {
+#                     "message": "Ingest successful",
+#                     "details": {
+#                         "name": name,
+#                         "type": artifact_type,
+#                         "version": version,
+#                         "id": artifact_id,
+#                         "url": url,
+#                     },
+#                 }
+#         else:
+#             return {"message": "Provide name parameter to ingest artifact"}
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in GET /ingest endpoint: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"Ingest failed: {str(e)}")
 
 
-@app.post("/ingest")
-async def post_artifact_ingest(request: Request):
-    try:
-        # Try to parse form data first (for multipart/form-data)
-        name = None
-        version = "main"
-        artifact_type = "model"
-        form = None
-
-        try:
-            form = await request.form()
-            name = form.get("name")
-            version = form.get("version", "main")
-            artifact_type = form.get("type", form.get("artifact_type", "model"))
-        except Exception as form_error:
-            # If form parsing fails, try JSON
-            logger.debug(f"Form parsing failed, trying JSON: {form_error}")
-            pass
-
-        # If no name from form, try JSON body
-        if not name:
-            try:
-                content_type = request.headers.get("content-type", "")
-                if "application/json" in content_type:
-                    body = await request.json()
-                elif form:
-                    body = dict(form)
-                else:
-                    body = {}
-                name = body.get("name") or body.get("model_id")
-                version = body.get("version", version)
-                artifact_type = body.get(
-                    "type", body.get("artifact_type", artifact_type)
-                )
-            except Exception as json_error:
-                logger.debug(f"JSON parsing failed: {json_error}")
-                # If both fail, check if we have form data
-                if not name and form:
-                    name = form.get("name")
-
-        if not name:
-            raise HTTPException(
-                status_code=400,
-                detail="Name parameter is required. Provide 'name' or 'model_id' in form data or JSON body.",
-            )
-
-        # Validate name is not empty
-        if not name.strip():
-            raise HTTPException(
-                status_code=400, detail="Name parameter cannot be empty"
-            )
-
-        if artifact_type == "model":
-            try:
-                result = model_ingestion(name, version)
-                return {"message": "Ingest successful", "details": result}
-            except HTTPException:
-                raise
-            except Exception as model_error:
-                logger.error(
-                    f"Error in model_ingestion for {name}: {str(model_error)}",
-                    exc_info=True,
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Model ingestion failed: {str(model_error)}",
-                )
-        else:
-            global _artifact_storage
-            artifact_id = str(random.randint(1000000000, 9999999999))
-            url = f"https://example.com/{artifact_type}/{name}"
-            _artifact_storage[artifact_id] = {
-                "name": name,
-                "type": artifact_type,
-                "version": version,
-                "id": artifact_id,
-                "url": url,
-            }
-            return {
-                "message": "Ingest successful",
-                "details": {
-                    "name": name,
-                    "type": artifact_type,
-                    "version": version,
-                    "id": artifact_id,
-                    "url": url,
-                },
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in /ingest endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ingest failed: {str(e)}")
+# @app.post("/ingest")
+# async def post_artifact_ingest(request: Request):
+#     try:
+#         # Try to parse form data first (for multipart/form-data)
+#         name = None
+#         version = "main"
+#         artifact_type = "model"
+#         form = None
+#
+#         try:
+#             form = await request.form()
+#             name = form.get("name")
+#             version = form.get("version", "main")
+#             artifact_type = form.get("type", form.get("artifact_type", "model"))
+#         except Exception as form_error:
+#             # If form parsing fails, try JSON
+#             logger.debug(f"Form parsing failed, trying JSON: {form_error}")
+#             pass
+#
+#         # If no name from form, try JSON body
+#         if not name:
+#             try:
+#                 content_type = request.headers.get("content-type", "")
+#                 if "application/json" in content_type:
+#                     body = await request.json()
+#                 elif form:
+#                     body = dict(form)
+#                 else:
+#                     body = {}
+#                 name = body.get("name") or body.get("model_id")
+#                 version = body.get("version", version)
+#                 artifact_type = body.get(
+#                     "type", body.get("artifact_type", artifact_type)
+#                 )
+#             except Exception as json_error:
+#                 logger.debug(f"JSON parsing failed: {json_error}")
+#                 # If both fail, check if we have form data
+#                 if not name and form:
+#                     name = form.get("name")
+#
+#         if not name:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="Name parameter is required. Provide 'name' or 'model_id' in form data or JSON body.",
+#             )
+#
+#         # Validate name is not empty
+#         if not name.strip():
+#             raise HTTPException(
+#                 status_code=400, detail="Name parameter cannot be empty"
+#             )
+#
+#         if artifact_type == "model":
+#             try:
+#                 result = model_ingestion(name, version)
+#                 return {"message": "Ingest successful", "details": result}
+#             except HTTPException:
+#                 raise
+#             except Exception as model_error:
+#                 logger.error(
+#                     f"Error in model_ingestion for {name}: {str(model_error)}",
+#                     exc_info=True,
+#                 )
+#                 raise HTTPException(
+#                     status_code=500,
+#                     detail=f"Model ingestion failed: {str(model_error)}",
+#                 )
+#         else:
+#             global _artifact_storage
+#             artifact_id = str(random.randint(1000000000, 9999999999))
+#             url = f"https://example.com/{artifact_type}/{name}"
+#             _artifact_storage[artifact_id] = {
+#                 "name": name,
+#                 "type": artifact_type,
+#                 "version": version,
+#                 "id": artifact_id,
+#                 "url": url,
+#             }
+#             return {
+#                 "message": "Ingest successful",
+#                 "details": {
+#                     "name": name,
+#                     "type": artifact_type,
+#                     "version": version,
+#                     "id": artifact_id,
+#                     "url": url,
+#                 },
+#             }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in /ingest endpoint: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"Ingest failed: {str(e)}")
 
 
 # @app.get("/artifact/directory")
