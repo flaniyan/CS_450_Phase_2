@@ -1,5 +1,4 @@
 import time
-from typing import Optional
 from ..types import MetricValue
 from .base import register
 
@@ -13,53 +12,22 @@ class TreescoreMetric:
         
         scores = []
         for p in parents:
-            score = None
             try:
-                score = p.get("score")
-                if score is not None:
-                    s = float(score)
-                    if 0.0 <= s <= 1.0:
-                        scores.append(s)
-                        continue
+                s = float(p.get("score"))
             except (TypeError, ValueError, AttributeError):
-                pass
-            
-            parent_id = None
-            if isinstance(p, dict):
-                parent_id = p.get("id") or p.get("name") or p.get("model_id")
-            elif isinstance(p, str):
-                parent_id = p
-            
-            if parent_id:
-                parent_score = self._lookup_parent_score(parent_id)
-                if parent_score is not None and 0.0 <= parent_score <= 1.0:
-                    scores.append(parent_score)
+                continue
+            if 0.0 <= s <= 1.0:
+                scores.append(s)
 
         if len(scores) > 0:
             avg = sum(scores) / len(scores)
             avg = max(0.0, min(1.0, avg))
-            value = round(float(avg), 2)
+            value = avg
         else:
-            value = round(0.0, 2)
+            value = 0.0
+        
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
-    
-    def _lookup_parent_score(self, parent_id: str) -> Optional[float]:
-        try:
-            from ...services.rating import analyze_model_content
-            parent_result = analyze_model_content(parent_id, suppress_errors=True)
-            if parent_result:
-                net_score = parent_result.get("net_score") or parent_result.get("NetScore") or parent_result.get("netScore")
-                if net_score is not None:
-                    try:
-                        score = float(net_score)
-                        if 0.0 <= score <= 1.0:
-                            return round(score, 2)
-                    except (TypeError, ValueError):
-                        pass
-        except Exception:
-            pass
-        return None
 
     def _extract_parents(self, meta: dict) -> list:
         parents = []
