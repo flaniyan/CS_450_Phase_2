@@ -42,14 +42,23 @@ class TreescoreMetric:
                 if parent_score is not None and 0.0 <= parent_score <= 1.0:
                     scores.append(parent_score)
 
-        base_score = 0.5
         if len(scores) > 0:
             avg = sum(scores) / len(scores)
             avg = max(0.0, min(1.0, avg))
-            additional_score = avg * 0.5
-            value = base_score + additional_score
+            value = avg
+            
+            if value < 0.5 and len(parents) > 0:
+                if len(scores) == len(parents):
+                    value = max(0.5, value * 1.2)
+                elif len(scores) > 0:
+                    value = max(0.5, value * 1.5)
+                else:
+                    value = 0.5
         else:
-            value = base_score
+            if len(parents) > 0:
+                value = 0.5
+            else:
+                value = 0.0
         
         value = max(0.0, min(1.0, value))
         value = round(float(value), 2)

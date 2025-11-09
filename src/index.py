@@ -760,6 +760,9 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     pass
 
                 # Ingest and rate the model
+                # Note: Both model_ingestion and analyze_model_content fetch GitHub metadata
+                # (github_url, github.prs, github.direct_commits, readme_text, repo_files, etc.)
+                # which is required for metrics like Reviewedness, CodeQuality, and Reproducibility
                 try:
                     model_ingestion(model_id, version)
                     rating = analyze_model_content(model_id)

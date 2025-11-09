@@ -224,38 +224,24 @@ def analyze_model_content(
                                                 f"https://github.com/{potential_repo}"
                                             )
                                             break
+                        if not repo_url:
+                            print(f"[RATE] Searching entire zip file for GitHub URL...")
+                            from ..services.s3_service import extract_github_url_from_zip
+                            repo_url = extract_github_url_from_zip(model_content)
+                            if repo_url:
+                                print(f"[RATE] Found GitHub URL in zip file: {repo_url}")
+                            else:
+                                print(f"[RATE] No GitHub URL found in zip file")
+                        
                         if not repo_url and meta.get("readme_text"):
                             readme = meta.get("readme_text", "")
-                            # More lenient regex to catch GitHub URLs in various formats
-                            # Handles: https://github.com/owner/repo, http://github.com/owner/repo
-                            # Also handles URLs with paths like /tree/main, /blob/main, etc.
-                            # Handles URLs without protocol: github.com/owner/repo
-                            # Handles markdown links: [text](https://github.com/owner/repo)
-                            # Handles URLs with underscores and hyphens in owner/repo names
-
-                            # First try markdown link syntax: [text](url) or [text](url "title")
-                            markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
-                            markdown_match = re.search(markdown_pattern, readme)
-                            if markdown_match:
-                                owner, repo = markdown_match.group(
-                                    2
-                                ), markdown_match.group(3)
-                                owner = owner.rstrip(".").strip()
-                                repo = repo.rstrip(".").strip()
-                                if owner and repo:
-                                    repo_url = f"https://github.com/{owner}/{repo}"
+                            print(f"[RATE] Extracting GitHub URL from README text (length: {len(readme)})")
+                            from ..services.s3_service import extract_github_url_from_text
+                            repo_url = extract_github_url_from_text(readme)
+                            if repo_url:
+                                print(f"[RATE] Found GitHub URL in README: {repo_url}")
                             else:
-                                # Fallback to direct URL matching
-                                github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
-                                github_matches = re.findall(github_pattern, readme)
-                                if github_matches:
-                                    # Extract owner and repo, construct full URL
-                                    # Take the first match, clean up owner/repo (remove trailing dots, etc.)
-                                    owner, repo = github_matches[0]
-                                    owner = owner.rstrip(".").strip()
-                                    repo = repo.rstrip(".").strip()
-                                    if owner and repo:
-                                        repo_url = f"https://github.com/{owner}/{repo}"
+                                print(f"[RATE] No GitHub URL found in README text")
                     if repo_url:
                         meta["github_url"] = repo_url
                         meta["github"] = {"prs": [], "direct_commits": []}
