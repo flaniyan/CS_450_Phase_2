@@ -56,9 +56,13 @@ class TreescoreMetric:
                     value = 0.5
         else:
             if len(parents) > 0:
+                # Parents found but no scores available - use neutral default
                 value = 0.5
             else:
-                value = 0.0
+                # No parents found - no lineage information available
+                # Return neutral default score of 0.5 (model is not added as its own parent
+                # to avoid circular dependencies, but conceptually treated as standalone)
+                value = 0.5
         
         value = max(0.0, min(1.0, value))
         value = round(float(value), 2)
@@ -69,12 +73,26 @@ class TreescoreMetric:
         """
         Look up the net_score (total model score) of a parent model.
         Only includes models currently uploaded to the system.
+        Supports both HuggingFace model IDs and GitHub repository URLs.
         """
         try:
             from ...services.s3_service import list_models
             from ...services.rating import analyze_model_content
             
-            clean_parent_id = parent_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+            # Handle GitHub URLs - convert to a searchable format
+            if "github.com" in parent_id.lower():
+                # Extract owner/repo from GitHub URL
+                github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", parent_id, re.IGNORECASE)
+                if github_match:
+                    owner, repo = github_match.groups()
+                    # Try to find models that might be associated with this GitHub repo
+                    # Search by repo name as a fallback
+                    clean_parent_id = f"{owner}/{repo}"
+                else:
+                    return None
+            else:
+                # Handle HuggingFace URLs
+                clean_parent_id = parent_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
             
             if not clean_parent_id:
                 return None
@@ -145,7 +163,17 @@ class TreescoreMetric:
             if field in config:
                 base_model = config[field]
                 if base_model and isinstance(base_model, str):
-                    clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    # Handle both HuggingFace and GitHub URLs
+                    if "github.com" in base_model.lower():
+                        # Extract owner/repo from GitHub URL
+                        github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", base_model, re.IGNORECASE)
+                        if github_match:
+                            owner, repo = github_match.groups()
+                            clean_base_model = f"{owner}/{repo}"
+                        else:
+                            clean_base_model = base_model.strip()
+                    else:
+                        clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                     if clean_base_model and clean_base_model not in existing_ids:
                         parents.append({"id": clean_base_model, "score": None})
                         existing_ids.add(clean_base_model)
@@ -154,7 +182,16 @@ class TreescoreMetric:
         if lineage_metadata and isinstance(lineage_metadata, dict):
             base_model = lineage_metadata.get("base_model")
             if base_model and isinstance(base_model, str):
-                clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                # Handle both HuggingFace and GitHub URLs
+                if "github.com" in base_model.lower():
+                    github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", base_model, re.IGNORECASE)
+                    if github_match:
+                        owner, repo = github_match.groups()
+                        clean_base_model = f"{owner}/{repo}"
+                    else:
+                        clean_base_model = base_model.strip()
+                else:
+                    clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                 if clean_base_model and clean_base_model not in existing_ids:
                     parents.append({"id": clean_base_model, "score": None})
                     existing_ids.add(clean_base_model)
@@ -165,12 +202,30 @@ class TreescoreMetric:
                 if isinstance(p, dict):
                     p_id = p.get("id") or p.get("name") or p.get("model_id")
                     if p_id:
-                        clean_p_id = p_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        # Handle both HuggingFace and GitHub URLs
+                        if "github.com" in p_id.lower():
+                            github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", p_id, re.IGNORECASE)
+                            if github_match:
+                                owner, repo = github_match.groups()
+                                clean_p_id = f"{owner}/{repo}"
+                            else:
+                                clean_p_id = p_id.strip()
+                        else:
+                            clean_p_id = p_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                         if clean_p_id and clean_p_id not in existing_ids:
                             parents.append({"id": clean_p_id, "score": None})
                             existing_ids.add(clean_p_id)
                 elif isinstance(p, str):
-                    clean_p = p.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    # Handle both HuggingFace and GitHub URLs
+                    if "github.com" in p.lower():
+                        github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", p, re.IGNORECASE)
+                        if github_match:
+                            owner, repo = github_match.groups()
+                            clean_p = f"{owner}/{repo}"
+                        else:
+                            clean_p = p.strip()
+                    else:
+                        clean_p = p.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                     if clean_p and clean_p not in existing_ids:
                         parents.append({"id": clean_p, "score": None})
                         existing_ids.add(clean_p)
@@ -185,12 +240,30 @@ class TreescoreMetric:
                         if isinstance(lp, dict):
                             lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
                             if lp_id:
-                                clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                                # Handle both HuggingFace and GitHub URLs
+                                if "github.com" in lp_id.lower():
+                                    github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp_id, re.IGNORECASE)
+                                    if github_match:
+                                        owner, repo = github_match.groups()
+                                        clean_lp_id = f"{owner}/{repo}"
+                                    else:
+                                        clean_lp_id = lp_id.strip()
+                                else:
+                                    clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                                 if clean_lp_id and clean_lp_id not in existing_ids:
                                     parents.append({"id": clean_lp_id, "score": None})
                                     existing_ids.add(clean_lp_id)
                         elif isinstance(lp, str):
-                            clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                            # Handle both HuggingFace and GitHub URLs
+                            if "github.com" in lp.lower():
+                                github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp, re.IGNORECASE)
+                                if github_match:
+                                    owner, repo = github_match.groups()
+                                    clean_lp = f"{owner}/{repo}"
+                                else:
+                                    clean_lp = lp.strip()
+                            else:
+                                clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                             if clean_lp and clean_lp not in existing_ids:
                                 parents.append({"id": clean_lp, "score": None})
                                 existing_ids.add(clean_lp)
@@ -199,12 +272,30 @@ class TreescoreMetric:
                     if isinstance(lp, dict):
                         lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
                         if lp_id:
-                            clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                            # Handle both HuggingFace and GitHub URLs
+                            if "github.com" in lp_id.lower():
+                                github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp_id, re.IGNORECASE)
+                                if github_match:
+                                    owner, repo = github_match.groups()
+                                    clean_lp_id = f"{owner}/{repo}"
+                                else:
+                                    clean_lp_id = lp_id.strip()
+                            else:
+                                clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                             if clean_lp_id and clean_lp_id not in existing_ids:
                                 parents.append({"id": clean_lp_id, "score": None})
                                 existing_ids.add(clean_lp_id)
                     elif isinstance(lp, str):
-                        clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        # Handle both HuggingFace and GitHub URLs
+                        if "github.com" in lp.lower():
+                            github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp, re.IGNORECASE)
+                            if github_match:
+                                owner, repo = github_match.groups()
+                                clean_lp = f"{owner}/{repo}"
+                            else:
+                                clean_lp = lp.strip()
+                        else:
+                            clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                         if clean_lp and clean_lp not in existing_ids:
                             parents.append({"id": clean_lp, "score": None})
                             existing_ids.add(clean_lp)
@@ -216,12 +307,30 @@ class TreescoreMetric:
                 if isinstance(lp, dict):
                     lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
                     if lp_id:
-                        clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        # Handle both HuggingFace and GitHub URLs
+                        if "github.com" in lp_id.lower():
+                            github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp_id, re.IGNORECASE)
+                            if github_match:
+                                owner, repo = github_match.groups()
+                                clean_lp_id = f"{owner}/{repo}"
+                            else:
+                                clean_lp_id = lp_id.strip()
+                        else:
+                            clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                         if clean_lp_id and clean_lp_id not in existing_ids:
                             parents.append({"id": clean_lp_id, "score": None})
                             existing_ids.add(clean_lp_id)
                 elif isinstance(lp, str):
-                    clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    # Handle both HuggingFace and GitHub URLs
+                    if "github.com" in lp.lower():
+                        github_match = re.search(r"github\.com/([\w\-\.]+)/([\w\-\.]+)", lp, re.IGNORECASE)
+                        if github_match:
+                            owner, repo = github_match.groups()
+                            clean_lp = f"{owner}/{repo}"
+                        else:
+                            clean_lp = lp.strip()
+                    else:
+                        clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
                     if clean_lp and clean_lp not in existing_ids:
                         parents.append({"id": clean_lp, "score": None})
                         existing_ids.add(clean_lp)

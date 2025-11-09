@@ -1144,15 +1144,19 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                         if isinstance(hf_meta, dict):
                             github_field = hf_meta.get("github", "")
                             if github_field:
+                                print(f"[INGEST] Found github field in hf_meta: {github_field} (type: {type(github_field)})")
                                 if isinstance(github_field, str):
                                     if github_field.startswith("http"):
                                         repo_url = github_field
                                     else:
                                         repo_url = f"https://github.com/{github_field}"
+                                    print(f"[INGEST] Extracted GitHub URL from github field: {repo_url}")
                                 elif isinstance(github_field, dict):
                                     repo_url = github_field.get(
                                         "url"
                                     ) or github_field.get("repo")
+                                    if repo_url:
+                                        print(f"[INGEST] Extracted GitHub URL from github dict: {repo_url}")
                             
                             if not repo_url:
                                 card_data = hf_meta.get("cardData", {})
@@ -1226,8 +1230,16 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                             print(f"[INGEST] Found GitHub URL in README: {repo_url}")
                         else:
                             print(f"[INGEST] No GitHub URL found in README text")
+                    
+                    if not repo_url:
+                        print(f"[INGEST] WARNING: No GitHub URL found after all extraction attempts")
+                        print(f"[INGEST] hf_meta keys: {list(hf_meta.keys()) if isinstance(hf_meta, dict) else 'N/A'}")
+                        if isinstance(hf_meta, dict):
+                            print(f"[INGEST] hf_meta.get('github'): {hf_meta.get('github')}")
+                    
                     if repo_url:
                         meta["github_url"] = repo_url
+                        print(f"[INGEST] Successfully set github_url: {repo_url}")
                         meta["github"] = {"prs": [], "direct_commits": []}
                         from ..acmecli.github_handler import fetch_github_metadata
 
@@ -1360,6 +1372,7 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             result = metric_results.get(metric_name)
             score = 0.0
             if result is None:
+                print(f"[INGEST] WARNING: {metric_name} not found in metric_results. Available keys: {list(metric_results.keys())}")
                 failures.append(f"{metric_name}=MISSING")
                 metric_scores_dict[metric_name] = 0.0
                 continue
@@ -1368,8 +1381,10 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             elif isinstance(result, (int, float)):
                 score = float(result)
             else:
+                print(f"[INGEST] WARNING: {metric_name} has unexpected type: {type(result)}, value: {result}")
                 score = 0.0
             metric_scores_dict[metric_name] = score
+            print(f"[INGEST] {metric_name} = {score:.2f}")
             if score < 0.5:
                 failures.append(f"{metric_name}={score:.2f}")
         if failures:
