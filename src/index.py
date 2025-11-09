@@ -15,7 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, field_serializer
+from enum import Enum
+from typing import List, Dict, Any, Optional, Union
 from botocore.exceptions import ClientError
 from .routes.index import router as api_router
 from .services.auth_public import (
@@ -52,17 +54,314 @@ logger = logging.getLogger(__name__)
 
 
 class User(BaseModel):
-    name: str
-    is_admin: bool = False
+    """User model matching the OpenAPI spec."""
+    name: str = Field(..., description="User name")
+    is_admin: bool = Field(..., description="Is this user an admin?")
 
 
-class Secret(BaseModel):
-    password: str
+class UserAuthenticationInfo(BaseModel):
+    """Authentication info for a user matching the OpenAPI spec."""
+    password: str = Field(..., description="Password for a user. Per the spec, this should be a \"strong\" password.")
 
 
 class AuthRequest(BaseModel):
-    user: User
-    secret: Secret
+    """Authentication request matching the OpenAPI spec."""
+    user: User = Field(..., description="User information")
+    secret: UserAuthenticationInfo = Field(..., description="User authentication information")
+
+
+# AuthenticationToken is a string type per the OpenAPI spec
+# The spec permits any token format (e.g., JWT)
+# Used in response models and type hints for documentation
+AuthenticationToken = str
+
+# EnumerateOffset is a string type for pagination offset
+EnumerateOffset = str
+
+
+class HealthStatus(str, Enum):
+    """Aggregate health classification for monitored systems."""
+    ok = "ok"
+    degraded = "degraded"
+    critical = "critical"
+    unknown = "unknown"
+
+
+# HealthMetricValue is a union type for flexible metric values
+HealthMetricValue = Union[int, float, str, bool]
+
+
+class HealthMetricMap(BaseModel):
+    """Arbitrary metric key/value pairs describing component performance."""
+    model_config = {"extra": "allow"}
+    
+    def model_dump(self) -> Dict[str, HealthMetricValue]:
+        """Return as dictionary with metric names as keys."""
+        result = {}
+        for key, value in self.__dict__.items():
+            if not key.startswith('_') and isinstance(value, (int, float, str, bool)):
+                result[key] = value
+        return result
+
+
+class HealthTimelineEntry(BaseModel):
+    """Time-series datapoint for a component metric."""
+    bucket: str = Field(..., description="Start timestamp of the sampled bucket (UTC).", format="date-time")
+    value: float = Field(..., description="Observed value for the bucket (e.g., requests per minute).")
+    unit: str | None = Field(None, description="Unit associated with the metric value.")
+
+
+class HealthIssueSeverity(str, Enum):
+    """Issue severity levels."""
+    info = "info"
+    warning = "warning"
+    error = "error"
+
+
+class HealthIssue(BaseModel):
+    """Outstanding issue or alert impacting a component."""
+    code: str = Field(..., description="Machine readable issue identifier.")
+    severity: HealthIssueSeverity = Field(..., description="Issue severity.")
+    summary: str = Field(..., description="Short description of the issue.")
+    details: str | None = Field(None, description="Extended diagnostic detail and suggested remediation.")
+
+
+class HealthLogReference(BaseModel):
+    """Link or descriptor for logs relevant to a health component."""
+    label: str = Field(..., description="Human readable log descriptor (e.g., \"Ingest Worker 1\").")
+    url: str = Field(..., description="Direct link to download or tail the referenced log.", format="uri")
+    tail_available: bool | None = Field(None, description="Indicates whether streaming tail access is supported.")
+    last_updated_at: str | None = Field(None, description="Timestamp of the latest log entry available for this reference.", format="date-time")
+
+
+class HealthRequestSummary(BaseModel):
+    """Request activity observed within the health window."""
+    window_start: str = Field(..., description="Beginning of the aggregation window (UTC).", format="date-time")
+    window_end: str = Field(..., description="End of the aggregation window (UTC).", format="date-time")
+    total_requests: int | None = Field(None, description="Number of API requests served during the window.", ge=0)
+    per_route: Dict[str, int] | None = Field(None, description="Request counts grouped by API route.")
+    per_artifact_type: Dict[str, int] | None = Field(None, description="Request counts grouped by artifact type (model/dataset/code).")
+    unique_clients: int | None = Field(None, description="Distinct API clients observed in the window.", ge=0)
+
+
+class HealthComponentBrief(BaseModel):
+    """Lightweight component-level status summary."""
+    id: str = Field(..., description="Stable identifier for the component (e.g., ingest-worker, metrics).")
+    status: HealthStatus = Field(..., description="Component health status.")
+    display_name: str | None = Field(None, description="Human readable component name.")
+    issue_count: int | None = Field(None, description="Number of outstanding issues contributing to the status.", ge=0)
+    last_event_at: str | None = Field(None, description="Last significant event timestamp for the component.", format="date-time")
+
+
+class HealthComponentDetail(BaseModel):
+    """Detailed status, metrics, and log references for a component."""
+    id: str = Field(..., description="Stable identifier for the component.")
+    status: HealthStatus = Field(..., description="Component health status.")
+    observed_at: str = Field(..., description="Timestamp when data for this component was last collected (UTC).", format="date-time")
+    display_name: str | None = Field(None, description="Human readable component name.")
+    description: str | None = Field(None, description="Overview of the component's responsibility.")
+    metrics: HealthMetricMap | None = Field(None, description="Component performance metrics.")
+    issues: List[HealthIssue] | None = Field(None, description="Outstanding issues impacting the component.")
+    timeline: List[HealthTimelineEntry] | None = Field(None, description="Time-series data for component metrics.")
+    logs: List[HealthLogReference] | None = Field(None, description="Log references for the component.")
+
+
+class HealthComponentCollection(BaseModel):
+    """Detailed health diagnostics broken down per component."""
+    components: List[HealthComponentDetail] = Field(..., description="Array of component health details.")
+    generated_at: str = Field(..., description="Timestamp when the component report was created (UTC).", format="date-time")
+    window_minutes: int | None = Field(None, description="Observation window applied to the component metrics.", ge=5)
+
+
+class HealthSummaryResponse(BaseModel):
+    """High-level snapshot summarizing registry health and recent activity."""
+    status: HealthStatus = Field(..., description="Overall health status.")
+    checked_at: str = Field(..., description="Timestamp when the health snapshot was generated (UTC).", format="date-time")
+    window_minutes: int = Field(..., description="Size of the trailing observation window in minutes.", ge=5)
+    uptime_seconds: int | None = Field(None, description="Seconds the registry API has been running.", ge=0)
+    version: str | None = Field(None, description="Running service version or git SHA when available.")
+    request_summary: HealthRequestSummary | None = Field(None, description="Request activity summary.")
+    components: List[HealthComponentBrief] | None = Field(None, description="Rollup of component status ordered by severity.")
+    logs: List[HealthLogReference] | None = Field(None, description="Quick links or descriptors for recent log files.")
+
+
+class TrackName(str, Enum):
+    """Track names that a student can implement."""
+    performance_track = "Performance track"
+    access_control_track = "Access control track"
+    high_assurance_track = "High assurance track"
+    other_security_track = "Other Security track"
+
+
+class TracksResponse(BaseModel):
+    """Response for the tracks endpoint."""
+    plannedTracks: List[str] = Field(..., description="List of tracks the student plans to implement")
+
+
+class ArtifactType(str, Enum):
+    """Artifact category."""
+    model = "model"
+    dataset = "dataset"
+    code = "code"
+
+
+class ArtifactData(BaseModel):
+    """
+    Source location for ingesting an artifact.
+    
+    Provide a single downloadable url pointing to a bundle that contains the artifact assets.
+    """
+    url: str = Field(..., description="Artifact source url used during ingest.", format="uri")
+    download_url: str | None = Field(None, description="Direct download link served by your server for retrieving the stored artifact bundle. Present only in responses.", format="uri", read_only=True)
+
+
+# ArtifactID is a string with pattern validation - validated at field level
+# Pattern: ^[a-zA-Z0-9\-]+$
+
+
+class ArtifactName(str):
+    """
+    Name of an artifact.
+    
+    - Names should only use typical "keyboard" characters.
+    - The name "*" is reserved. See the `/artifacts` API for its meaning.
+    """
+
+
+class ArtifactMetadata(BaseModel):
+    """
+    The `name` is provided when uploading an artifact.
+    
+    The `id` is used as an internal identifier for interacting with existing artifacts 
+    and distinguishes artifacts that share a name.
+    """
+    name: str = Field(..., description="Name of the artifact")
+    id: str = Field(..., description="Unique identifier for the artifact (pattern: ^[a-zA-Z0-9\-]+$)", pattern=r'^[a-zA-Z0-9\-]+$')
+    type: ArtifactType = Field(..., description="Artifact category")
+
+
+class Artifact(BaseModel):
+    """Artifact envelope containing metadata and ingest details."""
+    metadata: ArtifactMetadata
+    data: ArtifactData
+
+
+class ArtifactQuery(BaseModel):
+    """Query for searching artifacts."""
+    name: str = Field(..., description="Name of the artifact to search for")
+    types: List[ArtifactType] | None = Field(None, description="Optional list of artifact types to filter results")
+
+
+class ArtifactAuditAction(str, Enum):
+    """Action types in audit history."""
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DOWNLOAD = "DOWNLOAD"
+    RATE = "RATE"
+    AUDIT = "AUDIT"
+
+
+class ArtifactAuditEntry(BaseModel):
+    """One entry in an artifact's audit history."""
+    user: User = Field(..., description="User who performed the action")
+    date: str = Field(..., description="Date of activity using ISO-8601 Datetime standard in UTC format", format="date-time")
+    artifact: ArtifactMetadata = Field(..., description="Artifact metadata")
+    action: ArtifactAuditAction = Field(..., description="Action performed")
+
+
+class ArtifactCostItem(BaseModel):
+    """Cost information for a single artifact."""
+    standalone_cost: float | None = Field(None, description="The standalone cost of this artifact excluding dependencies. Required when `dependency = true` in the request.")
+    total_cost: float = Field(..., description="The total cost of the artifact")
+
+
+class ArtifactCost(BaseModel):
+    """
+    Artifact Cost aggregates the total download size (in MB) required for the artifact, 
+    optionally including dependencies.
+    
+    This is a dictionary-like structure where keys are artifact identifiers
+    and values are ArtifactCostItem objects.
+    """
+    # In Pydantic v2, we can use model_config with extra="allow" for additionalProperties
+    model_config = {"extra": "allow"}
+    
+    def model_dump(self) -> Dict[str, Dict[str, float]]:
+        """Return as dictionary with artifact IDs as keys."""
+        result = {}
+        for key, value in self.__dict__.items():
+            if not key.startswith('_') and isinstance(value, ArtifactCostItem):
+                result[key] = value.model_dump()
+        return result
+
+
+class ArtifactRegEx(BaseModel):
+    """Regular expression search for artifacts."""
+    regex: str = Field(..., description="A regular expression over artifact names and READMEs that is used for searching for an artifact")
+
+
+class ArtifactLineageNode(BaseModel):
+    """A single node in an artifact lineage graph."""
+    artifact_id: str = Field(..., description="Unique identifier for the node (artifact or external dependency)", pattern=r'^[a-zA-Z0-9\-]+$')
+    name: str = Field(..., description="Human-readable label for the node")
+    source: str | None = Field(None, description="Provenance for how the node was discovered")
+    metadata: Dict[str, Any] | None = Field(None, description="Optional metadata captured for lineage analysis")
+
+
+class ArtifactLineageEdge(BaseModel):
+    """Directed relationship between two lineage nodes."""
+    from_node_artifact_id: str = Field(..., description="Identifier of the upstream node", pattern=r'^[a-zA-Z0-9\-]+$')
+    to_node_artifact_id: str = Field(..., description="Identifier of the downstream node", pattern=r'^[a-zA-Z0-9\-]+$')
+    relationship: str = Field(..., description="Qualitative description of the edge")
+
+
+class ArtifactLineageGraph(BaseModel):
+    """Complete lineage graph for an artifact."""
+    nodes: List[ArtifactLineageNode] = Field(..., description="Nodes participating in the lineage graph")
+    edges: List[ArtifactLineageEdge] = Field(..., description="Directed edges describing lineage relationships")
+
+
+class SimpleLicenseCheckRequest(BaseModel):
+    """Request payload for artifact license compatibility analysis."""
+    github_url: str = Field(..., description="GitHub repository url to evaluate.", format="uri", example="https://github.com/google-research/bert")
+
+
+class SizeScore(BaseModel):
+    """Size suitability scores for common deployment targets."""
+    raspberry_pi: float = Field(..., description="Size score for Raspberry Pi class devices.")
+    jetson_nano: float = Field(..., description="Size score for Jetson Nano deployments.")
+    desktop_pc: float = Field(..., description="Size score for desktop deployments.")
+    aws_server: float = Field(..., description="Size score for cloud server deployments.")
+
+
+class ModelRating(BaseModel):
+    """Model rating summary generated by the evaluation service."""
+    name: str = Field(..., description="Human-friendly label for the evaluated model.")
+    category: str = Field(..., description="Model category assigned during evaluation.")
+    net_score: float = Field(..., description="Overall score synthesizing all metrics.")
+    net_score_latency: float = Field(..., description="Time (seconds) required to compute `net_score`.")
+    ramp_up_time: float = Field(..., description="Ease-of-adoption rating for the model.")
+    ramp_up_time_latency: float = Field(..., description="Time (seconds) required to compute `ramp_up_time`.")
+    bus_factor: float = Field(..., description="Team redundancy score for the upstream project.")
+    bus_factor_latency: float = Field(..., description="Time (seconds) required to compute `bus_factor`.")
+    performance_claims: float = Field(..., description="Alignment between stated and observed performance.")
+    performance_claims_latency: float = Field(..., description="Time (seconds) required to compute `performance_claims`.")
+    license: float = Field(..., description="Licensing suitability score.")
+    license_latency: float = Field(..., description="Time (seconds) required to compute `license`.")
+    dataset_and_code_score: float = Field(..., description="Availability and quality of accompanying datasets and code.")
+    dataset_and_code_score_latency: float = Field(..., description="Time (seconds) required to compute `dataset_and_code_score`.")
+    dataset_quality: float = Field(..., description="Quality rating for associated datasets.")
+    dataset_quality_latency: float = Field(..., description="Time (seconds) required to compute `dataset_quality`.")
+    code_quality: float = Field(..., description="Quality rating for provided code artifacts.")
+    code_quality_latency: float = Field(..., description="Time (seconds) required to compute `code_quality`.")
+    reproducibility: float = Field(..., description="Likelihood that reported results can be reproduced.")
+    reproducibility_latency: float = Field(..., description="Time (seconds) required to compute `reproducibility`.")
+    reviewedness: float = Field(..., description="Measure of peer or community review coverage.")
+    reviewedness_latency: float = Field(..., description="Time (seconds) required to compute `reviewedness`.")
+    tree_score: float = Field(..., description="Supply-chain health score for model dependencies.")
+    tree_score_latency: float = Field(..., description="Time (seconds) required to compute `tree_score`.")
+    size_score: SizeScore = Field(..., description="Size suitability scores for common deployment targets.")
+    size_score_latency: float = Field(..., description="Time (seconds) required to compute `size_score`.")
 
 
 app = FastAPI(
@@ -174,12 +473,23 @@ def verify_auth_token(request: Request) -> bool:
     return len(parts) == 3 and all(parts)
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    responses={
+        200: {"description": "Service reachable."},
+    },
+)
 def health():
     return {"ok": True}
 
 
-@app.get("/health/components")
+@app.get(
+    "/health/components",
+    response_model=HealthComponentCollection,
+    responses={
+        200: {"description": "Component-level health detail."},
+    },
+)
 def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     # Validate windowMinutes parameter
     if windowMinutes < 5 or windowMinutes > 1440:
@@ -189,77 +499,63 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
 
     # Build component with required fields
     observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    component = {
-        "id": "validator-service",
-        "status": "ok",  # Required: must be one of: ok, degraded, critical, unknown
-        "observed_at": observed_at,  # Required: datetime string in UTC
-    }
-
-    # Add optional fields
-    component["display_name"] = "Validator Service"
-    component["description"] = (
-        "Main API validator service handling artifact ingestion and validation"
+    
+    # Build metrics as HealthMetricMap
+    metrics = HealthMetricMap.model_construct(
+        uptime_seconds=3600,
+        requests_processed=0,
+    )
+    
+    # Build timeline if requested
+    timeline = []
+    if includeTimeline:
+        # Add example timeline entries if needed
+        timeline = []
+    
+    # Build component detail
+    component = HealthComponentDetail(
+        id="validator-service",
+        status=HealthStatus.ok,
+        observed_at=observed_at,
+        display_name="Validator Service",
+        description="Main API validator service handling artifact ingestion and validation",
+        metrics=metrics,
+        issues=[],
+        timeline=timeline if includeTimeline else None,
+        logs=[],
     )
 
-    # Add metrics (optional)
-    component["metrics"] = {
-        "uptime_seconds": 3600,  # Example metric
-        "requests_processed": 0,
-    }
-
-    # Add issues (optional) - empty array if no issues
-    component["issues"] = []
-
-    # Add timeline if requested (optional)
-    if includeTimeline:
-        component["timeline"] = []  # Array of HealthTimelineEntry objects
-
-    # Add logs (optional) - empty array if no logs
-    component["logs"] = []
-
     # Build response with required fields
-    response = {
-        "components": [component],  # Required: array of HealthComponentDetail
-        "generated_at": datetime.now(timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z"),  # Required: datetime string in UTC
-        "window_minutes": windowMinutes,  # Optional but recommended
-    }
+    response = HealthComponentCollection(
+        components=[component],
+        generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        window_minutes=windowMinutes,
+    )
 
     return response
 
 
-@app.post("/artifacts")
-async def list_artifacts(request: Request, offset: str = None):
+@app.post(
+    "/artifacts",
+    response_model=List[ArtifactMetadata],
+    responses={
+        200: {"description": "List of artifacts"},
+        400: {"description": "There is missing field(s) in the artifact_query or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        413: {"description": "Too many artifacts returned."},
+    },
+)
+async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset: str = None):
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        body = (
-            await request.json()
-            if request.headers.get("content-type") == "application/json"
-            else {}
-        )
-        if not isinstance(body, list):
-            raise HTTPException(
-                status_code=400,
-                detail="Request body must be an array of ArtifactQuery objects",
-            )
         results = []
-        for query in body:
-            if not isinstance(query, dict):
-                raise HTTPException(
-                    status_code=400, detail="Each query must be an object"
-                )
-            name = query.get("name")
-            if not name:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Missing required field 'name' in artifact_query",
-                )
-            types_filter = query.get("types", [])
+        for query in queries:
+            name = query.name
+            types_filter = query.types or []
             if name == "*":
                 result = list_models(limit=1000)
                 if result is None:
@@ -270,21 +566,22 @@ async def list_artifacts(request: Request, offset: str = None):
                         not types_filter or "model" in types_filter
                     ):
                         results.append(
-                            {
-                                "name": model.get("name", ""),
-                                "id": model.get("id", model.get("name", "")),
-                                "type": "model",
-                            }
+                            ArtifactMetadata(
+                                name=model.get("name", ""),
+                                id=model.get("id", model.get("name", "")),
+                                type=ArtifactType.model,
+                            )
                         )
                 for artifact_id, artifact in _artifact_storage.items():
                     artifact_type_stored = artifact.get("type", "")
-                    if not types_filter or artifact_type_stored in types_filter:
+                    artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
+                    if not types_filter or artifact_type_enum in types_filter:
                         results.append(
-                            {
-                                "name": artifact.get("name", artifact_id),
-                                "id": artifact_id,
-                                "type": artifact_type_stored,
-                            }
+                            ArtifactMetadata(
+                                name=artifact.get("name", artifact_id),
+                                id=artifact_id,
+                                type=artifact_type_enum,
+                            )
                         )
             else:
                 escaped_name = re.escape(name)
@@ -295,27 +592,28 @@ async def list_artifacts(request: Request, offset: str = None):
                 models = result.get("models") or []
                 for model in models:
                     if isinstance(model, dict) and (
-                        not types_filter or "model" in types_filter
+                        not types_filter or ArtifactType.model in types_filter
                     ):
                         results.append(
-                            {
-                                "name": model.get("name", ""),
-                                "id": model.get("id", model.get("name", "")),
-                                "type": "model",
-                            }
+                            ArtifactMetadata(
+                                name=model.get("name", ""),
+                                id=model.get("id", model.get("name", "")),
+                                type=ArtifactType.model,
+                            )
                         )
                 for artifact_id, artifact in _artifact_storage.items():
                     artifact_name = artifact.get("name", artifact_id)
                     artifact_type_stored = artifact.get("type", "")
+                    artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                     if re.match(name_pattern, artifact_name) and (
-                        not types_filter or artifact_type_stored in types_filter
+                        not types_filter or artifact_type_enum in types_filter
                     ):
                         results.append(
-                            {
-                                "name": artifact_name,
-                                "id": artifact_id,
-                                "type": artifact_type_stored,
-                            }
+                            ArtifactMetadata(
+                                name=artifact_name,
+                                id=artifact_id,
+                                type=artifact_type_enum,
+                            )
                         )
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
@@ -344,7 +642,14 @@ async def list_artifacts(request: Request, offset: str = None):
         )
 
 
-@app.delete("/reset")
+@app.delete(
+    "/reset",
+    responses={
+        200: {"description": "Registry is reset."},
+        401: {"description": "You do not have permission to reset the registry."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+    },
+)
 def reset_system(request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -412,7 +717,16 @@ def reset_system(request: Request):
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 
-@app.get("/artifact/byName/{name}")
+@app.get(
+    "/artifact/byName/{name}",
+    response_model=List[ArtifactMetadata],
+    responses={
+        200: {"description": "Return artifact metadata entries that match the provided name."},
+        400: {"description": "There is missing field(s) in the artifact_name or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "No such artifact."},
+    },
+)
 def get_artifact_by_name(name: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -437,22 +751,24 @@ def get_artifact_by_name(name: str, request: Request):
         for model in result.get("models", []):
             if model.get("name") == name:  # Exact match
                 artifacts.append(
-                    {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
-                        "type": "model",
-                    }
+                    ArtifactMetadata(
+                        name=model["name"],
+                        id=model.get("id", model["name"]),
+                        type=ArtifactType.model,
+                    )
                 )
 
         # Add artifacts from storage (non-model artifacts)
         for artifact_id, artifact in _artifact_storage.items():
             if artifact.get("name") == name:  # Exact match
+                artifact_type_stored = artifact.get("type", "model")
+                artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                 artifacts.append(
-                    {
-                        "name": artifact.get("name", artifact_id),
-                        "id": artifact_id,
-                        "type": artifact.get("type", "model"),
-                    }
+                    ArtifactMetadata(
+                        name=artifact.get("name", artifact_id),
+                        id=artifact_id,
+                        type=artifact_type_enum,
+                    )
                 )
 
         if not artifacts:
@@ -469,48 +785,25 @@ def get_artifact_by_name(name: str, request: Request):
         )
 
 
-@app.post("/artifact/byRegEx")
-async def search_artifacts_by_regex(request: Request):
+@app.post(
+    "/artifact/byRegEx",
+    response_model=List[ArtifactMetadata],
+    responses={
+        200: {"description": "Return a list of artifacts."},
+        400: {"description": "There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "No artifact found under this regex."},
+    },
+)
+async def search_artifacts_by_regex(artifact_regex: ArtifactRegEx, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        # Parse request body
-        try:
-            body = (
-                await request.json()
-                if request.headers.get("content-type") == "application/json"
-                else {}
-            )
-            if not isinstance(body, dict):
-                form = await request.form()
-                body = dict(form)
-        except Exception:
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
-            )
-
-        # Handle array or object body
-        if isinstance(body, list) and len(body) > 0:
-            search_criteria = body[0]
-        elif isinstance(body, dict):
-            search_criteria = body
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
-            )
-
-        # Validate regex field
-        regex_pattern = search_criteria.get("regex")
-        if not regex_pattern or not isinstance(regex_pattern, str):
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
-            )
+        # Extract regex pattern from ArtifactRegEx model
+        regex_pattern = artifact_regex.regex
 
         # Validate regex pattern and protect against ReDoS attacks
         # Check for potentially dangerous patterns
@@ -592,11 +885,11 @@ async def search_artifacts_by_regex(request: Request):
                 model_name = model.get("name", "")
                 # list_models already verified the regex match (name or README), so add all results
                 artifacts.append(
-                    {
-                        "name": model_name,
-                        "id": model.get("id", model_name),
-                        "type": "model",
-                    }
+                    ArtifactMetadata(
+                        name=model_name,
+                        id=model.get("id", model_name),
+                        type=ArtifactType.model,
+                    )
                 )
         except Exception as e:
             logger.warning(
@@ -612,12 +905,14 @@ async def search_artifacts_by_regex(request: Request):
             try:
                 # Use re.search() to match the pattern anywhere in the artifact name (substring match)
                 if compiled_pattern.search(artifact_name):
+                    artifact_type_stored = artifact.get("type", "model")
+                    artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                     artifacts.append(
-                        {
-                            "name": artifact_name,
-                            "id": artifact_id,
-                            "type": artifact.get("type", "model"),
-                        }
+                        ArtifactMetadata(
+                            name=artifact_name,
+                            id=artifact_id,
+                            type=artifact_type_enum,
+                        )
                     )
             except re.error:
                 # Skip invalid regex matches
@@ -639,8 +934,26 @@ async def search_artifacts_by_regex(request: Request):
         )
 
 
-@app.get("/artifact/{artifact_type}/{id}")
-@app.get("/artifacts/{artifact_type}/{id}")
+@app.get(
+    "/artifact/{artifact_type}/{id}",
+    response_model=Artifact,
+    responses={
+        200: {"description": "Return the artifact. url is required."},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
+@app.get(
+    "/artifacts/{artifact_type}/{id}",
+    response_model=Artifact,
+    responses={
+        200: {"description": "Return the artifact. url is required."},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
 def get_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -652,18 +965,19 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         if artifact_type == "model":
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                return {
-                    "metadata": {
-                        "name": artifact.get("name", id),
-                        "id": id,
-                        "type": artifact_type,
-                    },
-                    "data": {
-                        "url": artifact.get(
+                artifact_type_enum = ArtifactType(artifact_type)
+                return Artifact(
+                    metadata=ArtifactMetadata(
+                        name=artifact.get("name", id),
+                        id=id,
+                        type=artifact_type_enum,
+                    ),
+                    data=ArtifactData(
+                        url=artifact.get(
                             "url", f"https://huggingface.co/{artifact.get('name', id)}"
                         )
-                    },
-                }
+                    ),
+                )
             version = None
             found = False
             try:
@@ -705,25 +1019,27 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             model = {"name": id, "version": version}
-            return {
-                "metadata": {"name": model["name"], "id": id, "type": artifact_type},
-                "data": {"url": f"https://huggingface.co/{id}"},
-            }
+            artifact_type_enum = ArtifactType(artifact_type)
+            return Artifact(
+                metadata=ArtifactMetadata(name=model["name"], id=id, type=artifact_type_enum),
+                data=ArtifactData(url=f"https://huggingface.co/{id}"),
+            )
         else:
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                return {
-                    "metadata": {
-                        "name": artifact.get("name", id),
-                        "id": id,
-                        "type": artifact_type,
-                    },
-                    "data": {
-                        "url": artifact.get(
+                artifact_type_enum = ArtifactType(artifact_type)
+                return Artifact(
+                    metadata=ArtifactMetadata(
+                        name=artifact.get("name", id),
+                        id=id,
+                        type=artifact_type_enum,
+                    ),
+                    data=ArtifactData(
+                        url=artifact.get(
                             "url", f"https://example.com/{artifact_type}/{id}"
                         )
-                    },
-                }
+                    ),
+                )
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
         raise
@@ -737,8 +1053,22 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.post("/artifact/{artifact_type}")
-async def create_artifact_by_type(artifact_type: str, request: Request):
+@app.post(
+    "/artifact/{artifact_type}",
+    response_model=Artifact,
+    responses={
+        201: {"description": "Artifact successfully ingested and registered."},
+        202: {
+            "description": "Artifact ingest accepted but the rating pipeline deferred the evaluation. Use this when the package is stored but rating is performed asynchronously and the artifact is dropped silently if the rating later fails. Subsequent requests to `/rate` or any other endpoint with this artifact id should return 404 until a rating result exists."
+        },
+        400: {"description": "Invalid input data or missing required fields."},
+        403: {"description": "Authentication failed."},
+        409: {"description": "Artifact exists already."},
+        424: {"description": "Artifact is not registered due to the disqualified rating."},
+        500: {"description": "Internal server error during ingestion."},
+    },
+)
+async def create_artifact_by_type(artifact_type: str, artifact_data: ArtifactData, request: Request):
     """
     Register a new artifact by providing a downloadable source url.
     This endpoint handles ingestion of models, datasets, and code artifacts.
@@ -759,25 +1089,12 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         )
     
     try:
-        # Parse JSON body (required by spec - ArtifactData)
-        try:
-            body = await request.json()
-        except Exception as json_error:
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
-            )
+        # Extract url from ArtifactData model (required field)
+        url = artifact_data.url
         
-        # Extract url from body (required field per ArtifactData schema)
-        url = body.get("url", "")
-        if not url or not isinstance(url, str) or not url.strip():
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
-            )
-        
-        # Extract version if provided (for backward compatibility with model ingestion)
-        version = body.get("version", "main")
+        # Extract version - default to "main" since version is not part of ArtifactData schema
+        # Note: version can be extracted from URL if needed (e.g., /tree/main, /resolve/main)
+        version = "main"  # Default version per ArtifactData schema
         
         # Extract name from URL if needed
         name = None
@@ -855,19 +1172,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         "id": artifact_id,
                         "url": url,
                     }
-                    return Response(
-                        content=json.dumps(
-                            {
-                                "metadata": {
-                                    "name": model_id,
-                                    "id": artifact_id,
-                                    "type": artifact_type,
-                                },
-                                "data": {"url": url},
-                            }
+                    artifact_type_enum = ArtifactType(artifact_type)
+                    return Artifact(
+                        metadata=ArtifactMetadata(
+                            name=model_id,
+                            id=artifact_id,
+                            type=artifact_type_enum,
                         ),
-                        media_type="application/json",
-                        status_code=201,
+                        data=ArtifactData(url=url),
                     )
                 except HTTPException:
                     raise
@@ -892,19 +1204,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     "id": artifact_id,
                     "url": url,
                 }
-                return Response(
-                    content=json.dumps(
-                        {
-                            "metadata": {
-                                "name": model_id,
-                                "id": artifact_id,
-                                "type": artifact_type,
-                            },
-                            "data": {"url": url},
-                        }
+                artifact_type_enum = ArtifactType(artifact_type)
+                return Artifact(
+                    metadata=ArtifactMetadata(
+                        name=model_id,
+                        id=artifact_id,
+                        type=artifact_type_enum,
                     ),
-                    media_type="application/json",
-                    status_code=201,
+                    data=ArtifactData(url=url),
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
@@ -941,19 +1248,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 "url": url,
             }
             
-            return Response(
-                content=json.dumps(
-                    {
-                        "metadata": {
-                            "name": artifact_name,
-                            "id": artifact_id,
-                            "type": artifact_type,
-                        },
-                        "data": {"url": url},
-                    }
+            artifact_type_enum = ArtifactType(artifact_type)
+            return Artifact(
+                metadata=ArtifactMetadata(
+                    name=artifact_name,
+                    id=artifact_id,
+                    type=artifact_type_enum,
                 ),
-                media_type="application/json",
-                status_code=201,
+                data=ArtifactData(url=url),
             )
         else:
             raise HTTPException(
@@ -969,35 +1271,37 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         )
 
 
-@app.put("/artifacts/{artifact_type}/{id}")
-async def update_artifact(artifact_type: str, id: str, request: Request):
+@app.put(
+    "/artifacts/{artifact_type}/{id}",
+    response_model=Artifact,
+    responses={
+        200: {"description": "Artifact is updated."},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
+async def update_artifact(artifact_type: str, id: str, artifact: Artifact, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        body = (
-            await request.json()
-            if request.headers.get("content-type") == "application/json"
-            else {}
-        )
-        if "metadata" not in body or "data" not in body:
+        # Validate artifact metadata matches path parameters
+        if artifact.metadata.id != id:
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
             )
-        metadata = body.get("metadata", {})
-        if metadata.get("id") != id:
+        if artifact.metadata.type.value != artifact_type:
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
             )
-        if not metadata.get("name"):
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
-            )
+        
+        metadata = artifact.metadata
+        data = artifact.data
         if artifact_type == "model":
             # Check if artifact exists by trying to find it in S3
             found = False
@@ -1023,8 +1327,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
             # Update artifact data (url) - replace previous contents
-            data = body.get("data", {})
-            url = data.get("url", "")
+            url = data.url
             if not url:
                 raise HTTPException(
                     status_code=400,
@@ -1034,27 +1337,35 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
             # For models, we would need to re-ingest with the new URL, but for now just acknowledge the update
             # The spec says "The artifact source (from artifact_data) will replace the previous contents"
             # This would typically involve re-downloading and re-processing the artifact
-            return Response(status_code=200)
+            # Return the updated artifact
+            artifact_type_enum = ArtifactType(artifact_type)
+            return Artifact(
+                metadata=metadata,
+                data=data,
+            )
         else:
             global _artifact_storage
             if id in _artifact_storage:
-                artifact = _artifact_storage[id]
-                if artifact.get("type") == artifact_type:
+                stored_artifact = _artifact_storage[id]
+                if stored_artifact.get("type") == artifact_type:
                     # Update artifact data (url) - replace previous contents
-                    data = body.get("data", {})
-                    url = data.get("url", "")
+                    url = data.url
                     if not url:
                         raise HTTPException(
                             status_code=400,
                             detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid. URL is required in data.",
                         )
                     _artifact_storage[id] = {
-                        "name": metadata.get("name", artifact.get("name", id)),
+                        "name": metadata.name,
                         "type": artifact_type,
                         "id": id,
                         "url": url,
                     }
-                    return Response(status_code=200)
+                    # Return the updated artifact
+                    return Artifact(
+                        metadata=metadata,
+                        data=data,
+                    )
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
         raise
@@ -1068,7 +1379,15 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.delete("/artifacts/{artifact_type}/{id}")
+@app.delete(
+    "/artifacts/{artifact_type}/{id}",
+    responses={
+        200: {"description": "Artifact is deleted."},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or invalid"},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
 def delete_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -1145,7 +1464,17 @@ def delete_artifact(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.get("/artifact/{artifact_type}/{id}/cost")
+@app.get(
+    "/artifact/{artifact_type}/{id}/cost",
+    response_model=ArtifactCost,
+    responses={
+        200: {"description": "Return the total cost of the artifact, and its dependencies"},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+        500: {"description": "The artifact cost calculator encountered an error."},
+    },
+)
 def get_artifact_cost(
     artifact_type: str, id: str, dependency: bool = False, request: Request = None
 ):
@@ -1196,16 +1525,16 @@ def get_artifact_cost(
             standalone_size_mb = sizes.get("full", 0) / (1024 * 1024)
             if dependency:
                 # When dependency=true, return all artifacts (main + dependencies) with standalone_cost and total_cost
-                result = {}
+                result_dict = {}
                 total_size_mb = standalone_size_mb
 
                 # Add main artifact
-                result[id] = {
-                    "standalone_cost": round(standalone_size_mb, 2),
-                    "total_cost": round(
+                result_dict[id] = ArtifactCostItem(
+                    standalone_cost=round(standalone_size_mb, 2),
+                    total_cost=round(
                         standalone_size_mb, 2
                     ),  # Will be updated with total after dependencies
-                }
+                )
 
                 # Get lineage and add dependencies
                 lineage_result = get_model_lineage_from_config(id, "1.0.0")
@@ -1221,18 +1550,23 @@ def get_artifact_cost(
                                     )
                                     total_size_mb += dep_size_mb
                                     # Add dependency to result
-                                    result[dep_id] = {
-                                        "standalone_cost": round(dep_size_mb, 2),
-                                        "total_cost": round(dep_size_mb, 2),
-                                    }
+                                    result_dict[dep_id] = ArtifactCostItem(
+                                        standalone_cost=round(dep_size_mb, 2),
+                                        total_cost=round(dep_size_mb, 2),
+                                    )
                             except Exception:
                                 pass
 
                 # Update main artifact's total_cost to include all dependencies
-                result[id]["total_cost"] = round(total_size_mb, 2)
+                result_dict[id].total_cost = round(total_size_mb, 2)
+                
+                # Create ArtifactCost model with dynamic fields
+                # Use model_construct to bypass validation and set fields directly
+                result = ArtifactCost.model_construct(**result_dict)
             else:
                 # When dependency=false, return only main artifact with total_cost
-                result = {id: {"total_cost": round(standalone_size_mb, 2)}}
+                cost_item = ArtifactCostItem(total_cost=round(standalone_size_mb, 2))
+                result = ArtifactCost.model_construct(**{id: cost_item})
             return result
         else:
             if id not in _artifact_storage:
@@ -1242,14 +1576,11 @@ def get_artifact_cost(
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             standalone_cost = 0.0
             if dependency:
-                return {
-                    id: {
-                        "standalone_cost": standalone_cost,
-                        "total_cost": standalone_cost,
-                    }
-                }
+                cost_item = ArtifactCostItem(standalone_cost=standalone_cost, total_cost=standalone_cost)
             else:
-                return {id: {"total_cost": standalone_cost}}
+                cost_item = ArtifactCostItem(total_cost=standalone_cost)
+            result = ArtifactCost.model_construct(**{id: cost_item})
+            return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1263,7 +1594,16 @@ def get_artifact_cost(
         )
 
 
-@app.get("/artifact/{artifact_type}/{id}/audit")
+@app.get(
+    "/artifact/{artifact_type}/{id}/audit",
+    response_model=List[ArtifactAuditEntry],
+    responses={
+        200: {"description": "Return the audit trail for this artifact. (NON-BASELINE)"},
+        400: {"description": "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
 def get_artifact_audit(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -1353,17 +1693,18 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 )
 
             # Add CREATE entry
+            artifact_type_enum = ArtifactType(artifact_type)
             audit_entries.append(
-                {
-                    "user": {"name": "system", "is_admin": False},
-                    "date": create_date,
-                    "artifact": {
-                        "name": artifact_name,
-                        "id": id,
-                        "type": artifact_type,
-                    },
-                    "action": "CREATE",
-                }
+                ArtifactAuditEntry(
+                    user=User(name="system", is_admin=False),
+                    date=create_date,
+                    artifact=ArtifactMetadata(
+                        name=artifact_name,
+                        id=id,
+                        type=artifact_type_enum,
+                    ),
+                    action=ArtifactAuditAction.CREATE,
+                )
             )
         else:
             # For non-model artifacts, check storage
@@ -1371,19 +1712,20 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 artifact = _artifact_storage[id]
                 if artifact.get("type") == artifact_type:
                     # Add CREATE entry
+                    artifact_type_enum = ArtifactType(artifact_type)
                     audit_entries.append(
-                        {
-                            "user": {"name": "system", "is_admin": False},
-                            "date": datetime.now(timezone.utc)
+                        ArtifactAuditEntry(
+                            user=User(name="system", is_admin=False),
+                            date=datetime.now(timezone.utc)
                             .isoformat()
                             .replace("+00:00", "Z"),
-                            "artifact": {
-                                "name": artifact.get("name", id),
-                                "id": id,
-                                "type": artifact_type,
-                            },
-                            "action": "CREATE",
-                        }
+                            artifact=ArtifactMetadata(
+                                name=artifact.get("name", id),
+                                id=id,
+                                type=artifact_type_enum,
+                            ),
+                            action=ArtifactAuditAction.CREATE,
+                        )
                     )
                 else:
                     raise HTTPException(
@@ -1406,7 +1748,17 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.get("/artifact/model/{id}/rate")
+@app.get(
+    "/artifact/model/{id}/rate",
+    response_model=ModelRating,
+    responses={
+        200: {"description": "Return the rating. Only use this if each metric was computed successfully."},
+        400: {"description": "There is missing field(s) in the artifact_id or it is formed improperly, or is invalid."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+        500: {"description": "The artifact rating system encountered an error while computing at least one metric."},
+    },
+)
 def get_model_rate(id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -1463,50 +1815,85 @@ def get_model_rate(id: str, request: Request):
                 detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
             )
 
-        # Build ModelRating response with all required fields
-        result = {
-            "name": id,
-            "category": alias(rating, "category") or "unknown",
-            "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
-            "ramp_up_time": round(float(alias(
+        # Build ModelRating response with all required fields including latencies
+        # Extract latency values from rating if available, otherwise default to 0.0
+        def get_latency(metric_name: str) -> float:
+            """Extract latency for a metric, checking various naming conventions."""
+            latency_key = f"{metric_name}_latency"
+            return round(float(alias(rating, latency_key, f"{metric_name}Latency", f"{metric_name}_time") or 0.0), 2)
+        
+        # Extract size_score - it should be a dict with platform keys
+        size_score_dict = {}
+        if isinstance(rating, dict):
+            size_score_raw = rating.get("size_score")
+            if isinstance(size_score_raw, dict):
+                size_score_dict = size_score_raw
+            # Also try to get individual platform scores if size_score is not a dict
+            if not size_score_dict:
+                size_score_dict = {
+                    "raspberry_pi": alias(rating, "size_score", "raspberry_pi") or 0.0,
+                    "jetson_nano": alias(rating, "size_score", "jetson_nano") or 0.0,
+                    "desktop_pc": alias(rating, "size_score", "desktop_pc") or 0.0,
+                    "aws_server": alias(rating, "size_score", "aws_server") or 0.0,
+                }
+        
+        size_score_obj = SizeScore(
+            raspberry_pi=round(float(size_score_dict.get("raspberry_pi", 0.0)), 2),
+            jetson_nano=round(float(size_score_dict.get("jetson_nano", 0.0)), 2),
+            desktop_pc=round(float(size_score_dict.get("desktop_pc", 0.0)), 2),
+            aws_server=round(float(size_score_dict.get("aws_server", 0.0)), 2),
+        )
+        
+        result = ModelRating(
+            name=id,
+            category=alias(rating, "category") or "unknown",
+            net_score=round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
+            net_score_latency=get_latency("net_score"),
+            ramp_up_time=round(float(alias(
                 rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
             ) or 0.0), 2),
-            "bus_factor": round(float(alias(
+            ramp_up_time_latency=get_latency("ramp_up_time"),
+            bus_factor=round(float(alias(
                 rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
             ) or 0.0), 2),
-            "performance_claims": round(float(alias(
+            bus_factor_latency=get_latency("bus_factor"),
+            performance_claims=round(float(alias(
                 rating,
                 "performance_claims",
                 "PerformanceClaims",
                 "score_performance_claims",
             ) or 0.0), 2),
-            "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
-            "dataset_and_code_score": round(float(alias(
+            performance_claims_latency=get_latency("performance_claims"),
+            license=round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
+            license_latency=get_latency("license"),
+            dataset_and_code_score=round(float(alias(
                 rating,
                 "dataset_code",
                 "DatasetCode",
                 "score_available_dataset_and_code",
             ) or 0.0), 2),
-            "dataset_quality": round(float(alias(
+            dataset_and_code_score_latency=get_latency("dataset_and_code_score"),
+            dataset_quality=round(float(alias(
                 rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
             ) or 0.0), 2),
-            "code_quality": round(float(alias(
+            dataset_quality_latency=get_latency("dataset_quality"),
+            code_quality=round(float(alias(
                 rating, "code_quality", "CodeQuality", "score_code_quality"
             ) or 0.0), 2),
-            "reproducibility": round(float(alias(
+            code_quality_latency=get_latency("code_quality"),
+            reproducibility=round(float(alias(
                 rating, "reproducibility", "Reproducibility", "score_reproducibility"
             ) or 0.0), 2),
-            "reviewedness": round(float(alias(
+            reproducibility_latency=get_latency("reproducibility"),
+            reviewedness=round(float(alias(
                 rating, "reviewedness", "Reviewedness", "score_reviewedness"
             ) or 0.0), 2),
-            "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
-            "size_score": {
-                "raspberry_pi": round(float(alias(rating, "size_score", "raspberry_pi") or 0.0), 2),
-                "jetson_nano": round(float(alias(rating, "size_score", "jetson_nano") or 0.0), 2),
-                "desktop_pc": round(float(alias(rating, "size_score", "desktop_pc") or 0.0), 2),
-                "aws_server": round(float(alias(rating, "size_score", "aws_server") or 0.0), 2),
-            },
-        }
+            reviewedness_latency=get_latency("reviewedness"),
+            tree_score=round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
+            tree_score_latency=get_latency("tree_score"),
+            size_score=size_score_obj,
+            size_score_latency=get_latency("size_score"),
+        )
         return result
     except HTTPException:
         raise
@@ -1518,7 +1905,16 @@ def get_model_rate(id: str, request: Request):
         )
 
 
-@app.get("/artifact/model/{id}/lineage")
+@app.get(
+    "/artifact/model/{id}/lineage",
+    response_model=ArtifactLineageGraph,
+    responses={
+        200: {"description": "Lineage graph extracted from structured metadata. (BASELINE)"},
+        400: {"description": "The lineage graph cannot be computed because the artifact metadata is missing or malformed."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "Artifact does not exist."},
+    },
+)
 def get_model_lineage(id: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -1586,11 +1982,12 @@ def get_model_lineage(id: str, request: Request):
         # Add nodes from lineage map
         for model_id, metadata in lineage_map.items():
             nodes.append(
-                {
-                    "artifact_id": model_id,
-                    "name": metadata.get("name", model_id),
-                    "source": metadata.get("source", "config_json"),
-                }
+                ArtifactLineageNode(
+                    artifact_id=model_id,
+                    name=metadata.get("name", model_id),
+                    source=metadata.get("source", "config_json"),
+                    metadata=metadata if isinstance(metadata, dict) else None,
+                )
             )
 
             # Add edges from dependencies/relationships
@@ -1604,15 +2001,15 @@ def get_model_lineage(id: str, request: Request):
                         relationship = dep.get("relationship", "dependency")
                         if dep_id:
                             edges.append(
-                                {
-                                    "from_node_artifact_id": dep_id,
-                                    "to_node_artifact_id": model_id,
-                                    "relationship": relationship,
-                                }
+                                ArtifactLineageEdge(
+                                    from_node_artifact_id=dep_id,
+                                    to_node_artifact_id=model_id,
+                                    relationship=relationship,
+                                )
                             )
 
         # Return lineage graph
-        return {"nodes": nodes, "edges": edges}
+        return ArtifactLineageGraph(nodes=nodes, edges=edges)
     except HTTPException:
         raise
     except Exception as e:
@@ -1623,8 +2020,18 @@ def get_model_lineage(id: str, request: Request):
         )
 
 
-@app.post("/artifact/model/{id}/license-check")
-async def check_model_license(id: str, request: Request):
+@app.post(
+    "/artifact/model/{id}/license-check",
+    response_model=bool,
+    responses={
+        200: {"description": "License compatibility analysis produced successfully. (BASELINE)"},
+        400: {"description": "The license check request is malformed or references an unsupported usage context."},
+        403: {"description": "Authentication failed due to invalid or missing AuthenticationToken."},
+        404: {"description": "The artifact or GitHub project could not be found."},
+        502: {"description": "External license information could not be retrieved."},
+    },
+)
+async def check_model_license(id: str, license_check_request: SimpleLicenseCheckRequest, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
@@ -1637,6 +2044,9 @@ async def check_model_license(id: str, request: Request):
                 status_code=400,
                 detail="The license check request is malformed or references an unsupported usage context.",
             )
+
+        # Extract github_url from SimpleLicenseCheckRequest model
+        github_url = license_check_request.github_url
 
         # Check if artifact exists
         found = False
@@ -1670,30 +2080,6 @@ async def check_model_license(id: str, request: Request):
                 detail="The artifact or GitHub project could not be found.",
             )
 
-        # Parse request body
-        try:
-            body = (
-                await request.json()
-                if request.headers.get("content-type") == "application/json"
-                else {}
-            )
-            if not isinstance(body, dict):
-                form = await request.form()
-                body = dict(form)
-        except Exception:
-            raise HTTPException(
-                status_code=400,
-                detail="The license check request is malformed or references an unsupported usage context.",
-            )
-
-        # Validate github_url
-        github_url = body.get("github_url", "")
-        if not github_url or not isinstance(github_url, str):
-            raise HTTPException(
-                status_code=400,
-                detail="The license check request is malformed or references an unsupported usage context.",
-            )
-
         # Extract licenses and check compatibility
         try:
             model_license = extract_model_license(id)
@@ -1711,7 +2097,8 @@ async def check_model_license(id: str, request: Request):
                 )
 
             # Check compatibility (use_case is optional, defaults to fine-tune+inference)
-            use_case = body.get("use_case", "fine-tune+inference")
+            # Note: use_case is not in SimpleLicenseCheckRequest schema, so we default to fine-tune+inference
+            use_case = "fine-tune+inference"
             compatibility_result = check_license_compatibility(
                 model_license, github_license, use_case
             )
@@ -1739,7 +2126,14 @@ async def check_model_license(id: str, request: Request):
         )
 
 
-@app.get("/tracks")
+@app.get(
+    "/tracks",
+    response_model=TracksResponse,
+    responses={
+        200: {"description": "Return the list of tracks the student plans to implement"},
+        500: {"description": "The system encountered an error while retrieving the student's track information."},
+    },
+)
 def get_tracks():
     try:
         # Return list of tracks the student plans to implement
@@ -1749,7 +2143,7 @@ def get_tracks():
         # - "High assurance track"
         # - "Other Security track"
         planned_tracks = ["Performance track", "Access control track"]
-        return {"plannedTracks": planned_tracks}
+        return TracksResponse(plannedTracks=planned_tracks)
     except HTTPException:
         raise
     except Exception as e:
