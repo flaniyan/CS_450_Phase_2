@@ -427,48 +427,25 @@ def list_models(
                     if len(key.split("/")) >= 3:
                         model_name = key.split("/")[1]
                         model_version = key.split("/")[2]
-                        
-                        # Check version range first
+                        if name_pattern and not name_pattern.search(model_name):
+                            continue
                         if version_range:
                             normalized_version = model_version.lstrip("v")
                             if not version_matches_range(
                                 normalized_version, version_range
                             ):
                                 continue
-                        
-                        # Check regex patterns (name OR README should match)
-                        name_matches = False
-                        readme_matches = False
-                        
-                        if name_pattern:
-                            name_matches = name_pattern.search(model_name) is not None
-                        
                         if model_regex:
                             try:
-                                readme_matches = search_model_card_content(
+                                if not search_model_card_content(
                                     model_name, model_version, model_regex
-                                )
+                                ):
+                                    continue
                             except re.error as e:
                                 raise HTTPException(
                                     status_code=400,
                                     detail=f"Invalid model regex: {str(e)}",
                                 )
-                        
-                        # If both patterns are provided, match if EITHER name OR README matches
-                        # If only one pattern is provided, match if that pattern matches
-                        if name_pattern and model_regex:
-                            # Both provided: OR logic (match if name OR README matches)
-                            if not (name_matches or readme_matches):
-                                continue
-                        elif name_pattern:
-                            # Only name pattern provided: must match name
-                            if not name_matches:
-                                continue
-                        elif model_regex:
-                            # Only README pattern provided: must match README
-                            if not readme_matches:
-                                continue
-                        
                         results.append({"name": model_name, "version": model_version})
         return {"models": results, "next_token": response.get("NextContinuationToken")}
     except HTTPException:
