@@ -115,8 +115,15 @@ class ReviewednessMetric:
                 value = -1.0
         else:
             ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
-            value = max(0.0, min(1.0, ratio))
+            base_score = 0.5
+            additional_score = ratio * 0.5
+            value = base_score + additional_score
+            value = max(0.0, min(1.0, value))
         
+        if value == -1.0:
+            value = round(-1.0, 2)
+        else:
+            value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

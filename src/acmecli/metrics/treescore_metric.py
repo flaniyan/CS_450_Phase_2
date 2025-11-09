@@ -1,4 +1,6 @@
 import time
+import re
+from typing import Optional
 from ..types import MetricValue
 from .base import register
 
@@ -12,47 +14,98 @@ class TreescoreMetric:
         
         scores = []
         for p in parents:
+            score = None
             try:
-                s = float(p.get("score"))
+                if isinstance(p, dict):
+                    score = p.get("score")
+                    if score is not None:
+                        s = float(score)
+                        if 0.0 <= s <= 1.0:
+                            scores.append(round(s, 2))
+                            continue
+                elif isinstance(p, (int, float)):
+                    s = float(p)
+                    if 0.0 <= s <= 1.0:
+                        scores.append(round(s, 2))
+                        continue
             except (TypeError, ValueError, AttributeError):
-                continue
-            if 0.0 <= s <= 1.0:
-                scores.append(s)
+                pass
+            
+            parent_id = None
+            if isinstance(p, dict):
+                parent_id = p.get("id") or p.get("name") or p.get("model_id")
+            elif isinstance(p, str):
+                parent_id = p
+            
+            if parent_id:
+                parent_score = self._lookup_parent_score(parent_id)
+                if parent_score is not None and 0.0 <= parent_score <= 1.0:
+                    scores.append(parent_score)
 
+        base_score = 0.5
         if len(scores) > 0:
             avg = sum(scores) / len(scores)
             avg = max(0.0, min(1.0, avg))
-            value = avg
+            additional_score = avg * 0.5
+            value = base_score + additional_score
         else:
-            value = 0.0
+            value = base_score
         
+        value = max(0.0, min(1.0, value))
+        value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
+    
+    def _lookup_parent_score(self, parent_id: str) -> Optional[float]:
+        """
+        Look up the net_score (total model score) of a parent model.
+        Only includes models currently uploaded to the system.
+        """
+        try:
+            from ...services.s3_service import list_models
+            from ...services.rating import analyze_model_content
+            
+            clean_parent_id = parent_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+            
+            if not clean_parent_id:
+                return None
+            
+            try:
+                uploaded_models = list_models(name_regex=f"^{clean_parent_id.replace('/', '_')}$", limit=1000)
+                if not uploaded_models.get("models"):
+                    uploaded_models = list_models(name_regex=f".*{re.escape(clean_parent_id.split('/')[-1])}.*", limit=1000)
+                
+                if not uploaded_models.get("models"):
+                    return None
+                
+                for model in uploaded_models.get("models", []):
+                    model_name = model.get("name", "").replace("_", "/")
+                    if model_name == clean_parent_id or model_name.endswith(clean_parent_id.split("/")[-1]):
+                        parent_result = analyze_model_content(model_name, suppress_errors=True)
+                        if parent_result:
+                            net_score = parent_result.get("net_score") or parent_result.get("NetScore") or parent_result.get("netScore")
+                            if net_score is not None:
+                                try:
+                                    score = float(net_score)
+                                    if 0.0 <= score <= 1.0:
+                                        return round(score, 2)
+                                except (TypeError, ValueError):
+                                    pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return None
 
     def _extract_parents(self, meta: dict) -> list:
+        """
+        Extract parent models from config.json structured metadata analysis.
+        Priority: config.json fields > lineage_metadata > parents array.
+        Lineage graph is obtained by analysis of config.json structured metadata.
+        Only includes parents that are currently uploaded to the system.
+        """
         parents = []
-        
-        if meta.get("parents"):
-            parents.extend(meta.get("parents") if isinstance(meta.get("parents"), list) else [meta.get("parents")])
-        
-        lineage = meta.get("lineage")
-        if lineage:
-            if isinstance(lineage, dict):
-                if lineage.get("parents"):
-                    lineage_parents = lineage.get("parents")
-                    if isinstance(lineage_parents, list):
-                        parents.extend(lineage_parents)
-                    else:
-                        parents.append(lineage_parents)
-            elif isinstance(lineage, list):
-                parents.extend(lineage)
-        
-        if meta.get("lineage_parents"):
-            lineage_parents = meta.get("lineage_parents")
-            if isinstance(lineage_parents, list):
-                parents.extend(lineage_parents)
-            else:
-                parents.append(lineage_parents)
+        existing_ids = set()
         
         config = meta.get("config") or {}
         base_model_fields = [
@@ -83,15 +136,86 @@ class TreescoreMetric:
             if field in config:
                 base_model = config[field]
                 if base_model and isinstance(base_model, str):
-                    if not any(p.get("id") == base_model for p in parents if isinstance(p, dict)):
-                        parents.append({"id": base_model, "score": None})
+                    clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    if clean_base_model and clean_base_model not in existing_ids:
+                        parents.append({"id": clean_base_model, "score": None})
+                        existing_ids.add(clean_base_model)
         
         lineage_metadata = meta.get("lineage_metadata")
         if lineage_metadata and isinstance(lineage_metadata, dict):
             base_model = lineage_metadata.get("base_model")
             if base_model and isinstance(base_model, str):
-                if not any(p.get("id") == base_model for p in parents if isinstance(p, dict)):
-                    parents.append({"id": base_model, "score": None})
+                clean_base_model = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                if clean_base_model and clean_base_model not in existing_ids:
+                    parents.append({"id": clean_base_model, "score": None})
+                    existing_ids.add(clean_base_model)
+        
+        if meta.get("parents"):
+            parents_list = meta.get("parents") if isinstance(meta.get("parents"), list) else [meta.get("parents")]
+            for p in parents_list:
+                if isinstance(p, dict):
+                    p_id = p.get("id") or p.get("name") or p.get("model_id")
+                    if p_id:
+                        clean_p_id = p_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        if clean_p_id and clean_p_id not in existing_ids:
+                            parents.append({"id": clean_p_id, "score": None})
+                            existing_ids.add(clean_p_id)
+                elif isinstance(p, str):
+                    clean_p = p.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    if clean_p and clean_p not in existing_ids:
+                        parents.append({"id": clean_p, "score": None})
+                        existing_ids.add(clean_p)
+        
+        lineage = meta.get("lineage")
+        if lineage:
+            if isinstance(lineage, dict):
+                if lineage.get("parents"):
+                    lineage_parents = lineage.get("parents")
+                    lineage_parents_list = lineage_parents if isinstance(lineage_parents, list) else [lineage_parents]
+                    for lp in lineage_parents_list:
+                        if isinstance(lp, dict):
+                            lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
+                            if lp_id:
+                                clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                                if clean_lp_id and clean_lp_id not in existing_ids:
+                                    parents.append({"id": clean_lp_id, "score": None})
+                                    existing_ids.add(clean_lp_id)
+                        elif isinstance(lp, str):
+                            clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                            if clean_lp and clean_lp not in existing_ids:
+                                parents.append({"id": clean_lp, "score": None})
+                                existing_ids.add(clean_lp)
+            elif isinstance(lineage, list):
+                for lp in lineage:
+                    if isinstance(lp, dict):
+                        lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
+                        if lp_id:
+                            clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                            if clean_lp_id and clean_lp_id not in existing_ids:
+                                parents.append({"id": clean_lp_id, "score": None})
+                                existing_ids.add(clean_lp_id)
+                    elif isinstance(lp, str):
+                        clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        if clean_lp and clean_lp not in existing_ids:
+                            parents.append({"id": clean_lp, "score": None})
+                            existing_ids.add(clean_lp)
+        
+        if meta.get("lineage_parents"):
+            lineage_parents = meta.get("lineage_parents")
+            lineage_parents_list = lineage_parents if isinstance(lineage_parents, list) else [lineage_parents]
+            for lp in lineage_parents_list:
+                if isinstance(lp, dict):
+                    lp_id = lp.get("id") or lp.get("name") or lp.get("model_id")
+                    if lp_id:
+                        clean_lp_id = lp_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        if clean_lp_id and clean_lp_id not in existing_ids:
+                            parents.append({"id": clean_lp_id, "score": None})
+                            existing_ids.add(clean_lp_id)
+                elif isinstance(lp, str):
+                    clean_lp = lp.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                    if clean_lp and clean_lp not in existing_ids:
+                        parents.append({"id": clean_lp, "score": None})
+                        existing_ids.add(clean_lp)
         
         return parents
 
