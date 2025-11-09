@@ -59,6 +59,9 @@ class SizeMetric:
                 for platform in scores:
                     scores[platform] = max(0.0, scores[platform] - 0.1)
 
+        # Round all scores to 2 decimal places
+        scores = {platform: round(float(score), 2) for platform, score in scores.items()}
+
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, scores, latency_ms)
 

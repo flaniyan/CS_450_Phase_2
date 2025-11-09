@@ -38,6 +38,7 @@ def compute_net_score(results: dict):
 
             net_score += metric_value * weight
 
+    net_score = round(float(net_score), 2)
     latency_ms = int((time.perf_counter() - t0) * 1000)
     return net_score, latency_ms
 
