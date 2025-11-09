@@ -23,14 +23,16 @@ class ReproducibilityMetric:
         has_demo = self._has_demo(readme)
         
         if not has_demo:
+            score = 0.0
             if self._has_any_code_indicators(readme, files):
-                value = 0.5
-            elif readme or files:
-                value = 0.5
+                score = 0.5
+            elif readme:
+                score = 0.4
+            elif files:
+                score = 0.3
             elif meta.get("github_url") or meta.get("full_name") or meta.get("name"):
-                value = 0.5
-            else:
-                value = 0.0
+                score = 0.2
+            value = max(0.0, min(0.5, score))
         else:
             simple_install = self._has_simple_install(readme)
             _, referenced_paths = self._extract_run_target(readme)
@@ -46,10 +48,20 @@ class ReproducibilityMetric:
             has_secrets = self._mentions_secrets(readme)
             needs_heavy_setup = self._needs_heavy_setup(readme)
 
+            score = 0.5
+            if simple_install:
+                score += 0.2
+            if paths_exist:
+                score += 0.2
+            if not has_secrets:
+                score += 0.05
+            if not needs_heavy_setup:
+                score += 0.05
+            
             if simple_install and paths_exist and not has_secrets and not needs_heavy_setup:
                 value = 1.0
             else:
-                value = 0.5
+                value = max(0.5, min(1.0, score))
         
         value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)

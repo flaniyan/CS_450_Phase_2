@@ -495,30 +495,192 @@ def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, An
         return None
 
 
+def extract_github_url_from_zip(zip_content: bytes) -> Optional[str]:
+    """
+    Extract GitHub URL from all text files in the zip archive.
+    Searches through README files first, then other text files.
+    """
+    if not zip_content:
+        return None
+    
+    import zipfile
+    import io
+    
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
+            file_list = zip_file.namelist()
+            
+            # Text file extensions to search
+            text_extensions = (
+                ".md", ".txt", ".rst", ".org", ".py", ".js", ".ts", ".json", 
+                ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".sh", 
+                ".bat", ".cmd", ".ps1", ".html", ".htm", ".xml", ".csv"
+            )
+            
+            # Priority files (README files first)
+            priority_files = []
+            other_text_files = []
+            
+            for filename in file_list:
+                filename_lower = filename.lower()
+                # Skip binary files and very large files
+                if any(filename_lower.endswith(ext) for ext in text_extensions):
+                    if "readme" in filename_lower or filename_lower == "readme":
+                        priority_files.append(filename)
+                    else:
+                        other_text_files.append(filename)
+            
+            # Search priority files first (README files)
+            for filename in priority_files:
+                try:
+                    content = zip_file.read(filename)
+                    # Try to decode as text
+                    try:
+                        text = content.decode("utf-8", errors="ignore")
+                    except:
+                        try:
+                            text = content.decode("latin-1", errors="ignore")
+                        except:
+                            continue
+                    
+                    if text:
+                        github_url = extract_github_url_from_text(text)
+                        if github_url:
+                            print(f"[INGEST] Found GitHub URL in {filename}: {github_url}")
+                            return github_url
+                except Exception as e:
+                    print(f"[INGEST] Warning: Could not read {filename}: {e}")
+                    continue
+            
+            # Search other text files
+            for filename in other_text_files:
+                try:
+                    content = zip_file.read(filename)
+                    # Limit file size to avoid memory issues (max 1MB)
+                    if len(content) > 1024 * 1024:
+                        continue
+                    
+                    # Try to decode as text
+                    try:
+                        text = content.decode("utf-8", errors="ignore")
+                    except:
+                        try:
+                            text = content.decode("latin-1", errors="ignore")
+                        except:
+                            continue
+                    
+                    if text:
+                        github_url = extract_github_url_from_text(text)
+                        if github_url:
+                            print(f"[INGEST] Found GitHub URL in {filename}: {github_url}")
+                            return github_url
+                except Exception as e:
+                    print(f"[INGEST] Warning: Could not read {filename}: {e}")
+                    continue
+            
+            # Also check config.json specifically (it's often a string, not a file)
+            try:
+                config = extract_config_from_model(zip_content)
+                if config:
+                    config_str = json.dumps(config)
+                    github_url = extract_github_url_from_text(config_str)
+                    if github_url:
+                        print(f"[INGEST] Found GitHub URL in config.json: {github_url}")
+                        return github_url
+            except Exception as e:
+                print(f"[INGEST] Warning: Could not extract GitHub URL from config.json: {e}")
+            
+    except Exception as e:
+        print(f"[INGEST] Error searching zip for GitHub URL: {e}")
+    
+    return None
+
+
 def extract_github_url_from_text(text: str) -> Optional[str]:
-    """Extract GitHub URL from text (README, config, etc.) using multiple patterns."""
+    """
+    Extract GitHub URL from text (README, config, etc.) using multiple patterns.
+    Carefully reads the README to find GitHub links in various formats.
+    """
     if not text:
         return None
 
     import re
 
+    # Normalize text - handle markdown code blocks and HTML
+    text_normalized = text
+    
+    # Try multiple patterns in order of specificity
+    
+    # 1. Markdown link syntax: [text](https://github.com/owner/repo) or [text](url "title")
     markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
-    markdown_match = re.search(markdown_pattern, text)
+    markdown_match = re.search(markdown_pattern, text_normalized, re.IGNORECASE)
     if markdown_match:
         owner, repo = markdown_match.group(2), markdown_match.group(3)
-        owner = owner.rstrip(".").strip()
-        repo = repo.rstrip(".").strip()
+        owner = owner.rstrip(".").strip().rstrip("/")
+        repo = repo.rstrip(".").strip().rstrip("/")
         if owner and repo:
             return f"https://github.com/{owner}/{repo}"
 
-    github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>)"
-    github_matches = re.findall(github_pattern, text)
+    # 2. Direct GitHub URLs: https://github.com/owner/repo
+    github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>|,|;|\.)"
+    github_matches = re.findall(github_pattern, text_normalized, re.IGNORECASE)
     if github_matches:
-        owner, repo = github_matches[0]
-        owner = owner.rstrip(".").strip()
-        repo = repo.rstrip(".").strip()
+        # Take the first match, prefer full URLs over partial
+        for match in github_matches:
+            owner, repo = match
+            owner = owner.rstrip(".").strip().rstrip("/")
+            repo = repo.rstrip(".").strip().rstrip("/")
+            if owner and repo and len(owner) > 0 and len(repo) > 0:
+                return f"https://github.com/{owner}/{repo}"
+
+    # 3. GitHub URLs in code blocks or inline code
+    code_block_pattern = r"`(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)`"
+    code_matches = re.findall(code_block_pattern, text_normalized, re.IGNORECASE)
+    if code_matches:
+        owner, repo = code_matches[0]
+        owner = owner.rstrip(".").strip().rstrip("/")
+        repo = repo.rstrip(".").strip().rstrip("/")
         if owner and repo:
             return f"https://github.com/{owner}/{repo}"
+
+    # 4. GitHub URLs in HTML links: <a href="https://github.com/owner/repo">
+    html_pattern = r'<a[^>]*href=["\'](https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+))["\']'
+    html_match = re.search(html_pattern, text_normalized, re.IGNORECASE)
+    if html_match:
+        owner, repo = html_match.group(3), html_match.group(4)
+        owner = owner.rstrip(".").strip().rstrip("/")
+        repo = repo.rstrip(".").strip().rstrip("/")
+        if owner and repo:
+            return f"https://github.com/{owner}/{repo}"
+
+    # 5. GitHub URLs in plain text with common prefixes
+    prefix_patterns = [
+        r"(?:repository|repo|source|code|github)[\s:]*[:=]?\s*(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
+        r"(?:check|see|view|visit)[\s]+(?:out|at)?[\s]*(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
+        r"(?:available|found|located)[\s]+(?:at|on)?[\s]*(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
+    ]
+    for pattern in prefix_patterns:
+        match = re.search(pattern, text_normalized, re.IGNORECASE)
+        if match:
+            owner, repo = match.group(1), match.group(2)
+            owner = owner.rstrip(".").strip().rstrip("/")
+            repo = repo.rstrip(".").strip().rstrip("/")
+            if owner and repo:
+                return f"https://github.com/{owner}/{repo}"
+
+    # 6. Owner/repo format without full URL (e.g., "github.com/owner/repo" or "owner/repo")
+    owner_repo_pattern = r"(?:github\.com/)?([a-zA-Z0-9_-]+)/([a-zA-Z0-9_\-\.]+)"
+    owner_repo_matches = re.findall(owner_repo_pattern, text_normalized)
+    # Filter out common false positives
+    false_positives = ["com/", "org/", "net/", "io/", "co/"]
+    for owner, repo in owner_repo_matches:
+        if f"{owner}/{repo}".lower() not in false_positives:
+            owner = owner.rstrip(".").strip().rstrip("/")
+            repo = repo.rstrip(".").strip().rstrip("/")
+            if owner and repo and len(owner) > 0 and len(repo) > 0:
+                # Only use if it looks like a valid GitHub repo (not too generic)
+                if len(owner) >= 1 and len(repo) >= 1:
+                    return f"https://github.com/{owner}/{repo}"
 
     return None
 
@@ -1016,12 +1178,22 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                                                 repo_url = f"https://github.com/{potential_repo}"
                                             break
 
+                    if not repo_url:
+                        print(f"[INGEST] Searching entire zip file for GitHub URL...")
+                        repo_url = extract_github_url_from_zip(zip_content)
+                        if repo_url:
+                            print(f"[INGEST] Found GitHub URL in zip file: {repo_url}")
+                        else:
+                            print(f"[INGEST] No GitHub URL found in zip file")
+                    
                     if not repo_url and meta.get("readme_text"):
                         readme = meta.get("readme_text", "")
+                        print(f"[INGEST] Extracting GitHub URL from README text (length: {len(readme)})")
                         repo_url = extract_github_url_from_text(readme)
-
-                    if not repo_url:
-                        pass
+                        if repo_url:
+                            print(f"[INGEST] Found GitHub URL in README: {repo_url}")
+                        else:
+                            print(f"[INGEST] No GitHub URL found in README text")
                     if repo_url:
                         meta["github_url"] = repo_url
                         meta["github"] = {"prs": [], "direct_commits": []}

@@ -115,9 +115,15 @@ class ReviewednessMetric:
                 value = -1.0
         else:
             ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
-            base_score = 0.5
-            additional_score = ratio * 0.5
-            value = base_score + additional_score
+            value = max(0.0, min(1.0, ratio))
+            
+            if value < 0.5 and (pr_count > 0 or commit_count > 0):
+                if pr_count > 0 and reviewed_add > 0:
+                    value = max(0.5, value)
+                elif pr_count > 0:
+                    value = max(0.5, value * 1.5)
+                elif commit_count > 0:
+                    value = max(0.5, value * 1.2)
             value = max(0.0, min(1.0, value))
         
         if value == -1.0:
