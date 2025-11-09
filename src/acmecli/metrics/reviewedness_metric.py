@@ -12,7 +12,7 @@ class ReviewednessMetric:
         
         if not github_url:
             latency_ms = int((time.perf_counter() - t0) * 1000)
-            return MetricValue(self.name, round(-1.0, 2), latency_ms)
+            return MetricValue(self.name, -1.0, latency_ms)
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []
@@ -80,33 +80,6 @@ class ReviewednessMetric:
             
             if not reviewed and pr.get("comments_count", 0) > 0:
                 reviewed = True
-            
-            if not reviewed and pr.get("state") == "closed":
-                reviewed = True
-            
-            if not reviewed and pr.get("draft") is False:
-                reviewed = True
-            
-            if not reviewed and pr.get("number"):
-                reviewed = True
-            
-            if not reviewed and pr.get("title"):
-                reviewed = True
-            
-            if not reviewed and pr.get("body"):
-                reviewed = True
-            
-            if not reviewed and pr.get("user"):
-                reviewed = True
-            
-            if not reviewed and pr.get("created_at"):
-                reviewed = True
-            
-            if not reviewed and pr.get("updated_at"):
-                reviewed = True
-            
-            if not reviewed and pr.get("files"):
-                reviewed = True
 
             files = pr.get("files")
             if files:
@@ -115,12 +88,8 @@ class ReviewednessMetric:
                     for f in files
                     if is_code_file(f.get("filename"))
                 )
-                if add == 0:
-                    add = len([f for f in files if is_code_file(f.get("filename"))]) * 10
             else:
                 add = int(pr.get("additions") or 0)
-                if add == 0:
-                    add = 10
 
             total_add += add
             if reviewed:
@@ -148,7 +117,6 @@ class ReviewednessMetric:
             ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
             value = max(0.0, min(1.0, ratio))
         
-        value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 
