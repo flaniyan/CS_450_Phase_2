@@ -36,39 +36,33 @@ class HFHandler:
         }
         seen_urls: Set[str] = set()
         
-        # Pattern 1: Markdown links: [text](url) or [text](url "title")
-        markdown_pattern = r'\[([^\]]*)\]\((https?://[^\s\)"]+)(?:\s+"[^"]*")?\)'
+        # Pattern 1: HTML hyperlink (e.g., <a href="https://example.com">Click here</a>)
+        # Using pattern: href=["'](.*?)["']
+        html_href_pattern = r'href=["\'](.*?)["\']'
+        for match in re.finditer(html_href_pattern, text, re.IGNORECASE):
+            url = match.group(1).strip()
+            # Only process if it's an HTTP/HTTPS URL
+            if url.startswith(('http://', 'https://')):
+                # Clean up URL (remove fragments, query params, trailing slashes)
+                url = url.split("#")[0].split("?")[0].rstrip("/")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    self._categorize_url(url, links)
+        
+        # Pattern 2: Markdown hyperlink (e.g., [Click here](https://example.com))
+        # Using pattern: \]\((https?://[^\s)]+)\)
+        markdown_pattern = r'\]\((https?://[^\s)]+)\)'
         for match in re.finditer(markdown_pattern, text, re.IGNORECASE):
-            url = match.group(2).strip().rstrip("/")
+            url = match.group(1).strip().rstrip("/")
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 self._categorize_url(url, links)
         
-        # Pattern 2: HTML links: <a href="url">text</a> or <a href='url'>text</a>
-        # Also handles cases like <a href="url" class="...">text</a>
-        html_pattern = r'<a[^>]*href=["\'](https?://[^\s"\'>]+)["\'][^>]*>'
-        for match in re.finditer(html_pattern, text, re.IGNORECASE):
-            url = match.group(1).strip().rstrip("/")
-            # Clean up URL (remove fragments, query params, trailing slashes)
-            url = url.split("#")[0].split("?")[0].rstrip("/")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                self._categorize_url(url, links)
-        
-        # Pattern 2b: HTML links with spaces or newlines: <a\nhref="url"> or <a href = "url">
-        html_pattern_relaxed = r'<a[^>]*\s+href\s*=\s*["\'](https?://[^\s"\'>]+)["\'][^>]*>'
-        for match in re.finditer(html_pattern_relaxed, text, re.IGNORECASE | re.DOTALL):
-            url = match.group(1).strip().rstrip("/")
-            url = url.split("#")[0].split("?")[0].rstrip("/")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                self._categorize_url(url, links)
-        
-        # Pattern 3: Plain URLs (not in markdown or HTML tags)
-        # Match URLs that aren't inside markdown links or HTML tags
-        plain_url_pattern = r'(?<!\]\()(?<!href=["\'])(?<!href=)(https?://[^\s<>\)\]"\'`]+)'
-        for match in re.finditer(plain_url_pattern, text, re.IGNORECASE):
-            url = match.group(1).strip().rstrip("/")
+        # Pattern 3: Generic URL finder (any URL in plain text)
+        # Using pattern: https?://[^\s"'>)]+
+        generic_url_pattern = r'https?://[^\s"\'>)]+'
+        for match in re.finditer(generic_url_pattern, text, re.IGNORECASE):
+            url = match.group(0).strip().rstrip("/")
             # Clean up trailing punctuation
             url = re.sub(r'[.,;:!?]+$', '', url)
             if url and url not in seen_urls:

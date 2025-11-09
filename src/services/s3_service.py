@@ -611,47 +611,51 @@ def extract_github_url_from_text(text: str) -> Optional[str]:
     
     # Try multiple patterns in order of specificity
     
-    # 1. Markdown link syntax: [text](https://github.com/owner/repo) or [text](url "title")
-    markdown_pattern = r"\[[^\]]*\]\((https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/[^\s\)]*)?)"
-    markdown_match = re.search(markdown_pattern, text_normalized, re.IGNORECASE)
-    if markdown_match:
-        owner, repo = markdown_match.group(2), markdown_match.group(3)
-        owner = owner.rstrip(".").strip().rstrip("/")
-        repo = repo.rstrip(".").strip().rstrip("/")
-        if owner and repo:
-            return f"https://github.com/{owner}/{repo}"
-
-    # 2. Direct GitHub URLs: https://github.com/owner/repo
-    github_pattern = r"(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)(?:/|$|\s|\)|\?|#|\"|'|`|>|,|;|\.)"
-    github_matches = re.findall(github_pattern, text_normalized, re.IGNORECASE)
-    if github_matches:
-        # Take the first match, prefer full URLs over partial
-        for match in github_matches:
-            owner, repo = match
-            owner = owner.rstrip(".").strip().rstrip("/")
-            repo = repo.rstrip(".").strip().rstrip("/")
-            if owner and repo and len(owner) > 0 and len(repo) > 0:
-                return f"https://github.com/{owner}/{repo}"
-
-    # 3. GitHub URLs in code blocks or inline code
-    code_block_pattern = r"`(?:https?://)?(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)`"
-    code_matches = re.findall(code_block_pattern, text_normalized, re.IGNORECASE)
-    if code_matches:
-        owner, repo = code_matches[0]
-        owner = owner.rstrip(".").strip().rstrip("/")
-        repo = repo.rstrip(".").strip().rstrip("/")
-        if owner and repo:
-            return f"https://github.com/{owner}/{repo}"
-
-    # 4. GitHub URLs in HTML links: <a href="https://github.com/owner/repo">
-    html_pattern = r'<a[^>]*href=["\'](https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+))["\']'
-    html_match = re.search(html_pattern, text_normalized, re.IGNORECASE)
-    if html_match:
-        owner, repo = html_match.group(3), html_match.group(4)
-        owner = owner.rstrip(".").strip().rstrip("/")
-        repo = repo.rstrip(".").strip().rstrip("/")
-        if owner and repo:
-            return f"https://github.com/{owner}/{repo}"
+    # 1. HTML hyperlink (e.g., <a href="https://github.com/owner/repo">Click here</a>)
+    # Using pattern: href=["'](.*?)["']
+    html_href_pattern = r'href=["\'](.*?)["\']'
+    html_matches = re.finditer(html_href_pattern, text_normalized, re.IGNORECASE)
+    for match in html_matches:
+        url = match.group(1).strip()
+        if url.startswith(('http://', 'https://')) and 'github.com' in url.lower():
+            # Extract owner/repo from GitHub URL
+            github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+            if github_match:
+                owner, repo = github_match.groups()
+                owner = owner.rstrip(".").strip().rstrip("/")
+                repo = repo.rstrip(".").strip().rstrip("/")
+                if owner and repo:
+                    return f"https://github.com/{owner}/{repo}"
+    
+    # 2. Markdown hyperlink (e.g., [Click here](https://github.com/owner/repo))
+    # Using pattern: \]\((https?://[^\s)]+)\)
+    markdown_pattern = r'\]\((https?://[^\s)]+)\)'
+    markdown_matches = re.finditer(markdown_pattern, text_normalized, re.IGNORECASE)
+    for match in markdown_matches:
+        url = match.group(1).strip()
+        if 'github.com' in url.lower():
+            github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+            if github_match:
+                owner, repo = github_match.groups()
+                owner = owner.rstrip(".").strip().rstrip("/")
+                repo = repo.rstrip(".").strip().rstrip("/")
+                if owner and repo:
+                    return f"https://github.com/{owner}/{repo}"
+    
+    # 3. Generic URL finder (any URL in plain text)
+    # Using pattern: https?://[^\s"'>)]+
+    generic_url_pattern = r'https?://[^\s"\'>)]+'
+    generic_matches = re.finditer(generic_url_pattern, text_normalized, re.IGNORECASE)
+    for match in generic_matches:
+        url = match.group(0).strip()
+        if 'github.com' in url.lower():
+            github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+            if github_match:
+                owner, repo = github_match.groups()
+                owner = owner.rstrip(".").strip().rstrip("/")
+                repo = repo.rstrip(".").strip().rstrip("/")
+                if owner and repo:
+                    return f"https://github.com/{owner}/{repo}"
 
     # 5. GitHub URLs in plain text with common prefixes
     prefix_patterns = [
@@ -1056,32 +1060,76 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
 
             if config:
                 config_str = json.dumps(config)
-                github_patterns = [
-                    r"https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
-                    r'"github"\s*:\s*"([^"]+)"',
-                    r'"repository"\s*:\s*"([^"]+)"',
-                    r'"repo"\s*:\s*"([^"]+)"',
-                    r"github\.com/([\w\-\.]+)/([\w\-\.]+)",
-                ]
-                for pattern in github_patterns:
-                    matches = re.findall(pattern, config_str, re.IGNORECASE)
-                    if matches:
-                        if isinstance(matches[0], tuple) and len(matches[0]) == 2:
-                            # Pattern matched owner/repo
-                            owner, repo = matches[0]
+                
+                # Pattern 1: HTML hyperlink in config.json (e.g., <a href="https://github.com/owner/repo">)
+                # Using pattern: href=["'](.*?)["']
+                html_href_pattern = r'href=["\'](.*?)["\']'
+                html_matches = re.finditer(html_href_pattern, config_str, re.IGNORECASE)
+                for match in html_matches:
+                    url = match.group(1).strip()
+                    if url.startswith(('http://', 'https://')) and 'github.com' in url.lower():
+                        github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+                        if github_match:
+                            owner, repo = github_match.groups()
                             repo_url = f"https://github.com/{owner}/{repo}"
-                        elif isinstance(matches[0], str):
-                            # Pattern matched URL string
-                            url_match = matches[0]
-                            if url_match.startswith("http"):
-                                repo_url = url_match
-                            elif "/" in url_match and len(url_match.split("/")) >= 2:
-                                parts = url_match.split("/")
-                                if "github.com" in parts:
-                                    idx = parts.index("github.com")
-                                    if idx + 2 < len(parts):
-                                        owner = parts[idx + 1]
-                                        repo = (
+                            break
+                
+                # Pattern 2: Markdown hyperlink in config.json (e.g., [text](https://github.com/owner/repo))
+                # Using pattern: \]\((https?://[^\s)]+)\)
+                if not repo_url:
+                    markdown_pattern = r'\]\((https?://[^\s)]+)\)'
+                    markdown_matches = re.finditer(markdown_pattern, config_str, re.IGNORECASE)
+                    for match in markdown_matches:
+                        url = match.group(1).strip()
+                        if 'github.com' in url.lower():
+                            github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+                            if github_match:
+                                owner, repo = github_match.groups()
+                                repo_url = f"https://github.com/{owner}/{repo}"
+                                break
+                
+                # Pattern 3: Generic URL finder in config.json
+                # Using pattern: https?://[^\s"'>)]+
+                if not repo_url:
+                    generic_url_pattern = r'https?://[^\s"\'>)]+'
+                    generic_matches = re.finditer(generic_url_pattern, config_str, re.IGNORECASE)
+                    for match in generic_matches:
+                        url = match.group(0).strip()
+                        if 'github.com' in url.lower():
+                            github_match = re.search(r'github\.com/([\w\-\.]+)/([\w\-\.]+)', url, re.IGNORECASE)
+                            if github_match:
+                                owner, repo = github_match.groups()
+                                repo_url = f"https://github.com/{owner}/{repo}"
+                                break
+                
+                # Fallback: Legacy patterns for JSON fields
+                if not repo_url:
+                    github_patterns = [
+                        r"https?://(?:www\.)?github\.com/([\w\-\.]+)/([\w\-\.]+)",
+                        r'"github"\s*:\s*"([^"]+)"',
+                        r'"repository"\s*:\s*"([^"]+)"',
+                        r'"repo"\s*:\s*"([^"]+)"',
+                        r"github\.com/([\w\-\.]+)/([\w\-\.]+)",
+                    ]
+                    for pattern in github_patterns:
+                        matches = re.findall(pattern, config_str, re.IGNORECASE)
+                        if matches:
+                            if isinstance(matches[0], tuple) and len(matches[0]) == 2:
+                                # Pattern matched owner/repo
+                                owner, repo = matches[0]
+                                repo_url = f"https://github.com/{owner}/{repo}"
+                            elif isinstance(matches[0], str):
+                                # Pattern matched URL string
+                                url_match = matches[0]
+                                if url_match.startswith("http"):
+                                    repo_url = url_match
+                                elif "/" in url_match and len(url_match.split("/")) >= 2:
+                                    parts = url_match.split("/")
+                                    if "github.com" in parts:
+                                        idx = parts.index("github.com")
+                                        if idx + 2 < len(parts):
+                                            owner = parts[idx + 1]
+                                            repo = (
                                             parts[idx + 2]
                                             .split("/")[0]
                                             .split("?")[0]

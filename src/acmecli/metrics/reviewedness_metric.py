@@ -12,7 +12,7 @@ class ReviewednessMetric:
         
         if not github_url:
             latency_ms = int((time.perf_counter() - t0) * 1000)
-            return MetricValue(self.name, -1.0, latency_ms)
+            return MetricValue(self.name, 0.5, latency_ms)
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []
@@ -112,7 +112,7 @@ class ReviewednessMetric:
             if pr_count > 0 or commit_count > 0:
                 value = 1.0
             else:
-                value = -1.0
+                value = 0.5
         else:
             ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
             value = max(0.0, min(1.0, ratio))
@@ -126,8 +126,8 @@ class ReviewednessMetric:
                     value = max(0.5, value * 1.2)
             value = max(0.0, min(1.0, value))
         
-        if value == -1.0:
-            value = round(-1.0, 2)
+        if value == 0.5:
+            value = round(0.5, 2)
         else:
             value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
