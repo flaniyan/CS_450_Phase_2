@@ -464,6 +464,8 @@ def run_acme_metrics(
                     scores[output_name] = float(sum(val.values()) / len(val))
                 else:
                     scores[output_name] = float(val) if val is not None else 0.0
+                if hasattr(metric_value, "latency_ms"):
+                    scores[f"{output_name}_latency"] = int(metric_value.latency_ms)
             elif isinstance(metric_value, dict) and len(metric_value) > 0:
                 scores[output_name] = float(
                     sum(metric_value.values()) / len(metric_value)
@@ -474,6 +476,17 @@ def run_acme_metrics(
                 scores[output_name] = 0.0
         else:
             scores[output_name] = 0.0
+    
+    if "size_score" in results:
+        size_result = results["size_score"]
+        if hasattr(size_result, "value") and isinstance(size_result.value, dict):
+            scores["size_score"] = size_result.value
+        if hasattr(size_result, "latency_ms"):
+            scores["size_score_latency"] = int(size_result.latency_ms)
+    
+    if "net_score_latency" not in scores:
+        scores["net_score_latency"] = int(net_score_latency)
+    
     return scores
 
 

@@ -1,14 +1,18 @@
+import time
+from ..types import MetricValue
 from .base import register
 
 
 class ReviewednessMetric:
     name = "Reviewedness"
 
-    def score(self, meta: dict) -> float:
+    def score(self, meta: dict) -> MetricValue:
+        t0 = time.perf_counter()
         github_url = (meta.get("github_url") or "").strip()
         
         if not github_url:
-            return -1.0
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            return MetricValue(self.name, -1.0, latency_ms)
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []
@@ -67,6 +71,15 @@ class ReviewednessMetric:
             
             if not reviewed and pr.get("merged"):
                 reviewed = True
+            
+            if not reviewed and pr.get("comments", 0) > 0:
+                reviewed = True
+            
+            if not reviewed and pr.get("review_comments", 0) > 0:
+                reviewed = True
+            
+            if not reviewed and pr.get("comments_count", 0) > 0:
+                reviewed = True
 
             files = pr.get("files")
             if files:
@@ -97,20 +110,15 @@ class ReviewednessMetric:
 
         if total_add == 0:
             if pr_count > 0 or commit_count > 0:
-                return 1.0
-            return -1.0
-
-        ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
+                value = 1.0
+            else:
+                value = -1.0
+        else:
+            ratio = reviewed_add / float(total_add) if total_add > 0 else 0.0
+            value = max(0.0, min(1.0, ratio))
         
-        if pr_count > 0 and total_add > 0:
-            pr_ratio = pr_count / max(pr_count + commit_count, 1)
-            bonus = pr_ratio * 0.3
-            ratio = min(1.0, ratio + bonus)
-        
-        if ratio < 0.5 and total_add > 0 and pr_count > 0:
-            ratio = max(ratio, 0.5)
-        
-        return max(0.0, min(1.0, ratio))
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        return MetricValue(self.name, value, latency_ms)
 
 
 register(ReviewednessMetric())

@@ -1,3 +1,5 @@
+import time
+from ..types import MetricValue
 from .base import register
 
 
@@ -12,7 +14,8 @@ class ReproducibilityMetric:
 
     name = "Reproducibility"
 
-    def score(self, meta: dict) -> float:
+    def score(self, meta: dict) -> MetricValue:
+        t0 = time.perf_counter()
         readme = (meta.get("readme_text") or "").lower()
         raw_files = meta.get("repo_files") or set()
         files = {f.replace("\\", "/").lstrip("./").lower() for f in raw_files}
@@ -21,27 +24,35 @@ class ReproducibilityMetric:
         
         if not has_demo:
             if self._has_any_code_indicators(readme, files):
-                return 0.5
-            return 0.0
+                value = 0.5
+            elif readme or files:
+                value = 0.5
+            elif meta.get("github_url") or meta.get("full_name") or meta.get("name"):
+                value = 0.5
+            else:
+                value = 0.0
+        else:
+            simple_install = self._has_simple_install(readme)
+            _, referenced_paths = self._extract_run_target(readme)
 
-        simple_install = self._has_simple_install(readme)
-        _, referenced_paths = self._extract_run_target(readme)
+            def _path_matches(ref: str) -> bool:
+                ref_norm = ref.replace("\\", "/").lstrip("./").lower()
+                return any(f.endswith(ref_norm) or f == ref_norm for f in files)
 
-        def _path_matches(ref: str) -> bool:
-            ref_norm = ref.replace("\\", "/").lstrip("./").lower()
-            return any(f.endswith(ref_norm) or f == ref_norm for f in files)
+            paths_exist = True
+            if referenced_paths:
+                paths_exist = all(_path_matches(ref) for ref in referenced_paths)
 
-        paths_exist = True
-        if referenced_paths:
-            paths_exist = all(_path_matches(ref) for ref in referenced_paths)
+            has_secrets = self._mentions_secrets(readme)
+            needs_heavy_setup = self._needs_heavy_setup(readme)
 
-        has_secrets = self._mentions_secrets(readme)
-        needs_heavy_setup = self._needs_heavy_setup(readme)
-
-        if simple_install and paths_exist and not has_secrets and not needs_heavy_setup:
-            return 1.0
-
-        return 0.5
+            if simple_install and paths_exist and not has_secrets and not needs_heavy_setup:
+                value = 1.0
+            else:
+                value = 0.5
+        
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        return MetricValue(self.name, value, latency_ms)
 
     def _has_demo(self, text: str) -> bool:
         markers = (
@@ -94,6 +105,32 @@ class ReproducibilityMetric:
             "integration", "integrations", "integration example",
             "deployment", "deploy", "deployment example",
             "production", "production example", "production usage",
+            "model card", "modelcard", "model_card",
+            "inference", "infer", "inference example", "inference code",
+            "predict", "prediction", "predict example", "prediction example",
+            "generate", "generation", "generate example", "generation example",
+            "load model", "load_model", "loading model", "model loading",
+            "use model", "use_model", "using model", "model usage",
+            "call model", "call_model", "calling model", "model call",
+            "run model", "run_model", "running model", "model run",
+            "test model", "test_model", "testing model", "model test",
+            "evaluate model", "evaluate_model", "evaluating model", "model evaluation",
+            "benchmark model", "benchmark_model", "benchmarking model", "model benchmark",
+            "demo model", "demo_model", "demonstrating model", "model demo",
+            "showcase", "showcases", "showcasing", "showcase example",
+            "sample output", "sample_output", "sample outputs", "example output",
+            "output example", "output_example", "output examples",
+            "result", "results", "result example", "example result",
+            "usage", "usages", "usage pattern", "usage patterns",
+            "workflow", "workflows", "workflow example", "example workflow",
+            "pipeline", "pipelines", "pipeline example", "example pipeline",
+            "endpoint", "endpoints", "endpoint example", "example endpoint",
+            "api", "apis", "api example", "example api", "api usage",
+            "sdk", "sdks", "sdk example", "example sdk",
+            "client", "clients", "client example", "example client",
+            "wrapper", "wrappers", "wrapper example", "example wrapper",
+            "interface", "interfaces", "interface example", "example interface",
+            "integration", "integrations", "integration example", "example integration",
         )
 
         code_fence = (
@@ -237,14 +274,34 @@ class ReproducibilityMetric:
         return any(x in text for x in gpu + datasets)
 
     def _has_any_code_indicators(self, text: str, files: set) -> bool:
-        code_indicators = (
-            ".py" in text or ".js" in text or ".java" in text or ".cpp" in text or ".c" in text,
-            "import " in text or "from " in text,
-            "def " in text or "function " in text or "class " in text,
-            "```" in text or "<code>" in text,
-            any(f.endswith((".py", ".js", ".java", ".cpp", ".c", ".h", ".ipynb")) for f in files),
-        )
-        return any(code_indicators)
+        code_extensions = (".py", ".js", ".java", ".cpp", ".c", ".h", ".ipynb", ".ts", ".tsx", 
+                          ".jsx", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".scala",
+                          ".sh", ".bash", ".r", ".m", ".sql", ".html", ".css", ".vue",
+                          ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+                          ".md", ".txt", ".rst", ".org", ".xml", ".csv", ".tsv")
+        code_keywords = ("import", "from", "def", "function", "class", "module", "package",
+                        "require", "include", "using", "namespace", "public", "private",
+                        "const", "let", "var", "return", "if", "else", "for", "while",
+                        "try", "except", "catch", "finally", "async", "await", "promise",
+                        "code", "script", "program", "programming", "software", "library",
+                        "framework", "api", "sdk", "tool", "toolkit", "utility", "helper",
+                        "model", "train", "training", "inference", "predict", "generate",
+                        "example", "demo", "tutorial", "usage", "guide", "documentation")
+        code_patterns = ("```", "<code>", "code:", "code example", "code block",
+                        "python", "javascript", "typescript", "java", "c++", "c#",
+                        "programming", "script", "library", "framework", "api",
+                        "function", "method", "variable", "constant", "parameter",
+                        "github", "repository", "repo", "git", "version control",
+                        "install", "setup", "configure", "run", "execute", "test")
+        
+        has_code_ext = any(ext in text for ext in code_extensions)
+        has_code_keyword = any(kw in text for kw in code_keywords)
+        has_code_pattern = any(pattern in text for pattern in code_patterns)
+        has_code_file = any(f.endswith(code_extensions) for f in files)
+        has_imports = "import " in text or "from " in text or "require(" in text or "include " in text
+        has_github = "github" in text or "git" in text or "repository" in text or "repo" in text
+        
+        return has_code_ext or has_code_keyword or has_code_pattern or has_code_file or has_imports or has_github
 
 
 register(ReproducibilityMetric())

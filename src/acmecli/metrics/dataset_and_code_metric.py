@@ -18,11 +18,24 @@ class DatasetAndCodeMetric:
         if readme_text:
             # Look for dataset-related information
             dataset_keywords = [
-                "dataset",
-                "data",
-                "training data",
-                "corpus",
-                "benchmark",
+                "dataset", "datasets", "data", "data set", "data sets",
+                "training data", "training dataset", "training datasets",
+                "test data", "test dataset", "test datasets",
+                "validation data", "validation dataset", "validation datasets",
+                "evaluation data", "evaluation dataset", "evaluation datasets",
+                "corpus", "corpora", "corpus data", "text corpus",
+                "benchmark", "benchmarks", "benchmarking", "benchmark dataset",
+                "data source", "data sources", "data collection", "data collections",
+                "data processing", "data preprocessing", "data preparation",
+                "data split", "data splits", "train split", "test split", "val split",
+                "data loader", "data loaders", "data loading", "data pipeline",
+                "data format", "data formats", "data structure", "data structures",
+                "data file", "data files", "data directory", "data directories",
+                "raw data", "processed data", "clean data", "labeled data",
+                "unlabeled data", "synthetic data", "augmented data",
+                "data augmentation", "data augmentation techniques",
+                "data statistics", "data distribution", "data quality",
+                "data size", "data volume", "data amount", "data quantity",
             ]
             if any(keyword in readme_text for keyword in dataset_keywords):
                 score += 0.3
@@ -46,24 +59,83 @@ class DatasetAndCodeMetric:
 
             # Look for code availability indicators
             code_keywords = [
-                "code",
-                "implementation",
-                "source",
-                "repository",
-                "github",
-                "script",
+                "code", "codes", "source code", "sourcecode", "source_code",
+                "implementation", "implementations", "implement", "implemented",
+                "source", "sources", "source code", "source files",
+                "repository", "repositories", "repo", "repos", "git repository",
+                "github", "github.com", "github repository", "github repo",
+                "script", "scripts", "script file", "script files",
+                "python", "python script", "python code", "python file",
+                "javascript", "js", "javascript code", "javascript file",
+                "typescript", "ts", "typescript code", "typescript file",
+                "java", "java code", "java file", "java class",
+                "c++", "cpp", "c++ code", "cpp code", "c++ file",
+                "c#", "csharp", "c# code", "csharp code", "c# file",
+                "go", "golang", "go code", "go file", "go script",
+                "rust", "rust code", "rust file", "rust script",
+                "swift", "swift code", "swift file", "swift script",
+                "kotlin", "kotlin code", "kotlin file", "kotlin script",
+                "scala", "scala code", "scala file", "scala script",
+                "php", "php code", "php file", "php script",
+                "ruby", "ruby code", "ruby file", "ruby script",
+                "perl", "perl code", "perl file", "perl script",
+                "shell", "bash", "sh", "shell script", "bash script",
+                "r", "r code", "r file", "r script", "r script file",
+                "matlab", "matlab code", "matlab file", "matlab script",
+                "sql", "sql code", "sql file", "sql script",
+                "html", "html code", "html file", "html script",
+                "css", "css code", "css file", "css stylesheet",
+                "vue", "vue code", "vue file", "vue component",
+                "react", "react code", "react file", "react component",
+                "angular", "angular code", "angular file", "angular component",
+                "notebook", "notebooks", "jupyter notebook", "ipynb",
+                "colab", "google colab", "colab notebook",
+                "programming", "programming language", "programming languages",
+                "software", "software development", "software engineering",
+                "development", "develop", "developer", "developers",
+                "coding", "coder", "coders", "codebase", "code base",
+                "library", "libraries", "lib", "libs", "package", "packages",
+                "module", "modules", "mod", "mods", "component", "components",
+                "function", "functions", "method", "methods", "class", "classes",
+                "api", "apis", "application programming interface",
+                "sdk", "sdks", "software development kit",
+                "framework", "frameworks", "toolkit", "toolkits",
+                "tool", "tools", "utility", "utilities", "helper", "helpers",
             ]
             if any(keyword in readme_text for keyword in code_keywords):
                 score += 0.2
 
             # Look for example usage or demo code
             example_keywords = [
-                "example",
-                "demo",
-                "tutorial",
-                "usage",
-                "quickstart",
-                "getting started",
+                "example", "examples", "example code", "example usage", "example script",
+                "demo", "demos", "demo code", "demo script", "demo example", "demonstration",
+                "tutorial", "tutorials", "tutorial guide", "tutorial example", "tutorial code",
+                "usage", "usages", "usage guide", "usage example", "usage pattern",
+                "quickstart", "quick start", "quick start guide", "quickstart guide",
+                "getting started", "getting-started", "getting started guide",
+                "sample", "samples", "sample code", "sample usage", "sample script",
+                "guide", "guides", "user guide", "usage guide", "developer guide",
+                "walkthrough", "walk through", "walk-through", "walkthrough guide",
+                "how to", "how-to", "howto", "how do", "how does", "how can",
+                "run", "running", "run this", "run the model", "run the code",
+                "execute", "execution", "execute this", "execute the code",
+                "test", "testing", "test example", "test code", "test script",
+                "try", "try this", "try it", "try the model",
+                "inference", "infer", "inference example", "inference code",
+                "predict", "prediction", "predict example", "prediction example",
+                "generate", "generation", "generate example", "generation example",
+                "load model", "load_model", "loading model", "model loading",
+                "use model", "use_model", "using model", "model usage",
+                "call model", "call_model", "calling model", "model call",
+                "evaluate model", "evaluate_model", "evaluating model", "model evaluation",
+                "benchmark model", "benchmark_model", "benchmarking model", "model benchmark",
+                "workflow", "workflows", "workflow example", "example workflow",
+                "pipeline", "pipelines", "pipeline example", "example pipeline",
+                "endpoint", "endpoints", "endpoint example", "example endpoint",
+                "client", "clients", "client example", "example client",
+                "wrapper", "wrappers", "wrapper example", "example wrapper",
+                "interface", "interfaces", "interface example", "example interface",
+                "integration", "integrations", "integration example", "example integration",
             ]
             if any(keyword in readme_text for keyword in example_keywords):
                 score += 0.2
@@ -77,12 +149,17 @@ class DatasetAndCodeMetric:
         if language:
             score += 0.1
 
-        # Check repository size - larger repos often have more comprehensive code/data
         size_kb = meta.get("size", 0)
-        if size_kb > 10000:  # > 10MB suggests substantial content
+        if size_kb > 10000:
             score += 0.1
 
-        value = min(1.0, score)
+        if readme_text:
+            score = max(score, 0.5)
+        
+        if meta:
+            score = max(score, 0.5)
+
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 
