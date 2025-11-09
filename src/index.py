@@ -512,7 +512,67 @@ async def search_artifacts_by_regex(request: Request):
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
 
-        # Validate regex pattern
+        # Validate regex pattern and protect against ReDoS attacks
+        # Check for potentially dangerous patterns
+        if len(regex_pattern) > 1000:
+            raise HTTPException(
+                status_code=400,
+                detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+            )
+        
+        # Detect ReDoS patterns: nested quantifiers with large ranges
+        # Pattern to detect nested quantifiers like (a{1,99999}){1,99999}
+        nested_quantifier_pattern = r'\{(\d+),(\d+)\}.*\{(\d+),(\d+)\}'
+        matches = re.findall(nested_quantifier_pattern, regex_pattern)
+        for match in matches:
+            min1, max1, min2, max2 = match
+            # If any quantifier has a large range (>1000), reject it
+            if int(max1) > 1000 or int(max2) > 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+                )
+        
+        # Detect single quantifiers with very large ranges
+        large_quantifier_pattern = r'\{(\d+),(\d+)\}'
+        large_matches = re.findall(large_quantifier_pattern, regex_pattern)
+        for match in large_matches:
+            min_val, max_val = match
+            if int(max_val) > 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+                )
+        
+        # Detect ReDoS patterns: multiple overlapping quantifiers like (a+)(a+)(a+)(a+)(a+)(a+)
+        # Count consecutive groups with greedy quantifiers (+, *, {n,})
+        # This pattern can cause exponential backtracking
+        # Pattern: groups ending with +, *, or { followed by another group
+        overlapping_quantifier_pattern = r'\([^)]*\)[\+\*\{].*?\([^)]*\)[\+\*\{]'
+        # Count how many groups with quantifiers appear consecutively
+        # Look for pattern: (something with quantifier)(something with quantifier)...
+        group_with_quantifier_pattern = r'\([^)]*\)[\+\*\{]'
+        overlapping_matches = re.findall(group_with_quantifier_pattern, regex_pattern)
+        if len(overlapping_matches) >= 4:
+            # If there are 4+ groups with greedy quantifiers, it's likely a ReDoS attack
+            raise HTTPException(
+                status_code=400,
+                detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+            )
+        
+        # Detect patterns with many consecutive quantifiers (like a+a+a+a+a+)
+        # Count occurrences of quantifiers followed by more quantifiers
+        consecutive_quantifier_pattern = r'[\+\*\{][\+\*\{]'
+        if re.search(consecutive_quantifier_pattern, regex_pattern):
+            # Check if there are many quantifiers in sequence
+            quantifier_count = len(re.findall(r'[\+\*\{]', regex_pattern))
+            if quantifier_count >= 5:
+                raise HTTPException(
+                    status_code=400,
+                    detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+                )
+        
+        # Validate regex pattern syntax
         try:
             re.compile(regex_pattern)
         except re.error:
@@ -522,14 +582,15 @@ async def search_artifacts_by_regex(request: Request):
             )
 
         # Search for models matching regex
+        # According to spec: "Search for an artifact using regular expression over artifact names and READMEs"
         artifacts = []
         try:
-            # list_models already filters by name_regex using re.search() (substring match)
-            # This allows the regex pattern to match anywhere in the model name
-            result = list_models(name_regex=regex_pattern, limit=1000)
+            # Search by name_regex (matches artifact names)
+            # Also search by model_regex (matches READMEs and model card content)
+            result = list_models(name_regex=regex_pattern, model_regex=regex_pattern, limit=1000)
             for model in result.get("models", []):
                 model_name = model.get("name", "")
-                # list_models already verified the regex match, so add all results
+                # list_models already verified the regex match (name or README), so add all results
                 artifacts.append(
                     {
                         "name": model_name,
@@ -587,6 +648,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
+        global _artifact_storage
         if artifact_type == "model":
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
