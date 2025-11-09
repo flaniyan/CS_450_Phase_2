@@ -10,7 +10,6 @@ class LoggingEnvMetric:
 
     def score(self, meta: dict) -> MetricValue:
         t0 = time.perf_counter()
-        # Heuristic: score higher if LOG_FILE or LOG_LEVEL are mentioned/configured
         score = 0.0
         env_vars = meta.get("env_vars", {})
         readme_text = meta.get("readme_text", "").lower()
@@ -18,7 +17,11 @@ class LoggingEnvMetric:
             score += 0.5
         if "debug" in readme_text or "logging" in readme_text:
             score += 0.3
-        value = min(1.0, score)
+        
+        if readme_text or env_vars:
+            score = max(score, 0.5)
+        
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

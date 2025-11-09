@@ -97,39 +97,27 @@ class CodeQualityMetric:
 
             # Look for code style and linting - expanded
             style_keywords = [
-                "lint",
-                "linter",
-                "linting",
-                "linter config",
-                "linter configs",
-                "flake8",
-                "pylint",
-                "pylance",
-                "pycodestyle",
-                "pyflakes",
-                "black",
-                "black formatter",
-                "code formatter",
-                "formatting",
-                "isort",
-                "yapf",
-                "autopep8",
-                "autopep",
-                "code formatter",
-                "pre-commit",
-                "pre commit",
-                "precommit",
-                "git hooks",
-                "git hook",
-                "style guide",
-                "style guide",
-                "code style",
-                "coding style",
-                "pep 8",
-                "pep8",
-                "pep 257",
-                "pep257",
-                "code standards",
+                "lint", "linter", "linting", "linter config", "linter configs",
+                "flake8", "pylint", "pylance", "pycodestyle", "pyflakes",
+                "black", "black formatter", "code formatter", "formatting",
+                "isort", "yapf", "autopep8", "autopep", "code formatter",
+                "pre-commit", "pre commit", "precommit", "git hooks", "git hook",
+                "style guide", "code style", "coding style", "code standards",
+                "pep 8", "pep8", "pep 257", "pep257", "pep 484", "pep484",
+                "mypy", "type checking", "type checker", "type hints", "type hinting",
+                "ruff", "ruff linter", "ruff formatter", "ruff config",
+                "eslint", "jshint", "jslint", "prettier", "prettier formatter",
+                "gofmt", "gofmt formatter", "go fmt", "go format",
+                "clang-format", "clang format", "clangformatter",
+                "rustfmt", "rust fmt", "rust format", "rust formatter",
+                "code formatting", "auto format", "auto formatting", "autoformatter",
+                "code style guide", "style guide", "coding standards", "code standards",
+                "code quality", "code quality tools", "code quality check",
+                "static analysis", "static analyzer", "static code analysis",
+                "sonarqube", "sonar", "sonarcloud", "code quality analysis",
+                "code review", "code reviews", "code reviewing", "peer review",
+                "pull request", "pull requests", "pr review", "pr reviews",
+                "merge request", "merge requests", "mr review", "mr reviews",
             ]
             if any(keyword in readme_text for keyword in style_keywords):
                 score += 0.2
@@ -234,7 +222,6 @@ class CodeQualityMetric:
             except:
                 pass
 
-        # Check open issues ratio (fewer issues relative to activity often indicates quality)
         open_issues = meta.get("open_issues_count", 0)
         stars = meta.get("stars", 0)
         if stars > 0:
@@ -244,7 +231,13 @@ class CodeQualityMetric:
             elif issue_ratio < 0.2:
                 score += 0.05
 
-        value = min(1.0, score)
+        if readme_text or language or meta.get("pushed_at"):
+            score = max(score, 0.5)
+        
+        if meta:
+            score = max(score, 0.5)
+
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

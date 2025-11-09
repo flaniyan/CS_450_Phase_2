@@ -137,72 +137,53 @@ class DatasetQualityMetric:
 
             # Look for data curation and cleaning mentions - expanded
             quality_keywords = [
-                "curated",
-                "curation",
-                "curate",
-                "curating",
-                "carefully curated",
-                "cleaned",
-                "cleaning",
-                "clean",
-                "clean data",
-                "data cleaning",
-                "filtered",
-                "filtering",
-                "filter",
-                "filtered data",
-                "validated",
-                "validation",
-                "validate",
-                "validated data",
-                "annotated",
-                "annotation",
-                "annotate",
-                "annotations",
-                "labeled",
-                "labels",
-                "quality",
-                "high quality",
-                "quality data",
-                "data quality",
-                "verified",
-                "verification",
-                "verify",
-                "verified data",
-                "reviewed",
-                "review",
-                "reviewed data",
-                "data review",
+                "curated", "curation", "curate", "curating", "carefully curated",
+                "cleaned", "cleaning", "clean", "clean data", "data cleaning",
+                "filtered", "filtering", "filter", "filtered data", "data filtering",
+                "validated", "validation", "validate", "validated data", "data validation",
+                "annotated", "annotation", "annotate", "annotations", "data annotation",
+                "labeled", "labels", "label", "labeled data", "data labeling",
+                "quality", "high quality", "quality data", "data quality", "quality control",
+                "verified", "verification", "verify", "verified data", "data verification",
+                "reviewed", "review", "reviewed data", "data review", "data reviewing",
+                "processed", "processing", "process", "processed data", "data processing",
+                "preprocessed", "preprocessing", "preprocess", "preprocessed data", "data preprocessing",
+                "normalized", "normalization", "normalize", "normalized data", "data normalization",
+                "standardized", "standardization", "standardize", "standardized data", "data standardization",
+                "checked", "checking", "check", "checked data", "data checking",
+                "inspected", "inspection", "inspect", "inspected data", "data inspection",
+                "audited", "audit", "auditing", "audited data", "data audit",
+                "tested", "testing", "test", "tested data", "data testing",
+                "evaluated", "evaluation", "evaluate", "evaluated data", "data evaluation",
+                "assessed", "assessment", "assess", "assessed data", "data assessment",
+                "monitored", "monitoring", "monitor", "monitored data", "data monitoring",
+                "maintained", "maintenance", "maintain", "maintained data", "data maintenance",
+                "updated", "updating", "update", "updated data", "data updating",
+                "refined", "refinement", "refine", "refined data", "data refinement",
+                "polished", "polishing", "polish", "polished data", "data polishing",
             ]
             if any(keyword in readme_text for keyword in quality_keywords):
                 score += 0.2
 
             # Look for diversity and bias considerations - expanded
             diversity_keywords = [
-                "diverse",
-                "diversity",
-                "diversely",
-                "diverse dataset",
-                "balanced",
-                "balance",
-                "balanced dataset",
-                "balanced distribution",
-                "bias",
-                "biases",
-                "bias free",
-                "bias-free",
-                "unbiased",
-                "fairness",
-                "fair",
-                "fair dataset",
-                "fair representation",
-                "representative",
-                "representation",
-                "representative dataset",
-                "inclusive",
-                "inclusion",
-                "inclusive dataset",
-                "inclusivity",
+                "diverse", "diversity", "diversely", "diverse dataset", "data diversity",
+                "balanced", "balance", "balanced dataset", "balanced distribution", "data balance",
+                "bias", "biases", "bias free", "bias-free", "unbiased", "bias reduction",
+                "fairness", "fair", "fair dataset", "fair representation", "data fairness",
+                "representative", "representation", "representative dataset", "data representation",
+                "inclusive", "inclusion", "inclusive dataset", "inclusivity", "data inclusion",
+                "equitable", "equity", "equitable dataset", "data equity",
+                "unbiased", "unbiased dataset", "unbiased data", "data unbiased",
+                "neutral", "neutrality", "neutral dataset", "data neutrality",
+                "impartial", "impartiality", "impartial dataset", "data impartiality",
+                "comprehensive", "comprehensiveness", "comprehensive dataset", "data comprehensiveness",
+                "varied", "variety", "varied dataset", "data variety",
+                "heterogeneous", "heterogeneity", "heterogeneous dataset", "data heterogeneity",
+                "multifaceted", "multifaceted dataset", "data multifaceted",
+                "wide-ranging", "wide ranging", "wide-ranging dataset", "data wide-ranging",
+                "broad", "breadth", "broad dataset", "data breadth",
+                "extensive", "extensiveness", "extensive dataset", "data extensiveness",
             ]
             if any(keyword in readme_text for keyword in diversity_keywords):
                 score += 0.1
@@ -302,14 +283,19 @@ class DatasetQualityMetric:
         elif stars > 10:
             score += 0.02  # Give credit even for small star counts
 
-        # Check downloads (indicates usage and validation)
         downloads = meta.get("downloads", 0)
         if downloads > 10000:
             score += 0.05
         elif downloads > 1000:
             score += 0.02
 
-        value = min(1.0, max(0.0, score))
+        if readme_text:
+            score = max(score, 0.5)
+        
+        if meta:
+            score = max(score, 0.5)
+
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

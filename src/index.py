@@ -570,6 +570,7 @@ async def search_artifacts_by_regex(request: Request):
         )
 
 
+@app.get("/artifact/{artifact_type}/{id}")
 @app.get("/artifacts/{artifact_type}/{id}")
 def get_artifact(artifact_type: str, id: str, request: Request):
     if not verify_auth_token(request):
@@ -1313,17 +1314,14 @@ def get_model_rate(id: str, request: Request):
             "name": id,
             "category": alias(rating, "category") or "unknown",
             "net_score": alias(rating, "net_score", "NetScore", "netScore") or 0.0,
-            "net_score_latency": alias(rating, "net_score_latency") or 0.0,
             "ramp_up_time": alias(
                 rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
             )
             or 0.0,
-            "ramp_up_time_latency": alias(rating, "ramp_up_time_latency") or 0.0,
             "bus_factor": alias(
                 rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
             )
             or 0.0,
-            "bus_factor_latency": alias(rating, "bus_factor_latency") or 0.0,
             "performance_claims": alias(
                 rating,
                 "performance_claims",
@@ -1331,10 +1329,7 @@ def get_model_rate(id: str, request: Request):
                 "score_performance_claims",
             )
             or 0.0,
-            "performance_claims_latency": alias(rating, "performance_claims_latency")
-            or 0.0,
             "license": alias(rating, "license", "License", "score_license") or 0.0,
-            "license_latency": alias(rating, "license_latency") or 0.0,
             "dataset_and_code_score": alias(
                 rating,
                 "dataset_code",
@@ -1342,40 +1337,30 @@ def get_model_rate(id: str, request: Request):
                 "score_available_dataset_and_code",
             )
             or 0.0,
-            "dataset_and_code_score_latency": alias(
-                rating, "dataset_and_code_score_latency"
-            )
-            or 0.0,
             "dataset_quality": alias(
                 rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
             )
             or 0.0,
-            "dataset_quality_latency": alias(rating, "dataset_quality_latency") or 0.0,
             "code_quality": alias(
                 rating, "code_quality", "CodeQuality", "score_code_quality"
             )
             or 0.0,
-            "code_quality_latency": alias(rating, "code_quality_latency") or 0.0,
             "reproducibility": alias(
                 rating, "reproducibility", "Reproducibility", "score_reproducibility"
             )
             or 0.0,
-            "reproducibility_latency": alias(rating, "reproducibility_latency") or 0.0,
             "reviewedness": alias(
                 rating, "reviewedness", "Reviewedness", "score_reviewedness"
             )
             or 0.0,
-            "reviewedness_latency": alias(rating, "reviewedness_latency") or 0.0,
             "tree_score": alias(rating, "treescore", "Treescore", "score_treescore")
             or 0.0,
-            "tree_score_latency": alias(rating, "tree_score_latency") or 0.0,
             "size_score": {
                 "raspberry_pi": alias(rating, "size_score", "raspberry_pi") or 0.0,
                 "jetson_nano": alias(rating, "size_score", "jetson_nano") or 0.0,
                 "desktop_pc": alias(rating, "size_score", "desktop_pc") or 0.0,
                 "aws_server": alias(rating, "size_score", "aws_server") or 0.0,
             },
-            "size_score_latency": alias(rating, "size_score_latency") or 0.0,
         }
         return result
     except HTTPException:

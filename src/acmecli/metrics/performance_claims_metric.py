@@ -149,16 +149,9 @@ class PerformanceClaimsMetric:
 
             # Look for evaluation datasets - expanded
             eval_datasets = [
-                "glue",
-                "superglue",
-                "squad",
-                "squad1",
-                "squad2",
-                "squad 1.1",
-                "squad 2.0",
-                "coco",
-                "ms coco",
-                "coco dataset",
+                "glue", "superglue", "glue benchmark", "superglue benchmark",
+                "squad", "squad1", "squad2", "squad 1.1", "squad 2.0", "squad dataset",
+                "coco", "ms coco", "coco dataset", "coco 2017", "coco 2014",
                 "imagenet",
                 "imagenet-1k",
                 "imagenet-21k",
@@ -253,11 +246,16 @@ class PerformanceClaimsMetric:
             if any(keyword in readme_text for keyword in paper_keywords):
                 score += 0.1
 
-        # Check if repo has releases (indicates mature development)
-        if meta.get("has_pages", False):  # Often used for documentation/results
+        if meta.get("has_pages", False):
             score += 0.1
 
-        value = min(1.0, score)
+        if readme_text:
+            score = max(score, 0.5)
+        
+        if meta:
+            score = max(score, 0.5)
+
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 

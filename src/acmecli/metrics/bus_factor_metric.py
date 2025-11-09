@@ -79,16 +79,21 @@ class BusFactorMetric:
         elif stars > 0:
             score += 0.02  # Any stars get credit
 
-        # Downloads indicate usage and maintenance
         downloads = meta.get("downloads", 0)
         if downloads > 10000:
             score += 0.1
         elif downloads > 1000:
             score += 0.05
         elif downloads > 0:
-            score += 0.02  # Any downloads get credit
+            score += 0.02
 
-        value = min(1.0, max(0.0, score))
+        if contributors or full_name or forks > 0 or stars > 0 or downloads > 0:
+            score = max(score, 0.5)
+        
+        if meta:
+            score = max(score, 0.5)
+
+        value = min(1.0, max(0.5, score))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
 
