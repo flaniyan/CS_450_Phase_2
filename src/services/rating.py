@@ -168,6 +168,13 @@ def analyze_model_content(
                             meta["readme_text"] = (
                                 description + "\n\n" + meta.get("readme_text", "")
                             )
+                    
+                    # Check description for GitHub URL early
+                    if description and not repo_url:
+                        from ..services.s3_service import extract_github_url_from_text
+                        repo_url = extract_github_url_from_text(description)
+                        if repo_url:
+                            print(f"[RATE] Found GitHub URL in description: {repo_url}")
                     # Extract tags/topics for better scoring
                     tags = hf_meta.get("tags", []) or hf_meta.get("cardData", {}).get(
                         "tags", []
@@ -194,36 +201,65 @@ def analyze_model_content(
                                 repo_url = github_field.get("url") or github_field.get(
                                     "repo"
                                 )
-                    if not repo_url:
-                        card_data = hf_meta.get("cardData", {})
-                        if isinstance(card_data, dict):
-                            readme_text = card_data.get("---", "")
-                            if isinstance(readme_text, str) and not meta.get(
-                                "readme_text"
-                            ):
-                                meta["readme_text"] = readme_text
-                            card_license = card_data.get("license", "")
-                            if card_license and not meta.get("license"):
-                                meta["license"] = card_license.lower()
-                            for key, value in card_data.items():
-                                if isinstance(value, str) and (
-                                    "github.com" in value.lower()
-                                    or "github" in key.lower()
+                        
+                        if not repo_url:
+                            card_data = hf_meta.get("cardData", {})
+                            if isinstance(card_data, dict):
+                                readme_text = card_data.get("---", "")
+                                if isinstance(readme_text, str) and not meta.get(
+                                    "readme_text"
                                 ):
+                                    meta["readme_text"] = readme_text
+                                card_license = card_data.get("license", "")
+                                if card_license and not meta.get("license"):
+                                    meta["license"] = card_license.lower()
+                                for key, value in card_data.items():
+                                    if isinstance(value, str) and (
+                                        "github.com" in value.lower()
+                                        or "github" in key.lower()
+                                    ):
+                                        github_match = re.search(
+                                            r"https?://github\.com/[\w\-\.]+/[\w\-\.]+",
+                                            value,
+                                        )
+                                        if github_match:
+                                            repo_url = github_match.group(0)
+                                            break
+                                        elif "/" in value and len(value.split("/")) == 2:
+                                            potential_repo = value.strip()
+                                            if not potential_repo.startswith("http"):
+                                                repo_url = (
+                                                    f"https://github.com/{potential_repo}"
+                                                )
+                                                break
+                        
+                        if not repo_url:
+                            import json
+                            hf_meta_str = json.dumps(hf_meta)
+                            from ..services.s3_service import extract_github_url_from_text
+                            repo_url = extract_github_url_from_text(hf_meta_str)
+                            if repo_url:
+                                print(f"[RATE] Found GitHub URL in HuggingFace metadata: {repo_url}")
+                        
+                        if not repo_url:
+                            tags = hf_meta.get("tags", []) or []
+                            for tag in tags:
+                                if isinstance(tag, str) and "github.com" in tag.lower():
                                     github_match = re.search(
                                         r"https?://github\.com/[\w\-\.]+/[\w\-\.]+",
-                                        value,
+                                        tag,
                                     )
                                     if github_match:
                                         repo_url = github_match.group(0)
                                         break
-                                    elif "/" in value and len(value.split("/")) == 2:
-                                        potential_repo = value.strip()
-                                        if not potential_repo.startswith("http"):
-                                            repo_url = (
-                                                f"https://github.com/{potential_repo}"
-                                            )
-                                            break
+                        
+                        if not repo_url:
+                            model_index = hf_meta.get("model_index", "")
+                            if isinstance(model_index, str):
+                                from ..services.s3_service import extract_github_url_from_text
+                                repo_url = extract_github_url_from_text(model_index)
+                                if repo_url:
+                                    print(f"[RATE] Found GitHub URL in model_index: {repo_url}")
                         if not repo_url:
                             print(f"[RATE] Searching entire zip file for GitHub URL...")
                             from ..services.s3_service import extract_github_url_from_zip

@@ -59,6 +59,36 @@ class HFHandler:
         meta["lastModified"] = meta.get("lastModified", "")
         meta["files"] = meta.get("siblings", [])
         meta["license"] = meta.get("cardData", {}).get("license", "")
+        
+        # Also try to fetch the model page HTML to extract GitHub link from the page
+        try:
+            page_url = f"https://huggingface.co/{model_id}"
+            request = Request(page_url, headers=self._headers)
+            with urlopen(request, timeout=10) as response:
+                html_content = response.read().decode("utf-8", errors="ignore")
+                # Look for GitHub links in the HTML
+                import re
+                github_patterns = [
+                    r'href=["\'](https?://github\.com/[\w\-\.]+/[\w\-\.]+)["\']',
+                    r'github\.com/([\w\-\.]+)/([\w\-\.]+)',
+                ]
+                for pattern in github_patterns:
+                    matches = re.findall(pattern, html_content, re.IGNORECASE)
+                    if matches:
+                        if isinstance(matches[0], tuple):
+                            owner, repo = matches[0]
+                            github_url = f"https://github.com/{owner}/{repo}"
+                        else:
+                            github_url = matches[0]
+                        if github_url and "github.com" in github_url:
+                            if "github" not in meta:
+                                meta["github"] = github_url
+                            elif not meta.get("github"):
+                                meta["github"] = github_url
+                            break
+        except Exception as e:
+            logging.debug("Could not fetch model page HTML for GitHub link: %s", e)
+        
         return meta
 
 
