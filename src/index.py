@@ -524,12 +524,16 @@ async def search_artifacts_by_regex(request: Request):
         # Search for models matching regex
         artifacts = []
         try:
+            # list_models already filters by name_regex using re.search() (substring match)
+            # This allows the regex pattern to match anywhere in the model name
             result = list_models(name_regex=regex_pattern, limit=1000)
             for model in result.get("models", []):
+                model_name = model.get("name", "")
+                # list_models already verified the regex match, so add all results
                 artifacts.append(
                     {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
+                        "name": model_name,
+                        "id": model.get("id", model_name),
                         "type": "model",
                     }
                 )
@@ -539,10 +543,14 @@ async def search_artifacts_by_regex(request: Request):
             )
 
         # Search artifacts in storage matching regex
+        # Require exact substring match - the regex pattern must appear as a substring
+        # This matches the behavior of list_models which uses re.search() for substring matching
+        compiled_pattern = re.compile(regex_pattern, re.IGNORECASE)
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
             try:
-                if re.search(regex_pattern, artifact_name):
+                # Use re.search() to match the pattern anywhere in the artifact name (substring match)
+                if compiled_pattern.search(artifact_name):
                     artifacts.append(
                         {
                             "name": artifact_name,
@@ -775,8 +783,16 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                             detail="Artifact is not registered due to the disqualified rating.",
                         )
 
-                    # Generate artifact ID and return success (per Artifact schema)
+                    # Generate artifact ID and store it for later retrieval
                     artifact_id = str(random.randint(1000000000, 9999999999))
+                    global _artifact_storage
+                    _artifact_storage[artifact_id] = {
+                        "name": model_id,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": artifact_id,
+                        "url": url,
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -806,6 +822,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
+                global _artifact_storage
+                _artifact_storage[artifact_id] = {
+                    "name": model_id,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                }
                 return Response(
                     content=json.dumps(
                         {
