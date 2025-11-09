@@ -95,18 +95,22 @@ def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> 
 
     exec(script_content, safe_globals)
 
-    if "validate" in safe_globals:
-        result = safe_globals["validate"](package_data)
+    if "validate" not in safe_globals:
+        raise ValueError("Validator script must define a validate() function")
+
+    result = safe_globals["validate"](package_data)
     return {"valid": True, "result": result}
 
 
 def _validator_worker(script: str, data: Dict[str, Any], queue: Queue):
     try:
-        queue.put({"status": "ok", "result": _run_validator_script(script, data)})
+        result = _run_validator_script(script, data)
+        if result:
+            queue.put({"status": "ok", "result": result})
+        else:
+            queue.put({"status": "error", "error": "Validator returned no result"})
     except Exception as exc:
         queue.put({"status": "error", "error": str(exc)})
-    else:
-        return {"valid": False, "error": "No validate function found"}
 
 
 def execute_validator(
