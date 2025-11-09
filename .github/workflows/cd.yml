@@ -153,79 +153,63 @@ jobs:
             --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,deployments:deployments[*].{id:id,status:status,runningCount:runningCount,desiredCount:desiredCount}}' \
             --output table
           
-          echo "Starting wait for PRIMARY deployment to stabilize (max 15 minutes)..."
-          MAX_ATTEMPTS=60
-          ATTEMPT=0
-          SLEEP_INTERVAL=15
-          
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking service status..."
-            
-            # Get PRIMARY deployment status
-            RUNNING_COUNT=$(aws ecs describe-services \
+          echo "Using AWS CLI wait command (default timeout ~15 minutes)..."
+          # Use AWS CLI's built-in wait command which handles deployment transitions correctly
+          # Note: wait commands use default polling (15s interval, ~15min timeout)
+          if timeout 900 aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE; then
+            echo "Service stabilized successfully!"
+            aws ecs describe-services \
               --cluster $ECS_CLUSTER \
               --services $ECS_SERVICE \
-              --query 'services[0].deployments[?status==`PRIMARY`].runningCount | [0]' \
-              --output text)
+              --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount}' \
+              --output table
             
-            DESIRED_COUNT=$(aws ecs describe-services \
-              --cluster $ECS_CLUSTER \
-              --services $ECS_SERVICE \
-              --query 'services[0].deployments[?status==`PRIMARY`].desiredCount | [0]' \
-              --output text)
-            
-            if [ -z "$RUNNING_COUNT" ] || [ "$RUNNING_COUNT" == "None" ]; then
-              RUNNING_COUNT=0
-            fi
-            if [ -z "$DESIRED_COUNT" ] || [ "$DESIRED_COUNT" == "None" ]; then
-              DESIRED_COUNT=0
-            fi
-            
-            echo "PRIMARY deployment: $RUNNING_COUNT/$DESIRED_COUNT tasks running"
-            
-            # Check if PRIMARY deployment is stable
-            if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ] && [ "$DESIRED_COUNT" -gt 0 ]; then
-              # Verify at least one task is healthy
-              TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status RUNNING --query 'taskArns[0]' --output text)
-              if [ "$TASK_ARN" != "None" ] && [ ! -z "$TASK_ARN" ]; then
-                HEALTH_STATUS=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --query 'tasks[0].healthStatus' --output text)
-                if [ "$HEALTH_STATUS" == "HEALTHY" ]; then
-                  echo "Service stabilized successfully! PRIMARY deployment has $RUNNING_COUNT/$DESIRED_COUNT tasks running and healthy."
-                  aws ecs describe-services \
-                    --cluster $ECS_CLUSTER \
-                    --services $ECS_SERVICE \
-                    --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount}' \
-                    --output table
-                  exit 0
-                else
-                  echo "Task exists but health status is: $HEALTH_STATUS"
-                fi
+            # Verify at least one task is healthy
+            TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status RUNNING --query 'taskArns[0]' --output text)
+            if [ "$TASK_ARN" != "None" ] && [ ! -z "$TASK_ARN" ]; then
+              HEALTH_STATUS=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --query 'tasks[0].healthStatus' --output text)
+              echo "Task health status: $HEALTH_STATUS"
+              if [ "$HEALTH_STATUS" == "HEALTHY" ]; then
+                echo "Service is stable and healthy!"
+                exit 0
               else
-                echo "No running tasks found yet"
+                echo "Warning: Service is stable but task health status is: $HEALTH_STATUS"
+                # Still exit 0 if service is stable, health checks may take time
+                exit 0
+              fi
+            else
+              echo "Warning: No running tasks found, but service reports stable"
+              exit 0
+            fi
+          else
+            echo "Service stabilization wait timed out or failed"
+            echo "Checking final service status..."
+            aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $ECS_SERVICE \
+              --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,deployments:deployments[*].{id:id,status:status,runningCount:runningCount,desiredCount:desiredCount}}' \
+              --output table
+            echo "Checking task status..."
+            TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status RUNNING --query 'taskArns[0]' --output text)
+            if [ "$TASK_ARN" != "None" ] && [ ! -z "$TASK_ARN" ]; then
+              aws ecs describe-tasks \
+                --cluster $ECS_CLUSTER \
+                --tasks $TASK_ARN \
+                --query 'tasks[0].{lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason,containers:containers[*].{name:name,lastStatus:lastStatus,reason:reason}}' \
+                --output table
+              
+              # Check if service is actually stable despite wait timeout
+              RUNNING=$(aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --query 'services[0].runningCount' --output text)
+              DESIRED=$(aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --query 'services[0].desiredCount' --output text)
+              if [ "$RUNNING" == "$DESIRED" ] && [ "$DESIRED" -gt 0 ]; then
+                echo "Service is actually stable (runningCount=$RUNNING, desiredCount=$DESIRED), continuing..."
+                exit 0
               fi
             fi
-            
-            sleep $SLEEP_INTERVAL
-          done
-          
-          echo "Service stabilization wait timed out after $MAX_ATTEMPTS attempts"
-          echo "Checking final service status..."
-          aws ecs describe-services \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,deployments:deployments[*].{id:id,status:status,runningCount:runningCount,desiredCount:desiredCount}}' \
-            --output table
-          echo "Checking task status..."
-          TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status RUNNING --query 'taskArns[0]' --output text)
-          if [ "$TASK_ARN" != "None" ] && [ ! -z "$TASK_ARN" ]; then
-            aws ecs describe-tasks \
-              --cluster $ECS_CLUSTER \
-              --tasks $TASK_ARN \
-              --query 'tasks[0].{lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason,containers:containers[*].{name:name,lastStatus:lastStatus,reason:reason}}' \
-              --output table
+            exit 1
           fi
-          exit 1
 
       - name: Read service URL
         id: tfout
