@@ -31,6 +31,7 @@ def stub_cloudwatch(monkeypatch):
 
 
 def test_execute_validator_success(monkeypatch, stub_cloudwatch):
+    """Checker path: validator returns result and no metrics emitted."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "2")
     script = """
 def validate(package):
@@ -43,6 +44,7 @@ def validate(package):
 
 
 def test_execute_validator_timeout(monkeypatch, stub_cloudwatch):
+    """Validator loops forever; ensure timeout triggers metric and failure."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "1")
     script = """
 def validate(package):
@@ -59,6 +61,7 @@ def validate(package):
 
 
 def test_execute_validator_missing_validate(monkeypatch, stub_cloudwatch):
+    """Script lacks validate(); service should reject with clear message."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "2")
     script = """
 def not_validate(package):
@@ -71,6 +74,7 @@ def not_validate(package):
 
 
 def test_execute_validator_syntax_error(monkeypatch, stub_cloudwatch):
+    """Broken Python should surface syntax error without metrics."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "2")
     script = "def validate(:\n    pass"
     result = execute_validator(script, {})
@@ -80,6 +84,7 @@ def test_execute_validator_syntax_error(monkeypatch, stub_cloudwatch):
 
 
 def test_execute_validator_exception(monkeypatch, stub_cloudwatch):
+    """Validator raises runtime error; service must propagate message."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "2")
     script = """
 def validate(package):
@@ -92,6 +97,7 @@ def validate(package):
 
 
 def test_execute_validator_no_result(monkeypatch, stub_cloudwatch):
+    """validate() returning None should count as invalid and give error."""
     monkeypatch.setenv("VALIDATOR_TIMEOUT_SEC", "2")
     script = """
 def validate(package):
