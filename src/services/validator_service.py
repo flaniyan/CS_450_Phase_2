@@ -90,6 +90,8 @@ def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> 
             "zip": zip,
             "range": range,
             "print": print,
+            "Exception": Exception,
+            "RuntimeError": RuntimeError,
         }
     }
 
@@ -99,6 +101,9 @@ def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> 
         raise ValueError("Validator script must define a validate() function")
 
     result = safe_globals["validate"](package_data)
+    if result is None:
+        raise ValueError("Validator returned no result")
+
     return {"valid": True, "result": result}
 
 
