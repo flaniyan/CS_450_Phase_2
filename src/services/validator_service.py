@@ -7,15 +7,20 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import os
 from datetime import datetime, timezone
+from multiprocessing import get_context
+from multiprocessing.queues import Queue
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
 s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+cloudwatch = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
 # Environment variables
 ARTIFACTS_BUCKET = os.getenv("ARTIFACTS_BUCKET", "pkg-artifacts")
 PACKAGES_TABLE = os.getenv("DDB_TABLE_PACKAGES", "packages")
 DOWNLOADS_TABLE = os.getenv("DDB_TABLE_DOWNLOADS", "downloads")
+METRIC_NAMESPACE = os.getenv("VALIDATOR_METRIC_NAMESPACE", "ValidatorService")
+METRIC_NAME_TIMEOUT = os.getenv("VALIDATOR_TIMEOUT_METRIC_NAME", "validator.timeout.count")
 
 app = FastAPI(title="Package Validator Service", version="1.0.0")
 security = HTTPBearer()
@@ -64,48 +69,96 @@ def get_validator_script(pkg_name: str, version: str) -> Optional[str]:
         return None
 
 
+def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> Dict[str, Any]:
+    safe_globals = {
+        "__builtins__": {
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "list": list,
+            "dict": dict,
+            "tuple": tuple,
+            "set": set,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "any": any,
+            "all": all,
+            "enumerate": enumerate,
+            "zip": zip,
+            "range": range,
+            "print": print,
+            "Exception": Exception,
+            "RuntimeError": RuntimeError,
+        }
+    }
+
+    exec(script_content, safe_globals)
+
+    if "validate" not in safe_globals:
+        raise ValueError("Validator script must define a validate() function")
+
+    result = safe_globals["validate"](package_data)
+    if result is None:
+        raise ValueError("Validator returned no result")
+
+    return {"valid": True, "result": result}
+
+
+def _validator_worker(script: str, data: Dict[str, Any], queue: Queue):
+    try:
+        result = _run_validator_script(script, data)
+        if result:
+            queue.put({"status": "ok", "result": result})
+        else:
+            queue.put({"status": "error", "error": "Validator returned no result"})
+    except Exception as exc:
+        queue.put({"status": "error", "error": str(exc)})
+
+
 def execute_validator(
     script_content: str, package_data: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Execute validator script safely"""
-    try:
-        # Create a safe execution environment
-        safe_globals = {
-            "__builtins__": {
-                "len": len,
-                "str": str,
-                "int": int,
-                "float": float,
-                "bool": bool,
-                "list": list,
-                "dict": dict,
-                "tuple": tuple,
-                "set": set,
-                "min": min,
-                "max": max,
-                "sum": sum,
-                "any": any,
-                "all": all,
-                "enumerate": enumerate,
-                "zip": zip,
-                "range": range,
-                "print": print,
-            }
+    """Execute validator script safely with a timeout to prevent DoS."""
+    timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
+    ctx = get_context("spawn")
+    queue: Queue = ctx.Queue()
+    process = ctx.Process(target=_validator_worker, args=(script_content, package_data, queue))
+    process.start()
+    process.join(timeout)
+
+    if process.is_alive():
+        logging.error("Validator execution timed out after %s seconds", timeout)
+        process.terminate()
+        process.join()
+        try:
+            cloudwatch.put_metric_data(
+                Namespace=METRIC_NAMESPACE,
+                MetricData=[
+                    {
+                        "MetricName": METRIC_NAME_TIMEOUT,
+                        "Timestamp": datetime.now(timezone.utc),
+                        "Value": 1,
+                        "Unit": "Count",
+                    }
+                ],
+            )
+        except Exception as metric_error:
+            logging.warning("Failed to publish timeout metric: %s", metric_error)
+        return {
+            "valid": False,
+            "error": f"Validator execution timed out after {timeout} seconds",
         }
 
-        # Execute the validator script
-        exec(script_content, safe_globals)
+    if not queue.empty():
+        message = queue.get()
+        if message.get("status") == "ok":
+            return message["result"]
+        return {"valid": False, "error": message.get("error", "Unknown validator error")}
 
-        # Call the validate function if it exists
-        if "validate" in safe_globals:
-            result = safe_globals["validate"](package_data)
-            return {"valid": True, "result": result}
-        else:
-            return {"valid": False, "error": "No validate function found"}
-
-    except Exception as e:
-        logging.error(f"Validator execution error: {e}")
-        return {"valid": False, "error": str(e)}
+    return {"valid": False, "error": "Validator returned no result"}
 
 
 def log_download_event(

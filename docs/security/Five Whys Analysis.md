@@ -1,12 +1,4 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
 # 🧩 Five Whys Analysis — Trustworthy Module Registry
-=======
-# 🧩 Five Whys Analysis
->>>>>>> 3e5b6f144d5ac92802d2ae2a7086fdbe1a4bc7a5
-=======
-# 🧩 Five Whys Analysis — Trustworthy Module Registry
->>>>>>> eda6b84d50b63949d957cac35c29c2f1018e278d
 
 This document applies the **Five Whys** root-cause method to four potential security issues discovered during STRIDE analysis.  
 Each issue traces its failure chain to an underlying cause and proposes an actionable mitigation.
@@ -27,7 +19,7 @@ A user could still access package endpoints with an expired or tampered JWT.
 | **5. Why was that choice made?**         | Limited familiarity with API Gateway authorizers and reuse patterns.                      |
 
 **Root Cause:** Authentication not centralized across all endpoints.  
-**Fix:** Implement a **shared JWT-verification middleware** or API Gateway **Lambda Authorizer**; enforce token expiry and signature validation on every call.
+**Fix:** Introduced a shared `verify_auth_token` helper that calls `verify_jwt_token`, rejects forged or expired tokens with HTTP 403, and attaches claims to `request.state`.
 
 ---
 
@@ -45,8 +37,7 @@ Lambda functions could access all S3 objects or DynamoDB tables rather than leas
 | **5. Why was that omitted?**                 | Team unfamiliar with Terraform’s `aws_iam_policy_document` blocks. |
 
 **Root Cause:** Over-permissive IAM role design.  
-**Fix:** Replace broad policies with **resource-scoped IAM roles** (S3 prefix restrictions and DynamoDB table-specific actions).  
-Run `terraform plan` + `terraform validate` to confirm least privilege.
+**Fix:** Terraform now provisions IAM policies scoped to specific S3 prefixes (`packages/*`, `validator/inputs/*`), DynamoDB tables, and KMS keys. Terratest guard ensures no `Action="*"` / `Resource="*"` in policy docs.
 
 ---
 
@@ -64,7 +55,7 @@ Validator Service stores a temp `.zip` for analysis before deletion; file may re
 | **5. Why was that de-prioritized?** | Misjudged risk assuming AWS ECS automatically wiped disks.        |
 
 **Root Cause:** Assumed ephemeral storage instead of enforcing cleanup.  
-**Fix:** Encrypt temp files with `crypto.subtle` or Node `fs` streams using **KMS data keys**, and **delete temp files** in a finally block or ECS task epilogue.
+**Fix:** Current code streams validator scripts directly from S3 without writing temp files, so risk is mitigated by design; no additional action required.
 
 ---
 
@@ -82,7 +73,7 @@ A malicious validator script could loop indefinitely, consuming CPU and blocking
 | **5. Why was this misunderstood?**   | Lack of detailed reading of ECS task-definition runtime limits.      |
 
 **Root Cause:** Missing per-validator timeout enforcement.  
-**Fix:** Run validators inside **isolated Node.js worker threads** with a `setTimeout` kill (≤ 5 s) or configure **ECS task `stopTimeout`** to 5 seconds max.
+**Fix:** `execute_validator` launches validators in a subprocess with configurable timeout (`VALIDATOR_TIMEOUT_SEC`, default 5 s). If the script hangs, the child process is terminated and the API responds with a timeout error. Regression tests live in `tests/unit/test_validator_timeout.py`.
 
 ---
 
