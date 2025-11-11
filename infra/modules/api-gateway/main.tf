@@ -129,6 +129,18 @@ resource "aws_api_gateway_resource" "authenticate" {
   path_part   = "authenticate"
 }
 
+resource "aws_api_gateway_resource" "package" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
+  path_part   = "package"
+}
+
+resource "aws_api_gateway_resource" "package_id" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.package.id
+  path_part   = "{id}"
+}
+
 resource "aws_api_gateway_resource" "tracks" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
@@ -418,6 +430,81 @@ resource "aws_api_gateway_integration" "authenticate_put" {
   integration_http_method = "PUT"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/authenticate"
+}
+
+# GET /package/{id}
+resource "aws_api_gateway_method" "package_id_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_resource.package_id.id
+  http_method   = "GET"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.id" = true
+  }
+}
+
+resource "aws_api_gateway_integration" "package_id_get" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.package_id.id
+  http_method = aws_api_gateway_method.package_id_get.http_method
+
+  integration_http_method = "GET"
+  type                    = "HTTP"
+  uri                     = "${var.validator_service_url}/package/{id}"
+
+  request_parameters = {
+    "integration.request.path.id" = "method.request.path.id"
+  }
+
+  passthrough_behavior = "WHEN_NO_MATCH"
+}
+
+resource "aws_api_gateway_method_response" "package_id_get_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.package_id.id
+  http_method = aws_api_gateway_method.package_id_get.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "package_id_get_404" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.package_id.id
+  http_method = aws_api_gateway_method.package_id_get.http_method
+  status_code = "404"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "package_id_get_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.package_id.id
+  http_method = aws_api_gateway_method.package_id_get.http_method
+  status_code = aws_api_gateway_method_response.package_id_get_200.status_code
+
+  depends_on = [
+    aws_api_gateway_integration.package_id_get,
+    aws_api_gateway_method_response.package_id_get_200,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "package_id_get_404" {
+  rest_api_id        = aws_api_gateway_rest_api.main_api.id
+  resource_id        = aws_api_gateway_resource.package_id.id
+  http_method        = aws_api_gateway_method.package_id_get.http_method
+  status_code        = aws_api_gateway_method_response.package_id_get_404.status_code
+  selection_pattern  = "404"
+
+  depends_on = [
+    aws_api_gateway_integration.package_id_get,
+    aws_api_gateway_method_response.package_id_get_404,
+  ]
 }
 
 # GET /tracks
@@ -1334,6 +1421,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.artifacts_post,
     aws_api_gateway_integration.reset_delete,
     aws_api_gateway_integration.authenticate_put,
+    aws_api_gateway_integration.package_id_get,
     aws_api_gateway_integration.tracks_get,
     aws_api_gateway_integration.admin_get,
     aws_api_gateway_integration.directory_get,
@@ -1358,6 +1446,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.artifact_directory_get,
     aws_api_gateway_integration.artifact_byname_name_get,
     aws_api_gateway_integration.artifact_byregex_post,
+    aws_api_gateway_integration_response.package_id_get_200,
+    aws_api_gateway_integration_response.package_id_get_404,
     aws_api_gateway_integration_response.artifacts_options_200,
     aws_api_gateway_integration_response.artifact_type_options_200,
     aws_api_gateway_integration_response.authenticate_options_200,
@@ -1373,6 +1463,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_resource.artifacts.id,
       aws_api_gateway_resource.reset.id,
       aws_api_gateway_resource.authenticate.id,
+      aws_api_gateway_resource.package.id,
+      aws_api_gateway_resource.package_id.id,
       aws_api_gateway_resource.tracks.id,
       aws_api_gateway_resource.admin.id,
       aws_api_gateway_resource.directory.id,
@@ -1428,6 +1520,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_method.artifact_byname_name_get.id,
       aws_api_gateway_method.artifact_byregex_post.id,
       aws_api_gateway_method.root_get.id,
+      aws_api_gateway_method.package_id_get.id,
       # Integrations
       aws_api_gateway_integration.root_get.id,
       aws_api_gateway_integration.health_get.id,
@@ -1436,6 +1529,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_integration.artifacts_post.id,
       aws_api_gateway_integration.reset_delete.id,
       aws_api_gateway_integration.authenticate_put.id,
+      aws_api_gateway_integration.package_id_get.id,
       aws_api_gateway_integration.tracks_get.id,
       aws_api_gateway_integration.artifact_type_get.id,
       aws_api_gateway_integration.artifact_type_post.id,
