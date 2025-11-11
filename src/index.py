@@ -38,6 +38,9 @@ from .services.s3_service import (
     s3,
     ap_arn,
     model_ingestion,
+    sanitize_model_id,
+    store_model_metadata,
+    get_model_metadata,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import (
@@ -412,7 +415,7 @@ def reset_system(request: Request):
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 
-@app.get("/artifact/byName/{name}")
+@app.get("/artifact/byName/{name:path}")
 def get_artifact_by_name(name: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -429,22 +432,25 @@ def get_artifact_by_name(name: str, request: Request):
 
         # Search for models with matching name
         escaped_name = re.escape(name)
-        name_pattern = f"^{escaped_name}$"
+        sanitized_name = sanitize_model_id(name)
+        name_pattern = f"^{re.escape(sanitized_name)}$"
         result = list_models(name_regex=name_pattern, limit=1000)
         artifacts = []
 
-        # Add models from S3
         for model in result.get("models", []):
-            if model.get("name") == name:  # Exact match
+            model_id = model.get("name")
+            metadata = get_model_metadata(model_id) or {}
+            display_name = metadata.get("name", name)
+            if display_name == name:
                 artifacts.append(
                     {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
-                        "type": "model",
+                        "name": display_name,
+                        "id": metadata.get("id", model_id),
+                        "type": metadata.get("type", "model"),
                     }
                 )
 
-        # Add artifacts from storage (non-model artifacts)
+        # Add artifacts from storage (non-model artifacts or cached models)
         for artifact_id, artifact in _artifact_storage.items():
             if artifact.get("name") == name:  # Exact match
                 artifacts.append(
@@ -521,28 +527,32 @@ async def search_artifacts_by_regex(request: Request):
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
 
+        compiled_pattern = re.compile(regex_pattern)
+
         # Search for models matching regex
         artifacts = []
         try:
-            result = list_models(name_regex=regex_pattern, limit=1000)
-            for model in result.get("models", []):
-                artifacts.append(
-                    {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
-                        "type": "model",
-                    }
-                )
+            models_response = list_models(limit=1000)
+            for model in models_response.get("models", []):
+                model_id = model.get("name")
+                metadata = get_model_metadata(model_id) or {}
+                candidate_name = metadata.get("name", model_id)
+                if compiled_pattern.search(candidate_name):
+                    artifacts.append(
+                        {
+                            "name": candidate_name,
+                            "id": metadata.get("id", model_id),
+                            "type": metadata.get("type", "model"),
+                        }
+                    )
         except Exception as e:
-            logger.warning(
-                f"Error searching models with regex {regex_pattern}: {str(e)}"
-            )
+            logger.warning(f"Error searching models with regex {regex_pattern}: {str(e)}")
 
         # Search artifacts in storage matching regex
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
             try:
-                if re.search(regex_pattern, artifact_name):
+                if compiled_pattern.search(artifact_name):
                     artifacts.append(
                         {
                             "name": artifact_name,
@@ -580,8 +590,12 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
     try:
         if artifact_type == "model":
-            if id in _artifact_storage:
-                artifact = _artifact_storage[id]
+            artifact = _artifact_storage.get(id)
+            if not artifact:
+                artifact = get_model_metadata(id)
+                if artifact:
+                    _artifact_storage[id] = artifact
+            if artifact:
                 return {
                     "metadata": {
                         "name": artifact.get("name", id),
@@ -750,7 +764,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Check if artifact already exists
                 try:
                     existing = list_models(
-                        name_regex=f"^{re.escape(model_id)}$", limit=1
+                        name_regex=f"^{re.escape(sanitize_model_id(model_id))}$", limit=1
                     )
                     if existing.get("models"):
                         raise HTTPException(
@@ -777,9 +791,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                             detail="Artifact is not registered due to the disqualified rating.",
                         )
 
-                    # Generate artifact ID and return success (per Artifact schema)
-                    artifact_id = str(random.randint(1000000000, 9999999999))
-                    _artifact_storage[artifact_id] = {
+                    artifact_id = sanitize_model_id(model_id)
+                    metadata_entry = {
                         "name": model_id,
                         "type": artifact_type,
                         "version": version,
@@ -787,6 +800,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         "url": url,
                         "source": "huggingface",
                     }
+                    _artifact_storage[artifact_id] = metadata_entry
+                    store_model_metadata(model_id, metadata_entry)
                     return Response(
                         content=json.dumps(
                             {
@@ -815,8 +830,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             else:
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
-                artifact_id = str(random.randint(1000000000, 9999999999))
-                _artifact_storage[artifact_id] = {
+                artifact_id = sanitize_model_id(model_id)
+                metadata_entry = {
                     "name": model_id,
                     "type": artifact_type,
                     "version": version,
@@ -824,6 +839,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     "url": url,
                     "source": "direct",
                 }
+                _artifact_storage[artifact_id] = metadata_entry
+                store_model_metadata(model_id, metadata_entry)
                 return Response(
                     content=json.dumps(
                         {
