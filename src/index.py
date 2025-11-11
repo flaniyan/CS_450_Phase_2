@@ -680,6 +680,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
+
+    global _artifact_storage
     
     # Validate artifact_type
     if artifact_type not in ["model", "dataset", "code"]:
@@ -723,7 +725,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         else:
             name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
-            global _artifact_storage
             # Determine model_id from name or URL
             model_id = None
             
