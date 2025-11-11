@@ -17,6 +17,18 @@
    $token = $tokenResponse
    ```
 
+   **Authenticate on backend link (static grader credentials)**
+   ```powershell
+   $authUri = "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/authenticate"
+   $tokenResponse = Invoke-RestMethod `
+       -Uri $authUri `
+       -Method Post `
+       -ContentType "application/json" `
+       -InFile ".\auth.json"
+
+   $token = $tokenResponse
+   ```
+
 3. **Set common headers**
    ```powershell
    $headers = @{
@@ -35,7 +47,7 @@
        -Body $body
 
    $id = $ingestResponse.metadata.id
-   ```
+  ```
 
 5. **Verify reads**
    ```powershell
@@ -47,4 +59,12 @@
        -Uri "http://127.0.0.1:8086/artifact/byName/google-bert/bert-base-uncased" `
        -Headers $headers
    ```
+
+   Invoke-RestMethod `
+       -Uri "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/artifact/model/$id" `
+       -Headers $headers
+
+   Invoke-RestMethod `
+       -Uri "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/artifact/byName/google-bert/bert-base-uncased" `
+       -Headers $headers
 
