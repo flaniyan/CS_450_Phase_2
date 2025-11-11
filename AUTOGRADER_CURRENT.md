@@ -1,9 +1,22 @@
-This link will help you access all the logs:
-https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/API-Gateway-Execution-Logs_1q1x0d7k93$252Fprod/log-events/7887381aabb0afd610c0dc228d877154
+## Current Autograder Status (Phase 2)
 
-Once you run autograder you can then see exactly what is failing and why
+- Latest run: 39 / 84  
+- Logs: https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/API-Gateway-Execution-Logs_1q1x0d7k93$252Fprod/log-events/7887381aabb0afd610c0dc228d877154
 
-We are currenlty 25/84 on autograder
+### Issues
+- 2025-11-11T03:45:50Z `GET /package/invalidId` → backend returned 404 but API Gateway only has a 200 method response, causing config error and 500 to client.
+- 2025-11-09T23:08:46Z `POST /artifact/byRegEx` with regex `google-research-bert` → backend 404 “No artifact found under this regex.” (no matching artifacts ingested).
+- 2025-11-09T23:08:47Z `POST /artifact/byRegEx` with regex `ece461rules` → backend 404 “No artifact found under this regex.” (no records matched pattern).
+- 2025-11-09T23:08:48Z `POST /artifact/byRegEx` with regex `(a{1,99999}){1,99999}$` → backend 404 “No artifact found under this regex.” (stress regex returns empty set).
+- 2025-11-09T23:09:04Z `GET /artifact/model/8228642810` → backend 404 “Artifact does not exist.” (ID not persisted).
+- 2025-11-09T23:09:05Z `GET /artifact/model/8510140450` → backend 404 “Artifact does not exist.” (second lookup failure).
+- 2025-11-09T23:09:08Z `GET /artifact/model/3023340011` → backend 404 “Artifact does not exist.” (ID missing from storage/S3).
+- 2025-11-09T23:09:16Z `GET /artifact/model/8412004283` → backend 404 “Artifact does not exist.” (ID missing from storage/S3).
+- 2025-11-09T23:09:09Z `GET /artifact/model/6514529035` → backend 404 “Artifact does not exist.” (additional missing model record).
+- 2025-11-09T23:09:11Z `GET /artifact/model/5948785717` → backend 404 “Artifact does not exist.” (missing persisted entry).
+- 2025-11-09T23:09:13Z `GET /artifact/model/1336304314` → backend 404 “Artifact does not exist.” (missing persisted entry).
+- 2025-11-09T23:09:15Z `GET /artifact/model/5097499038` → backend 404 “Artifact does not exist.” (missing persisted entry).
+
 
 
 RECENT LOG:

@@ -967,6 +967,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
             # This would typically involve re-downloading and re-processing the artifact
             return Response(status_code=200)
         else:
+            global _artifact_storage
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 if artifact.get("type") == artifact_type:
@@ -1006,6 +1007,7 @@ def delete_artifact(artifact_type: str, id: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
+        global _artifact_storage
         deleted = False
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
