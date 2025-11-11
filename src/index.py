@@ -680,6 +680,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
+
+    global _artifact_storage
     
     # Validate artifact_type
     if artifact_type not in ["model", "dataset", "code"]:
@@ -777,6 +779,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
 
                     # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
+                    _artifact_storage[artifact_id] = {
+                        "name": model_id,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": artifact_id,
+                        "url": url,
+                        "source": "huggingface",
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -806,6 +816,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
+                _artifact_storage[artifact_id] = {
+                    "name": model_id,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                    "source": "direct",
+                }
                 return Response(
                     content=json.dumps(
                         {
@@ -822,7 +840,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
-            global _artifact_storage
             artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
             
             # Check if artifact already exists
