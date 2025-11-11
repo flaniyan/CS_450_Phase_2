@@ -5,7 +5,6 @@ import os
 import json
 from starlette.datastructures import UploadFile
 import uvicorn
-import random
 import logging
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
@@ -41,6 +40,9 @@ from .services.s3_service import (
     sanitize_model_id,
     store_model_metadata,
     get_model_metadata,
+    store_generic_artifact_metadata,
+    get_generic_artifact_metadata,
+    aws_available,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import (
@@ -436,6 +438,7 @@ def get_artifact_by_name(name: str, request: Request):
         name_pattern = f"^{re.escape(sanitized_name)}$"
         result = list_models(name_regex=name_pattern, limit=1000)
         artifacts = []
+        seen_ids = set()
 
         for model in result.get("models", []):
             model_id = model.get("name")
@@ -449,17 +452,35 @@ def get_artifact_by_name(name: str, request: Request):
                         "type": metadata.get("type", "model"),
                     }
                 )
+                seen_ids.add(metadata.get("id", model_id))
+
+        if aws_available:
+            candidate_id = sanitize_model_id(name)
+            for artifact_type in ["dataset", "code"]:
+                metadata = get_generic_artifact_metadata(artifact_type, candidate_id)
+                if metadata and metadata.get("name") == name:
+                    artifacts.append(
+                        {
+                            "name": metadata.get("name", name),
+                            "id": metadata.get("id", candidate_id),
+                            "type": metadata.get("type", artifact_type),
+                        }
+                    )
+                    seen_ids.add(metadata.get("id", candidate_id))
+                    _artifact_storage[metadata.get("id", candidate_id)] = metadata
 
         # Add artifacts from storage (non-model artifacts or cached models)
-        for artifact_id, artifact in _artifact_storage.items():
-            if artifact.get("name") == name:  # Exact match
-                artifacts.append(
-                    {
-                        "name": artifact.get("name", artifact_id),
-                        "id": artifact_id,
-                        "type": artifact.get("type", "model"),
-                    }
-                )
+        if not aws_available:
+            for artifact_id, artifact in _artifact_storage.items():
+                if artifact.get("name") == name and artifact_id not in seen_ids:
+                    artifacts.append(
+                        {
+                            "name": artifact.get("name", artifact_id),
+                            "id": artifact_id,
+                            "type": artifact.get("type", "model"),
+                        }
+                    )
+                    seen_ids.add(artifact_id)
 
         if not artifacts:
             raise HTTPException(status_code=404, detail="No such artifact.")
@@ -654,8 +675,14 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 "data": {"url": f"https://huggingface.co/{id}"},
             }
         else:
-            if id in _artifact_storage:
-                artifact = _artifact_storage[id]
+            artifact = None
+            if aws_available:
+                artifact = get_generic_artifact_metadata(artifact_type, id)
+                if artifact:
+                    _artifact_storage[id] = artifact
+            if not artifact and not aws_available:
+                artifact = _artifact_storage.get(id)
+            if artifact:
                 return {
                     "metadata": {
                         "name": artifact.get("name", id),
@@ -663,9 +690,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         "type": artifact_type,
                     },
                     "data": {
-                        "url": artifact.get(
-                            "url", f"https://example.com/{artifact_type}/{id}"
-                        )
+                        "url": artifact.get("url"),
                     },
                 }
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
@@ -858,37 +883,41 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
             artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
-            
-            # Check if artifact already exists
+            if not url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
+                )
+
+            artifact_id = sanitize_model_id(artifact_name)
+            existing_metadata = (
+                get_generic_artifact_metadata(artifact_type, artifact_id)
+                if aws_available
+                else None
+            )
+            if existing_metadata:
+                raise HTTPException(status_code=409, detail="Artifact exists already.")
             for existing_id, existing_artifact in _artifact_storage.items():
-                if (
+                if existing_artifact.get("type") == artifact_type and (
                     existing_artifact.get("url") == url
-                    and existing_artifact.get("type") == artifact_type
-                ) or (
-                    existing_artifact.get("name") == artifact_name
-                    and existing_artifact.get("type") == artifact_type
+                    or existing_artifact.get("name") == artifact_name
                 ):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
                     )
-            
-            # If URL not provided but name is, construct URL
-            if not url:
-                url = f"https://example.com/{artifact_type}/{artifact_name}"
-            
-            # For dataset/code ingestion, we validate and store
-            # In a full implementation, you might download, validate structure, etc.
-            # For now, we perform basic validation and storage
-            artifact_id = str(random.randint(1000000000, 9999999999))
-            
-            _artifact_storage[artifact_id] = {
+
+            metadata_entry = {
                 "name": artifact_name,
                 "type": artifact_type,
                 "version": version,
                 "id": artifact_id,
                 "url": url,
+                "source": "direct",
             }
-            
+
+            _artifact_storage[artifact_id] = metadata_entry
+            store_generic_artifact_metadata(artifact_type, artifact_id, metadata_entry)
+
             return Response(
                 content=json.dumps(
                     {

@@ -49,6 +49,15 @@
    $id = $ingestResponse.metadata.id
   ```
 
+   $body = '{"url":"https://huggingface.co/google-bert/bert-base-uncased"}'
+   $ingestResponse = Invoke-RestMethod `
+       -Uri "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/artifact/model" `
+       -Method Post `
+       -Headers $headers `
+       -Body $body
+
+   $id = $ingestResponse.metadata.id
+
 5. **Verify reads**
    ```powershell
    Invoke-RestMethod `

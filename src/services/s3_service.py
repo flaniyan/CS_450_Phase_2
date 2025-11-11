@@ -350,6 +350,41 @@ def get_model_metadata(model_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def store_generic_artifact_metadata(
+    artifact_type: str, artifact_id: str, metadata: Dict[str, Any]
+) -> None:
+    if not aws_available:
+        return
+    try:
+        safe_artifact_id = sanitize_model_id(artifact_id)
+        key = f"artifacts/{artifact_type}/{safe_artifact_id}/metadata.json"
+        s3.put_object(
+            Bucket=ap_arn,
+            Key=key,
+            Body=json.dumps(metadata).encode("utf-8"),
+            ContentType="application/json",
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to store {artifact_type} metadata for {artifact_id}: {e}"
+        )
+
+
+def get_generic_artifact_metadata(
+    artifact_type: str, artifact_id: str
+) -> Optional[Dict[str, Any]]:
+    if not aws_available:
+        return None
+    try:
+        safe_artifact_id = sanitize_model_id(artifact_id)
+        key = f"artifacts/{artifact_type}/{safe_artifact_id}/metadata.json"
+        response = s3.get_object(Bucket=ap_arn, Key=key)
+        data = response["Body"].read().decode("utf-8")
+        return json.loads(data)
+    except Exception:
+        return None
+
+
 _model_card_cache = {}
 
 
