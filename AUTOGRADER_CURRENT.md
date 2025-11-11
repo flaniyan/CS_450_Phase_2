@@ -103,3 +103,17 @@ RECENT LOG:
 11/09/25 11:09:17 PM : Test Result : Total score: 9 / 45 
 
 11/09/25 11:09:17 PM : Test Result : Total score: 44 / 84 
+
+Ethan's Analysis of errors at 44/84 state
+A majoirty of our errors come from trying to find artifact by a parameter
+Starting with name, when we ingest a model via POST /Artificat/model, it assigns it a random numeric value, but never a mapping
+
+Essentially, we are genearting a random ID and never saving the metadata under that key. 
+
+Soultion: Persist artifact metadata, keyed by the returned metadata.id
+
+How are we currenlty storign metadata? src/index.py has in-mem dict. There is no metadata that is persisted. 
+
+The easiest way is to take our in-mem metadata and insert an entry in _artifcat_storage keyed by gen ID with artifacts name/type/url/version
+
+Endpoints should consult a map first

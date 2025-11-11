@@ -723,6 +723,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         else:
             name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
+            global _artifact_storage
             # Determine model_id from name or URL
             model_id = None
             
@@ -777,6 +778,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
 
                     # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
+                    _artifact_storage[artifact_id] = {
+                        "name": model_id,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": artifact_id,
+                        "url": url,
+                        "source": "huggingface",
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -806,6 +815,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
+                _artifact_storage[artifact_id] = {
+                    "name": model_id,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                    "source": "direct",
+                }
                 return Response(
                     content=json.dumps(
                         {
