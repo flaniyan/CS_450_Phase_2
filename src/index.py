@@ -942,12 +942,13 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             # If we have a stored version, try that first
             if stored_version:
                 logger.info(f"DEBUG: Trying stored version first: '{stored_version}'")
+                # Sanitize version for S3 key (same as upload_model)
+                safe_version = stored_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
+                logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                 try:
-                    safe_version = stored_version.replace("/", "_").replace(":", "_").replace("\\", "_")
-                    s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
-                    logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                     s3.head_object(Bucket=ap_arn, Key=s3_key)
-                    version = stored_version
+                    version = stored_version  # Keep original version format for response
                     model_name = search_name
                     found = True
                     logger.info(f"DEBUG: Found model in S3 with stored version: {s3_key}")
@@ -969,17 +970,26 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             v = model["version"]
                             model_n = model.get("name", sanitized_search_name)
                             logger.info(f"DEBUG: Checking model: name='{model_n}', version='{v}'")
-                            # Verify the model actually exists in S3
+                            # Note: model_n and v from list_models are already sanitized (from S3 key path)
+                            # The version from list_models is the sanitized version from the S3 key
+                            # So we can use it directly to construct the S3 key
+                            s3_key = f"models/{model_n}/{v}/model.zip"
+                            logger.info(f"DEBUG: Verifying S3 key: {s3_key}")
                             try:
-                                safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
-                                s3_key = f"models/{model_n}/{safe_version}/model.zip"
-                                logger.info(f"DEBUG: Verifying S3 key: {s3_key}")
                                 s3.head_object(Bucket=ap_arn, Key=s3_key)
-                                version = v
+                                # Version from list_models is already sanitized, but we need to map it back
+                                # to the original version format. Since we don't have the original, use as-is
+                                # but try to find the original version from storage if available
+                                if model_name and stored_version:
+                                    # Use the stored version if we have it (original format)
+                                    version = stored_version
+                                else:
+                                    # Use the version from list_models (sanitized, but that's what we have)
+                                    version = v
                                 # Map back to original model name if we have it
                                 model_name = search_name  # Use original name, not sanitized
                                 found = True
-                                logger.info(f"DEBUG: Found model in S3: {s3_key}")
+                                logger.info(f"DEBUG: Found model in S3: {s3_key}, using version='{version}'")
                                 break
                             except ClientError as e:
                                 error_code = e.response.get("Error", {}).get("Code", "")
@@ -1004,7 +1014,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
                         logger.info(f"DEBUG: Trying common version: {s3_key}")
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
-                        version = v
+                        version = v  # Use original version format
                         model_name = search_name
                         found = True
                         logger.info(f"DEBUG: Found model with common version: {s3_key}")
@@ -1016,6 +1026,35 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             continue
                         else:
                             logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+            
+            # Last resort: if we have a model_name but no version found, try to find ANY version
+            # by listing all objects with the model name prefix
+            if not found and model_name and model_name != id:
+                # Only do direct S3 search if we have a real model name (not just the artifact_id)
+                logger.info(f"DEBUG: Last resort - searching S3 directly for any version of '{sanitized_search_name}'")
+                try:
+                    prefix = f"models/{sanitized_search_name}/"
+                    response = s3.list_objects_v2(Bucket=ap_arn, Prefix=prefix, MaxKeys=10)
+                    if "Contents" in response:
+                        for item in response["Contents"]:
+                            key = item["Key"]
+                            if key.endswith("/model.zip"):
+                                parts = key.split("/")
+                                if len(parts) >= 3:
+                                    found_version_sanitized = parts[2]  # This is already sanitized from S3 key
+                                    # Try to map back to original version if we have it
+                                    if stored_version:
+                                        version = stored_version  # Use original version format
+                                    else:
+                                        # Use sanitized version as-is (it's what's in S3)
+                                        # Most common versions like "main" don't change when sanitized
+                                        version = found_version_sanitized
+                                    model_name = search_name
+                                    found = True
+                                    logger.info(f"DEBUG: Found model via direct S3 search: {key}, version='{version}'")
+                                    break
+                except Exception as e:
+                    logger.warning(f"DEBUG: Direct S3 search failed: {str(e)}")
             
             if not found:
                 logger.error(f"DEBUG: Model not found: id='{id}', search_name='{search_name}', sanitized='{sanitized_search_name}'")
