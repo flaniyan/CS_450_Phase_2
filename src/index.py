@@ -437,9 +437,9 @@ def get_artifact_by_name(name: str, request: Request):
             )
 
         # Search for models with matching name
+        # Use original name for exact matching, not sanitized version
         escaped_name = re.escape(name)
-        sanitized_name = sanitize_model_id(name)
-        name_pattern = f"^{re.escape(sanitized_name)}$"
+        name_pattern = f"^{escaped_name}$"
         result = list_models(name_regex=name_pattern, limit=1000)
         artifacts = []
         seen_artifact_ids = set()  # Track which artifact_ids we've already added
@@ -478,13 +478,15 @@ def get_artifact_by_name(name: str, request: Request):
                             }
                         )
 
-        # Add artifacts from storage (non-model artifacts or cached models)
+        # Add artifacts from storage (all artifact types including models)
+        # This ensures we find artifacts stored by artifact_id
         for artifact_id, artifact in _artifact_storage.items():
-            if artifact.get("name") == name and artifact_id not in seen_artifact_ids:
+            artifact_name = artifact.get("name", "")
+            if artifact_name == name and artifact_id not in seen_artifact_ids:
                 seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
-                        "name": artifact.get("name", artifact_id),
+                        "name": artifact_name,
                         "id": artifact_id,
                         "type": artifact.get("type", "model"),
                     }
@@ -625,23 +627,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
     try:
         if artifact_type == "model":
-            # First, check if id is an artifact_id (numeric) and lookup the model_id
-            model_id = None
-            if id.isdigit() and id in _artifact_id_to_name:
-                mapping = _artifact_id_to_name[id]
-                if mapping.get("type") == "model":
-                    model_id = mapping.get("name")
-                    url = mapping.get("url", f"https://huggingface.co/{model_id}")
-                    return {
-                        "metadata": {
-                            "name": model_id,
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {"url": url},
-                    }
-            
-            # Check if id is in storage (legacy or non-model artifacts)
+            # First, check if id is in _artifact_storage (primary storage)
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 if artifact.get("type") == "model":
@@ -656,6 +642,21 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                                 "url", f"https://huggingface.co/{artifact.get('name', id)}"
                             )
                         },
+                    }
+            
+            # Also check _artifact_id_to_name mapping (fallback)
+            if id.isdigit() and id in _artifact_id_to_name:
+                mapping = _artifact_id_to_name[id]
+                if mapping.get("type") == "model":
+                    model_id = mapping.get("name")
+                    url = mapping.get("url", f"https://huggingface.co/{model_id}")
+                    return {
+                        "metadata": {
+                            "name": model_id,
+                            "id": id,
+                            "type": artifact_type,
+                        },
+                        "data": {"url": url},
                     }
             
             # If id is numeric but not in mapping, it might be an artifact_id that was lost
@@ -898,6 +899,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         "type": artifact_type,
                         "url": url,
                     }
+                    # Store artifact metadata in _artifact_storage keyed by artifact_id
+                    _artifact_storage[artifact_id] = {
+                        "name": model_id,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": artifact_id,
+                        "url": url,
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -931,6 +940,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 _artifact_id_to_name[artifact_id] = {
                     "name": model_id,
                     "type": artifact_type,
+                    "url": url,
+                }
+                # Store artifact metadata in _artifact_storage keyed by artifact_id
+                _artifact_storage[artifact_id] = {
+                    "name": model_id,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
                     "url": url,
                 }
                 return Response(
@@ -985,6 +1002,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             _artifact_id_to_name[artifact_id] = {
                 "name": artifact_name,
                 "type": artifact_type,
+                "url": url,
+            }
+            # Store artifact metadata in _artifact_storage keyed by artifact_id
+            _artifact_storage[artifact_id] = {
+                "name": artifact_name,
+                "type": artifact_type,
+                "version": version,
+                "id": artifact_id,
                 "url": url,
             }
             
