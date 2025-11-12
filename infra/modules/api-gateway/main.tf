@@ -1,11 +1,11 @@
 variable "artifacts_bucket" { type = string }
 variable "ddb_tables_arnmap" { type = map(string) }
 variable "validator_service_url" { type = string }
-variable "aws_region" { 
-  type    = string 
+variable "aws_region" {
+  type    = string
   default = "us-east-1"
 }
-variable "kms_key_arn" { 
+variable "kms_key_arn" {
   type        = string
   description = "KMS key ARN for S3 encryption"
 }
@@ -74,26 +74,26 @@ resource "aws_api_gateway_integration_response" "root_get_200" {
       message = "ACME Registry API"
       version = "1.0.0"
       endpoints = {
-        health = "/health"
-        health_components = "/health/components"
-        authenticate = "/authenticate"
-        artifacts = "/artifacts"
-        reset = "/reset"
+        health                  = "/health"
+        health_components       = "/health/components"
+        authenticate            = "/authenticate"
+        artifacts               = "/artifacts"
+        reset                   = "/reset"
         artifact_by_type_and_id = "/artifact/{artifact_type}/{id}"
-        artifact_by_type = "/artifact/{artifact_type}"
-        artifact_by_name = "/artifact/byName/{name}"
-        artifact_by_regex = "/artifact/byRegEx"
-        artifact_cost = "/artifact/{artifact_type}/{id}/cost"
-        artifact_audit = "/artifact/{artifact_type}/{id}/audit"
-        model_rate = "/artifact/model/{id}/rate"
-        model_lineage = "/artifact/model/{id}/lineage"
-        model_license_check = "/artifact/model/{id}/license-check"
-        model_download = "/artifact/model/{id}/download"
-        artifact_ingest = "/artifact/ingest"
-        artifact_directory = "/artifact/directory"
-        upload = "/upload"
-        admin = "/admin"
-        directory = "/directory"
+        artifact_by_type        = "/artifact/{artifact_type}"
+        artifact_by_name        = "/artifact/byName/{name}"
+        artifact_by_regex       = "/artifact/byRegEx"
+        artifact_cost           = "/artifact/{artifact_type}/{id}/cost"
+        artifact_audit          = "/artifact/{artifact_type}/{id}/audit"
+        model_rate              = "/artifact/model/{id}/rate"
+        model_lineage           = "/artifact/model/{id}/lineage"
+        model_license_check     = "/artifact/model/{id}/license-check"
+        model_download          = "/artifact/model/{id}/download"
+        artifact_ingest         = "/artifact/ingest"
+        artifact_directory      = "/artifact/directory"
+        upload                  = "/upload"
+        admin                   = "/admin"
+        directory               = "/directory"
       }
     })
   }
@@ -328,8 +328,8 @@ resource "aws_api_gateway_method" "health_components_get" {
   authorization = "NONE"
 
   request_parameters = {
-    "method.request.querystring.windowMinutes"    = false
-    "method.request.querystring.includeTimeline"  = false
+    "method.request.querystring.windowMinutes"   = false
+    "method.request.querystring.includeTimeline" = false
   }
 }
 
@@ -495,11 +495,11 @@ resource "aws_api_gateway_integration_response" "package_id_get_200" {
 }
 
 resource "aws_api_gateway_integration_response" "package_id_get_404" {
-  rest_api_id        = aws_api_gateway_rest_api.main_api.id
-  resource_id        = aws_api_gateway_resource.package_id.id
-  http_method        = aws_api_gateway_method.package_id_get.http_method
-  status_code        = aws_api_gateway_method_response.package_id_get_404.status_code
-  selection_pattern  = "404"
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.package_id.id
+  http_method       = aws_api_gateway_method.package_id_get.http_method
+  status_code       = aws_api_gateway_method_response.package_id_get_404.status_code
+  selection_pattern = "404"
 
   depends_on = [
     aws_api_gateway_integration.package_id_get,
@@ -596,9 +596,9 @@ resource "aws_api_gateway_integration" "upload_post" {
   integration_http_method = "POST"
   type                    = "HTTP_PROXY"
   uri                     = "${var.validator_service_url}/upload"
-  
-  content_handling       = "CONVERT_TO_BINARY"
-  passthrough_behavior   = "WHEN_NO_MATCH"
+
+  content_handling     = "CONVERT_TO_BINARY"
+  passthrough_behavior = "WHEN_NO_MATCH"
 }
 
 # OPTIONS /admin
@@ -1456,7 +1456,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
 
   triggers = {
     redeployment = sha1(jsonencode([
-      timestamp(),  # Force redeployment when any change is made
+      timestamp(), # Force redeployment when any change is made
       # Resources
       aws_api_gateway_resource.health.id,
       aws_api_gateway_resource.health_components.id,
@@ -1605,9 +1605,9 @@ resource "aws_iam_policy" "lambda_s3_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ListPackagesPrefix"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "ListPackagesPrefix"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = ["arn:aws:s3:::${var.artifacts_bucket}"]
         Condition = {
           StringLike = {
@@ -1755,24 +1755,24 @@ output "api_gateway_invoke_url" {
 
 output "api_endpoints" {
   value = {
-    health                = "${aws_api_gateway_stage.main_stage.invoke_url}/health"
-    health_components     = "${aws_api_gateway_stage.main_stage.invoke_url}/health/components"
-    artifacts             = "${aws_api_gateway_stage.main_stage.invoke_url}/artifacts"
-    reset                 = "${aws_api_gateway_stage.main_stage.invoke_url}/reset"
-    authenticate          = "${aws_api_gateway_stage.main_stage.invoke_url}/authenticate"
-    tracks                = "${aws_api_gateway_stage.main_stage.invoke_url}/tracks"
-    artifact_ingest       = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/ingest"
-    artifact_directory    = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/directory"
-    artifact_create       = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}"
-    artifact_rate         = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/rate"
-    artifact_cost         = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}/{id}/cost"
-    artifact_lineage      = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/lineage"
-    artifact_license      = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/license-check"
-    artifact_upload       = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/upload"
-    artifact_download     = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/download"
-    artifact_audit        = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}/{id}/audit"
-    artifact_by_name      = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/byName/{name}"
-    artifact_by_regex     = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/byRegEx"
+    health             = "${aws_api_gateway_stage.main_stage.invoke_url}/health"
+    health_components  = "${aws_api_gateway_stage.main_stage.invoke_url}/health/components"
+    artifacts          = "${aws_api_gateway_stage.main_stage.invoke_url}/artifacts"
+    reset              = "${aws_api_gateway_stage.main_stage.invoke_url}/reset"
+    authenticate       = "${aws_api_gateway_stage.main_stage.invoke_url}/authenticate"
+    tracks             = "${aws_api_gateway_stage.main_stage.invoke_url}/tracks"
+    artifact_ingest    = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/ingest"
+    artifact_directory = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/directory"
+    artifact_create    = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}"
+    artifact_rate      = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/rate"
+    artifact_cost      = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}/{id}/cost"
+    artifact_lineage   = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/lineage"
+    artifact_license   = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/license-check"
+    artifact_upload    = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/upload"
+    artifact_download  = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/model/{id}/download"
+    artifact_audit     = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/{artifact_type}/{id}/audit"
+    artifact_by_name   = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/byName/{name}"
+    artifact_by_regex  = "${aws_api_gateway_stage.main_stage.invoke_url}/artifact/byRegEx"
   }
   description = "Map of all API endpoints"
 }
