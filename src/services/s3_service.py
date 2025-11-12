@@ -233,22 +233,6 @@ def get_presigned_upload_url(
         )
 
 
-def sanitize_model_id(model_id: str) -> str:
-    return (
-        model_id.replace("https://huggingface.co/", "")
-        .replace("http://huggingface.co/", "")
-        .replace("/", "_")
-        .replace(":", "_")
-        .replace("\\", "_")
-        .replace("?", "_")
-        .replace("*", "_")
-        .replace('"', "_")
-        .replace("<", "_")
-        .replace(">", "_")
-        .replace("|", "_")
-    )
-
-
 def upload_model(
     file_content: bytes, model_id: str, version: str, debloat: bool = False
 ) -> Dict[str, str]:
@@ -260,7 +244,20 @@ def upload_model(
     if not file_content or len(file_content) == 0:
         raise HTTPException(status_code=400, detail="Cannot upload empty file content")
     try:
-        safe_model_id = sanitize_model_id(model_id)
+        # Sanitize model_id and version for S3 key
+        safe_model_id = (
+            model_id.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+            .replace(":", "_")
+            .replace("\\", "_")
+            .replace("?", "_")
+            .replace("*", "_")
+            .replace('"', "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+        )
         safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
         s3_key = f"models/{safe_model_id}/{safe_version}/model.zip"
 
@@ -301,8 +298,7 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             detail="AWS services not available. Please check your AWS configuration.",
         )
     try:
-        safe_model_id = sanitize_model_id(model_id)
-        s3_key = f"models/{safe_model_id}/{version}/model.zip"
+        s3_key = f"models/{model_id}/{version}/model.zip"
         response = s3.get_object(Bucket=ap_arn, Key=s3_key)
         zip_content = response["Body"].read()
         if component != "full":
@@ -319,70 +315,6 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
         raise HTTPException(status_code=500, detail=f"AWS download failed: {str(e)}")
-
-
-def store_model_metadata(model_id: str, metadata: Dict[str, Any]) -> None:
-    if not aws_available:
-        return
-    try:
-        safe_model_id = sanitize_model_id(model_id)
-        s3.put_object(
-            Bucket=ap_arn,
-            Key=f"models/{safe_model_id}/metadata.json",
-            Body=json.dumps(metadata).encode("utf-8"),
-            ContentType="application/json",
-        )
-    except Exception as e:
-        logger.warning(f"Failed to store metadata for {model_id}: {e}")
-
-
-def get_model_metadata(model_id: str) -> Optional[Dict[str, Any]]:
-    if not aws_available:
-        return None
-    try:
-        safe_model_id = sanitize_model_id(model_id)
-        response = s3.get_object(
-            Bucket=ap_arn, Key=f"models/{safe_model_id}/metadata.json"
-        )
-        data = response["Body"].read().decode("utf-8")
-        return json.loads(data)
-    except Exception:
-        return None
-
-
-def store_generic_artifact_metadata(
-    artifact_type: str, artifact_id: str, metadata: Dict[str, Any]
-) -> None:
-    if not aws_available:
-        return
-    try:
-        safe_artifact_id = sanitize_model_id(artifact_id)
-        key = f"artifacts/{artifact_type}/{safe_artifact_id}/metadata.json"
-        s3.put_object(
-            Bucket=ap_arn,
-            Key=key,
-            Body=json.dumps(metadata).encode("utf-8"),
-            ContentType="application/json",
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to store {artifact_type} metadata for {artifact_id}: {e}"
-        )
-
-
-def get_generic_artifact_metadata(
-    artifact_type: str, artifact_id: str
-) -> Optional[Dict[str, Any]]:
-    if not aws_available:
-        return None
-    try:
-        safe_artifact_id = sanitize_model_id(artifact_id)
-        key = f"artifacts/{artifact_type}/{safe_artifact_id}/metadata.json"
-        response = s3.get_object(Bucket=ap_arn, Key=key)
-        data = response["Body"].read().decode("utf-8")
-        return json.loads(data)
-    except Exception:
-        return None
 
 
 _model_card_cache = {}

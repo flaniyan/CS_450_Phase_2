@@ -38,12 +38,6 @@ from .services.s3_service import (
     s3,
     ap_arn,
     model_ingestion,
-    sanitize_model_id,
-    store_model_metadata,
-    get_model_metadata,
-    store_generic_artifact_metadata,
-    get_generic_artifact_metadata,
-    aws_available,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import (
@@ -153,8 +147,6 @@ async def startup_event():
 
 
 _artifact_storage = {}
-# Mapping from artifact_id to model_id/name for lookup
-_artifact_id_to_name = {}
 
 
 def verify_auth_token(request: Request) -> bool:
@@ -407,9 +399,8 @@ def reset_system(request: Request):
         )
 
     try:
-        global _artifact_storage, _artifact_id_to_name
+        global _artifact_storage
         _artifact_storage.clear()
-        _artifact_id_to_name.clear()
         result = reset_registry()
         purge_tokens()
         ensure_default_admin()
@@ -421,7 +412,7 @@ def reset_system(request: Request):
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 
-@app.get("/artifact/byName/{name:path}")
+@app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
     if not verify_auth_token(request):
         raise HTTPException(
@@ -437,56 +428,28 @@ def get_artifact_by_name(name: str, request: Request):
             )
 
         # Search for models with matching name
-        # Use original name for exact matching, not sanitized version
         escaped_name = re.escape(name)
         name_pattern = f"^{escaped_name}$"
         result = list_models(name_regex=name_pattern, limit=1000)
         artifacts = []
-        seen_artifact_ids = set()  # Track which artifact_ids we've already added
 
+        # Add models from S3
         for model in result.get("models", []):
-            model_name = model.get("name", "")
-            if model_name == name:  # Exact match
-                # Try to find all artifact_ids for this model name
-                found_artifact_ids = set()
-                for stored_id, stored_info in _artifact_id_to_name.items():
-                    if stored_info.get("name") == model_name and stored_info.get("type") == "model":
-                        found_artifact_ids.add(stored_id)
-                
-                # If we found artifact_ids, add all of them (avoid duplicates)
-                if found_artifact_ids:
-                    for artifact_id in found_artifact_ids:
-                        if artifact_id not in seen_artifact_ids:
-                            seen_artifact_ids.add(artifact_id)
-                            artifacts.append(
-                                {
-                                    "name": model_name,
-                                    "id": artifact_id,
-                                    "type": "model",
-                                }
-                            )
-                else:
-                    # If no artifact_id found, use model name as fallback
-                    artifact_id = model.get("id", model_name)
-                    if artifact_id not in seen_artifact_ids:
-                        seen_artifact_ids.add(artifact_id)
-                        artifacts.append(
-                            {
-                                "name": model_name,
-                                "id": artifact_id,
-                                "type": "model",
-                            }
-                        )
-
-        # Add artifacts from storage (all artifact types including models)
-        # This ensures we find artifacts stored by artifact_id
-        for artifact_id, artifact in _artifact_storage.items():
-            artifact_name = artifact.get("name", "")
-            if artifact_name == name and artifact_id not in seen_artifact_ids:
-                seen_artifact_ids.add(artifact_id)
+            if model.get("name") == name:  # Exact match
                 artifacts.append(
                     {
-                        "name": artifact_name,
+                        "name": model["name"],
+                        "id": model.get("id", model["name"]),
+                        "type": "model",
+                    }
+                )
+
+        # Add artifacts from storage (non-model artifacts)
+        for artifact_id, artifact in _artifact_storage.items():
+            if artifact.get("name") == name:  # Exact match
+                artifacts.append(
+                    {
+                        "name": artifact.get("name", artifact_id),
                         "id": artifact_id,
                         "type": artifact.get("type", "model"),
                     }
@@ -558,38 +521,28 @@ async def search_artifacts_by_regex(request: Request):
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
 
-        compiled_pattern = re.compile(regex_pattern)
-
         # Search for models matching regex
         artifacts = []
         try:
             result = list_models(name_regex=regex_pattern, limit=1000)
             for model in result.get("models", []):
-                model_name = model.get("name", "")
-                # Try to find artifact_id for this model
-                artifact_id = None
-                for stored_id, stored_info in _artifact_id_to_name.items():
-                    if stored_info.get("name") == model_name and stored_info.get("type") == "model":
-                        artifact_id = stored_id
-                        break
-                # If no artifact_id found, use model name as fallback
-                if not artifact_id:
-                    artifact_id = model.get("id", model_name)
                 artifacts.append(
                     {
-                        "name": model_name,
-                        "id": artifact_id,
+                        "name": model["name"],
+                        "id": model.get("id", model["name"]),
                         "type": "model",
                     }
                 )
         except Exception as e:
-            logger.warning(f"Error searching models with regex {regex_pattern}: {str(e)}")
+            logger.warning(
+                f"Error searching models with regex {regex_pattern}: {str(e)}"
+            )
 
         # Search artifacts in storage matching regex
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
             try:
-                if compiled_pattern.search(artifact_name):
+                if re.search(regex_pattern, artifact_name):
                     artifacts.append(
                         {
                             "name": artifact_name,
@@ -627,90 +580,41 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
     try:
         if artifact_type == "model":
-            # First, check if id is in _artifact_storage (primary storage)
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                if artifact.get("type") == "model":
-                    return {
-                        "metadata": {
-                            "name": artifact.get("name", id),
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {
-                            "url": artifact.get(
-                                "url", f"https://huggingface.co/{artifact.get('name', id)}"
-                            )
-                        },
-                    }
-            
-            # Also check _artifact_id_to_name mapping (fallback)
-            if id.isdigit() and id in _artifact_id_to_name:
-                mapping = _artifact_id_to_name[id]
-                if mapping.get("type") == "model":
-                    model_id = mapping.get("name")
-                    url = mapping.get("url", f"https://huggingface.co/{model_id}")
-                    return {
-                        "metadata": {
-                            "name": model_id,
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {"url": url},
-                    }
-            
-            # If id is numeric but not in mapping, it might be an artifact_id that was lost
-            # Try to find by searching all models and matching artifact_ids
-            if id.isdigit():
-                # Search through all models to find one that might match
-                try:
-                    result = list_models(limit=1000)
-                    if result.get("models"):
-                        for model in result["models"]:
-                            model_name = model.get("name", "")
-                            # Check if this model's artifact_id matches
-                            # We need to check if any stored mapping has this model_name
-                            for stored_id, stored_info in _artifact_id_to_name.items():
-                                if stored_info.get("name") == model_name and stored_id == id:
-                                    version = model.get("version", "1.0.0")
-                                    return {
-                                        "metadata": {
-                                            "name": model_name,
-                                            "id": id,
-                                            "type": artifact_type,
-                                        },
-                                        "data": {"url": f"https://huggingface.co/{model_name}"},
-                                    }
-                except Exception:
-                    pass
-            
-            # Try to find by model_id (name) - id might be a model name
+                return {
+                    "metadata": {
+                        "name": artifact.get("name", id),
+                        "id": id,
+                        "type": artifact_type,
+                    },
+                    "data": {
+                        "url": artifact.get(
+                            "url", f"https://huggingface.co/{artifact.get('name', id)}"
+                        )
+                    },
+                }
             version = None
             found = False
-            model_name = id
             try:
-                escaped_name = re.escape(id)
-                name_pattern = f"^{escaped_name}$"
-                result = list_models(name_regex=name_pattern, limit=1000)
+                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                 if result.get("models"):
                     for model in result["models"]:
-                        if model.get("name") == id:  # Exact match
-                            v = model.get("version", "1.0.0")
-                            model_name = model.get("name", id)
-                            try:
-                                s3_key = f"models/{model_name}/{v}/model.zip"
-                                s3.head_object(Bucket=ap_arn, Key=s3_key)
-                                version = v
-                                found = True
-                                break
-                            except ClientError as e:
-                                error_code = e.response.get("Error", {}).get("Code", "")
-                                if error_code == "NoSuchKey" or error_code == "404":
-                                    continue
-                                else:
-                                    print(
-                                        f"Unexpected error checking {s3_key}: {error_code}"
-                                    )
+                        v = model["version"]
+                        try:
+                            s3_key = f"models/{id}/{v}/model.zip"
+                            s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            version = v
+                            found = True
+                            break
+                        except ClientError as e:
+                            error_code = e.response.get("Error", {}).get("Code", "")
+                            if error_code == "NoSuchKey" or error_code == "404":
+                                continue
+                            else:
+                                print(
+                                    f"Unexpected error checking {s3_key}: {error_code}"
+                                )
             except Exception as e:
                 print(f"Error calling list_models: {e}")
             if not found:
@@ -721,7 +625,6 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
                         found = True
-                        model_name = id
                         break
                     except ClientError as e:
                         error_code = e.response.get("Error", {}).get("Code", "")
@@ -731,43 +634,26 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             print(f"Unexpected error checking {s3_key}: {error_code}")
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
+            model = {"name": id, "version": version}
             return {
-                "metadata": {"name": model_name, "id": id, "type": artifact_type},
-                "data": {"url": f"https://huggingface.co/{model_name}"},
+                "metadata": {"name": model["name"], "id": id, "type": artifact_type},
+                "data": {"url": f"https://huggingface.co/{id}"},
             }
         else:
-            # For non-model artifacts, check storage
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                if artifact.get("type") == artifact_type:
-                    return {
-                        "metadata": {
-                            "name": artifact.get("name", id),
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {
-                            "url": artifact.get(
-                                "url", f"https://example.com/{artifact_type}/{id}"
-                            )
-                        },
-                    }
-            # Also check artifact_id mapping
-            if id in _artifact_id_to_name:
-                mapping = _artifact_id_to_name[id]
-                if mapping.get("type") == artifact_type:
-                    return {
-                        "metadata": {
-                            "name": mapping.get("name", id),
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {
-                            "url": mapping.get(
-                                "url", f"https://example.com/{artifact_type}/{id}"
-                            )
-                        },
-                    }
+                return {
+                    "metadata": {
+                        "name": artifact.get("name", id),
+                        "id": id,
+                        "type": artifact_type,
+                    },
+                    "data": {
+                        "url": artifact.get(
+                            "url", f"https://example.com/{artifact_type}/{id}"
+                        )
+                    },
+                }
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
         raise
@@ -794,8 +680,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
-
-    global _artifact_storage
     
     # Validate artifact_type
     if artifact_type not in ["model", "dataset", "code"]:
@@ -864,7 +748,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Check if artifact already exists
                 try:
                     existing = list_models(
-                        name_regex=f"^{re.escape(sanitize_model_id(model_id))}$", limit=1
+                        name_regex=f"^{re.escape(model_id)}$", limit=1
                     )
                     if existing.get("models"):
                         raise HTTPException(
@@ -893,20 +777,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
 
                     # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
-                    # Store mapping from artifact_id to model_id for lookup
-                    _artifact_id_to_name[artifact_id] = {
-                        "name": model_id,
-                        "type": artifact_type,
-                        "url": url,
-                    }
-                    # Store artifact metadata in _artifact_storage keyed by artifact_id
-                    _artifact_storage[artifact_id] = {
-                        "name": model_id,
-                        "type": artifact_type,
-                        "version": version,
-                        "id": artifact_id,
-                        "url": url,
-                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -936,20 +806,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
-                # Store mapping from artifact_id to model_id for lookup
-                _artifact_id_to_name[artifact_id] = {
-                    "name": model_id,
-                    "type": artifact_type,
-                    "url": url,
-                }
-                # Store artifact metadata in _artifact_storage keyed by artifact_id
-                _artifact_storage[artifact_id] = {
-                    "name": model_id,
-                    "type": artifact_type,
-                    "version": version,
-                    "id": artifact_id,
-                    "url": url,
-                }
                 return Response(
                     content=json.dumps(
                         {
@@ -966,45 +822,31 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
+            global _artifact_storage
             artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
-            if not url:
-                raise HTTPException(
-                    status_code=400,
-                    detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
-                )
-
-            artifact_id = sanitize_model_id(artifact_name)
-            existing_metadata = (
-                get_generic_artifact_metadata(artifact_type, artifact_id)
-                if aws_available
-                else None
-            )
-            if existing_metadata:
-                raise HTTPException(status_code=409, detail="Artifact exists already.")
+            
+            # Check if artifact already exists
             for existing_id, existing_artifact in _artifact_storage.items():
-                if existing_artifact.get("type") == artifact_type and (
+                if (
                     existing_artifact.get("url") == url
-                    or existing_artifact.get("name") == artifact_name
+                    and existing_artifact.get("type") == artifact_type
+                ) or (
+                    existing_artifact.get("name") == artifact_name
+                    and existing_artifact.get("type") == artifact_type
                 ):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
                     )
-
-            metadata_entry = {
-                "name": artifact_name,
-                "type": artifact_type,
-                "version": version,
-                "id": artifact_id,
-                "url": url,
-                "source": "direct",
-            }
-            # Store mapping from artifact_id to name for lookup
-            _artifact_id_to_name[artifact_id] = {
-                "name": artifact_name,
-                "type": artifact_type,
-                "url": url,
-            }
-            # Store artifact metadata in _artifact_storage keyed by artifact_id
+            
+            # If URL not provided but name is, construct URL
+            if not url:
+                url = f"https://example.com/{artifact_type}/{artifact_name}"
+            
+            # For dataset/code ingestion, we validate and store
+            # In a full implementation, you might download, validate structure, etc.
+            # For now, we perform basic validation and storage
+            artifact_id = str(random.randint(1000000000, 9999999999))
+            
             _artifact_storage[artifact_id] = {
                 "name": artifact_name,
                 "type": artifact_type,
