@@ -160,13 +160,27 @@ def consume_token_use(token_id: str) -> Optional[Dict[str, Any]]:
 def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
     try:
         table = dynamodb.Table(USERS_TABLE)
-        resp = table.query(
-            IndexName="username-index",
-            KeyConditionExpression="username = :u",
-            ExpressionAttributeValues={":u": username},
-        )
-        items = resp.get("Items", [])
-        return items[0] if items else None
+        # Try to query using username-index if it exists
+        try:
+            resp = table.query(
+                IndexName="username-index",
+                KeyConditionExpression="username = :u",
+                ExpressionAttributeValues={":u": username},
+            )
+            items = resp.get("Items", [])
+            if items:
+                return items[0]
+        except Exception as index_error:
+            # If index doesn't exist, fall back to scan (less efficient but works)
+            logger.debug(f"username-index not available, using scan: {index_error}")
+            resp = table.scan(
+                FilterExpression="username = :u",
+                ExpressionAttributeValues={":u": username},
+            )
+            items = resp.get("Items", [])
+            if items:
+                return items[0]
+        return None
     except Exception as e:
         logger.error(f"get_user_by_username error: {e}")
         return None
