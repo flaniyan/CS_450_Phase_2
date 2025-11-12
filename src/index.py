@@ -433,14 +433,22 @@ def reset_system(request: Request):
 
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
+    logger.info(f"=== GET /artifact/byName/{name} ===")
+    logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
+    
     if not verify_auth_token(request):
+        logger.error(f"DEBUG: Authentication failed for /artifact/byName/{name}")
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
+    logger.info(f"DEBUG: Authentication passed for /artifact/byName/{name}")
+    
     try:
         # Validate name parameter
+        logger.info(f"DEBUG: Validating name parameter: '{name}'")
         if not name or not name.strip():
+            logger.error(f"DEBUG: Name parameter is empty or invalid: '{name}'")
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_name or it is formed improperly, or is invalid.",
@@ -449,16 +457,21 @@ def get_artifact_by_name(name: str, request: Request):
         # Search for models with matching name
         escaped_name = re.escape(name)
         name_pattern = f"^{escaped_name}$"
+        logger.info(f"DEBUG: Searching S3 for models with name pattern: {name_pattern}")
         result = list_models(name_regex=name_pattern, limit=1000)
+        logger.info(f"DEBUG: list_models returned {len(result.get('models', []))} models")
         artifacts = []
 
         # Track which artifact_ids we've already added to avoid duplicates
         seen_artifact_ids = set()
+        logger.info(f"DEBUG: Checking _artifact_storage (size: {len(_artifact_storage)})")
         
         # Add models from S3 - find their artifact_ids from storage
         for model in result.get("models", []):
             model_name = model.get("name", "")
+            logger.info(f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'")
             if model_name == name:  # Exact match
+                logger.info(f"DEBUG: Found exact match in S3: {model_name}")
                 # Find artifact_id(s) for this model name in storage
                 found_ids = []
                 for artifact_id, artifact in _artifact_storage.items():
@@ -466,9 +479,11 @@ def get_artifact_by_name(name: str, request: Request):
                         if artifact_id not in seen_artifact_ids:
                             found_ids.append(artifact_id)
                             seen_artifact_ids.add(artifact_id)
+                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for model '{model_name}'")
                 
                 # If we found artifact_ids, use them; otherwise use model name as fallback
                 if found_ids:
+                    logger.info(f"DEBUG: Using {len(found_ids)} artifact_id(s) from storage")
                     for artifact_id in found_ids:
                         artifacts.append(
                             {
@@ -479,6 +494,7 @@ def get_artifact_by_name(name: str, request: Request):
                         )
                 else:
                     # Fallback: use model name as id if no artifact_id found
+                    logger.warning(f"DEBUG: No artifact_id found in storage for '{model_name}', using fallback")
                     fallback_id = model.get("id", model_name)
                     if fallback_id not in seen_artifact_ids:
                         seen_artifact_ids.add(fallback_id)
@@ -491,8 +507,12 @@ def get_artifact_by_name(name: str, request: Request):
                         )
 
         # Add artifacts from storage (all artifact types including models)
+        logger.info(f"DEBUG: Searching _artifact_storage for artifacts with name='{name}'")
+        storage_matches = 0
         for artifact_id, artifact in _artifact_storage.items():
             if artifact.get("name") == name and artifact_id not in seen_artifact_ids:  # Exact match
+                storage_matches += 1
+                logger.info(f"DEBUG: Found artifact in storage: id='{artifact_id}', name='{artifact.get('name')}', type='{artifact.get('type')}'")
                 seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
@@ -501,10 +521,14 @@ def get_artifact_by_name(name: str, request: Request):
                         "type": artifact.get("type", "model"),
                     }
                 )
+        logger.info(f"DEBUG: Found {storage_matches} additional artifacts in storage")
 
+        logger.info(f"DEBUG: Total artifacts found: {len(artifacts)}")
         if not artifacts:
+            logger.error(f"DEBUG: No artifacts found for name '{name}'")
             raise HTTPException(status_code=404, detail="No such artifact.")
 
+        logger.info(f"DEBUG: Returning {len(artifacts)} artifact(s): {artifacts}")
         return artifacts
     except HTTPException:
         raise
@@ -645,24 +669,31 @@ async def search_artifacts_by_regex(request: Request):
             )
 
         # Search for artifacts matching regex in S3 (all types: model, dataset, code)
+        logger.info(f"DEBUG: Starting regex search with pattern: '{regex_pattern}'")
         artifacts = []
         seen_artifact_ids = set()
         
         # Search models from S3
+        logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}'")
         try:
             result = list_models(name_regex=regex_pattern, limit=1000)
-            for model in result.get("models", []):
+            models_found = result.get("models", [])
+            logger.info(f"DEBUG: Found {len(models_found)} models in S3 matching regex")
+            for model in models_found:
                 model_name = model.get("name", "")
+                logger.info(f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'")
                 # Find artifact_id for this model name in storage
                 artifact_id = None
                 for stored_id, stored_artifact in _artifact_storage.items():
                     if stored_artifact.get("name") == model_name and stored_artifact.get("type") == "model":
                         artifact_id = stored_id
+                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for model '{model_name}'")
                         break
                 
                 # Use found artifact_id or fallback to model name
                 if not artifact_id:
                     artifact_id = model.get("id", model_name)
+                    logger.warning(f"DEBUG: No artifact_id in storage for '{model_name}', using fallback: '{artifact_id}'")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -673,25 +704,33 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "model",
                         }
                     )
+                    logger.info(f"DEBUG: Added model artifact: name='{model_name}', id='{artifact_id}'")
         except Exception as e:
+            logger.error(f"DEBUG: Error searching models with regex {regex_pattern}: {str(e)}", exc_info=True)
             logger.warning(
                 f"Error searching models with regex {regex_pattern}: {str(e)}"
             )
         
         # Search datasets from S3
+        logger.info(f"DEBUG: Searching datasets in S3 with regex: '{regex_pattern}'")
         try:
             result = list_artifacts_from_s3(artifact_type="dataset", name_regex=regex_pattern, limit=1000)
-            for dataset in result.get("artifacts", []):
+            datasets_found = result.get("artifacts", [])
+            logger.info(f"DEBUG: Found {len(datasets_found)} datasets in S3 matching regex")
+            for dataset in datasets_found:
                 dataset_name = dataset.get("name", "")
+                logger.info(f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset.get('version', 'N/A')}'")
                 # Find artifact_id for this dataset name in storage
                 artifact_id = None
                 for stored_id, stored_artifact in _artifact_storage.items():
                     if stored_artifact.get("name") == dataset_name and stored_artifact.get("type") == "dataset":
                         artifact_id = stored_id
+                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for dataset '{dataset_name}'")
                         break
                 
                 if not artifact_id:
                     artifact_id = dataset_name
+                    logger.warning(f"DEBUG: No artifact_id in storage for '{dataset_name}', using fallback: '{artifact_id}'")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -702,25 +741,33 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "dataset",
                         }
                     )
+                    logger.info(f"DEBUG: Added dataset artifact: name='{dataset_name}', id='{artifact_id}'")
         except Exception as e:
+            logger.error(f"DEBUG: Error searching datasets with regex {regex_pattern}: {str(e)}", exc_info=True)
             logger.warning(
                 f"Error searching datasets with regex {regex_pattern}: {str(e)}"
             )
         
         # Search code artifacts from S3
+        logger.info(f"DEBUG: Searching code artifacts in S3 with regex: '{regex_pattern}'")
         try:
             result = list_artifacts_from_s3(artifact_type="code", name_regex=regex_pattern, limit=1000)
-            for code_artifact in result.get("artifacts", []):
+            code_artifacts_found = result.get("artifacts", [])
+            logger.info(f"DEBUG: Found {len(code_artifacts_found)} code artifacts in S3 matching regex")
+            for code_artifact in code_artifacts_found:
                 code_name = code_artifact.get("name", "")
+                logger.info(f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_artifact.get('version', 'N/A')}'")
                 # Find artifact_id for this code artifact name in storage
                 artifact_id = None
                 for stored_id, stored_artifact in _artifact_storage.items():
                     if stored_artifact.get("name") == code_name and stored_artifact.get("type") == "code":
                         artifact_id = stored_id
+                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for code artifact '{code_name}'")
                         break
                 
                 if not artifact_id:
                     artifact_id = code_name
+                    logger.warning(f"DEBUG: No artifact_id in storage for '{code_name}', using fallback: '{artifact_id}'")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -731,23 +778,29 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "code",
                         }
                     )
+                    logger.info(f"DEBUG: Added code artifact: name='{code_name}', id='{artifact_id}'")
         except Exception as e:
+            logger.error(f"DEBUG: Error searching code artifacts with regex {regex_pattern}: {str(e)}", exc_info=True)
             logger.warning(
                 f"Error searching code artifacts with regex {regex_pattern}: {str(e)}"
             )
 
         # Search artifacts in storage matching regex, but verify they exist in S3
+        logger.info(f"DEBUG: Searching _artifact_storage (size: {len(_artifact_storage)}) for artifacts matching regex")
+        storage_matches = 0
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
             artifact_type = artifact.get("type", "model")
             try:
                 if re.search(regex_pattern, artifact_name) and artifact_id not in seen_artifact_ids:
+                    logger.info(f"DEBUG: Found potential match in storage: id='{artifact_id}', name='{artifact_name}', type='{artifact_type}'")
                     # Verify artifact exists in S3 before including it
                     artifact_exists = False
                     try:
                         if artifact_type == "model":
                             # Check if model exists in S3
                             sanitized_artifact_name = sanitize_model_id_for_s3(artifact_name)
+                            logger.info(f"DEBUG: Verifying model in S3: sanitized_name='{sanitized_artifact_name}'")
                             result = list_models(name_regex=f"^{re.escape(sanitized_artifact_name)}$", limit=1)
                             if result.get("models"):
                                 model = result["models"][0]
@@ -755,29 +808,40 @@ async def search_artifacts_by_regex(request: Request):
                                 model_n = model.get("name", sanitized_artifact_name)
                                 safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
                                 s3_key = f"models/{model_n}/{safe_version}/model.zip"
+                                logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                                 try:
                                     s3.head_object(Bucket=ap_arn, Key=s3_key)
                                     artifact_exists = True
-                                except ClientError:
+                                    logger.info(f"DEBUG: Model exists in S3: {s3_key}")
+                                except ClientError as e:
+                                    logger.warning(f"DEBUG: Model not found in S3: {s3_key}, error: {e}")
                                     pass
+                            else:
+                                logger.warning(f"DEBUG: No models found in S3 for '{sanitized_artifact_name}'")
                         else:
                             # For datasets and code, check if metadata.json exists in S3
                             sanitized_name = sanitize_model_id_for_s3(artifact_name)
                             version = artifact.get("version", "main")
                             safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
                             s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+                            logger.info(f"DEBUG: Verifying {artifact_type} in S3: key='{s3_key}'")
                             try:
                                 s3.head_object(Bucket=ap_arn, Key=s3_key)
                                 artifact_exists = True
-                            except ClientError:
+                                logger.info(f"DEBUG: {artifact_type} exists in S3: {s3_key}")
+                            except ClientError as e:
+                                logger.warning(f"DEBUG: {artifact_type} not found in S3: {s3_key}, error: {e}")
                                 pass
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"DEBUG: Exception verifying artifact in S3: {str(e)}", exc_info=True)
                         pass
                     
                     # Only include if artifact exists in S3
                     if not artifact_exists:
+                        logger.warning(f"DEBUG: Skipping artifact '{artifact_id}' - not found in S3")
                         continue
                     
+                    storage_matches += 1
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
                         {
@@ -786,15 +850,22 @@ async def search_artifacts_by_regex(request: Request):
                             "type": artifact_type,
                         }
                     )
-            except re.error:
+                    logger.info(f"DEBUG: Added artifact from storage: name='{artifact_name}', id='{artifact_id}', type='{artifact_type}'")
+            except re.error as e:
                 # Skip invalid regex matches
+                logger.warning(f"DEBUG: Regex error for artifact '{artifact_id}': {str(e)}")
                 continue
+        
+        logger.info(f"DEBUG: Found {storage_matches} additional artifacts in storage matching regex")
 
+        logger.info(f"DEBUG: Total artifacts found: {len(artifacts)}")
         if not artifacts:
+            logger.error(f"DEBUG: No artifacts found matching regex '{regex_pattern}'")
             raise HTTPException(
                 status_code=404, detail="No artifact found under this regex."
             )
 
+        logger.info(f"DEBUG: Returning {len(artifacts)} artifact(s): {artifacts}")
         return artifacts
     except HTTPException:
         raise
@@ -809,81 +880,132 @@ async def search_artifacts_by_regex(request: Request):
 @app.get("/artifact/{artifact_type}/{id}")
 @app.get("/artifacts/{artifact_type}/{id}")
 def get_artifact(artifact_type: str, id: str, request: Request):
+    logger.info(f"=== GET /artifact/{artifact_type}/{id} ===")
+    logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
+    
     if not verify_auth_token(request):
+        logger.error(f"DEBUG: Authentication failed for /artifact/{artifact_type}/{id}")
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
+    logger.info(f"DEBUG: Authentication passed for /artifact/{artifact_type}/{id}")
+    
     try:
         if artifact_type == "model":
+            logger.info(f"DEBUG: Processing model artifact with id='{id}'")
             # For models, ALWAYS verify existence in S3 (source of truth)
             model_name = None
             version = None
             found = False
             
-            # First, check if id is in _artifact_storage to get the model name
+            # First, check if id is in _artifact_storage to get the model name and version
+            stored_version = None
+            logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
+                logger.info(f"DEBUG: Found artifact in storage: {artifact}")
                 if artifact.get("type") == "model":
                     model_name = artifact.get("name", id)
+                    stored_version = artifact.get("version", "main")
+                    logger.info(f"DEBUG: Extracted from storage: model_name='{model_name}', version='{stored_version}'")
+                else:
+                    logger.warning(f"DEBUG: Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+            else:
+                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage")
             
             # If we have a model name from storage, use it; otherwise use id as model name
             search_name = model_name if model_name else id
+            logger.info(f"DEBUG: Using search_name='{search_name}'")
             
-            # Query S3 to verify the model exists
-            # Note: list_models returns sanitized model names from S3 keys, so we need to search with sanitized name
+            # Sanitize the model name for S3 lookup
             sanitized_search_name = sanitize_model_id_for_s3(search_name)
-            try:
-                result = list_models(name_regex=f"^{re.escape(sanitized_search_name)}$", limit=1000)
-                if result.get("models"):
-                    for model in result["models"]:
-                        v = model["version"]
-                        model_n = model.get("name", sanitized_search_name)
-                        # Verify the model actually exists in S3
-                        try:
-                            safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
-                            s3_key = f"models/{model_n}/{safe_version}/model.zip"
-                            s3.head_object(Bucket=ap_arn, Key=s3_key)
-                            version = v
-                            # Map back to original model name if we have it
-                            model_name = search_name  # Use original name, not sanitized
-                            found = True
-                            break
-                        except ClientError as e:
-                            error_code = e.response.get("Error", {}).get("Code", "")
-                            if error_code == "NoSuchKey" or error_code == "404":
-                                continue
-                            else:
-                                logger.warning(
-                                    f"Unexpected error checking {s3_key}: {error_code}"
-                                )
-            except Exception as e:
-                logger.warning(f"Error calling list_models: {e}")
+            logger.info(f"DEBUG: Sanitized search name: '{sanitized_search_name}'")
             
-            # If not found via list_models, try common versions directly with sanitized name
+            # If we have a stored version, try that first
+            if stored_version:
+                logger.info(f"DEBUG: Trying stored version first: '{stored_version}'")
+                try:
+                    safe_version = stored_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
+                    logger.info(f"DEBUG: Checking S3 key: {s3_key}")
+                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                    version = stored_version
+                    model_name = search_name
+                    found = True
+                    logger.info(f"DEBUG: Found model in S3 with stored version: {s3_key}")
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    logger.warning(f"DEBUG: S3 check failed for stored version: {s3_key}, error_code={error_code}")
+                    if error_code not in ["NoSuchKey", "404"]:
+                        logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+            
+            # If not found with stored version, try list_models to find any version
             if not found:
-                common_versions = ["1.0.0", "main", "latest"]
+                logger.info(f"DEBUG: Not found with stored version, trying list_models")
+                try:
+                    result = list_models(name_regex=f"^{re.escape(sanitized_search_name)}$", limit=1000)
+                    models_found = result.get("models", [])
+                    logger.info(f"DEBUG: list_models returned {len(models_found)} models")
+                    if models_found:
+                        for model in models_found:
+                            v = model["version"]
+                            model_n = model.get("name", sanitized_search_name)
+                            logger.info(f"DEBUG: Checking model: name='{model_n}', version='{v}'")
+                            # Verify the model actually exists in S3
+                            try:
+                                safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                s3_key = f"models/{model_n}/{safe_version}/model.zip"
+                                logger.info(f"DEBUG: Verifying S3 key: {s3_key}")
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                version = v
+                                # Map back to original model name if we have it
+                                model_name = search_name  # Use original name, not sanitized
+                                found = True
+                                logger.info(f"DEBUG: Found model in S3: {s3_key}")
+                                break
+                            except ClientError as e:
+                                error_code = e.response.get("Error", {}).get("Code", "")
+                                logger.warning(f"DEBUG: S3 check failed: {s3_key}, error_code={error_code}")
+                                if error_code == "NoSuchKey" or error_code == "404":
+                                    continue
+                                else:
+                                    logger.warning(
+                                        f"Unexpected error checking {s3_key}: {error_code}"
+                                    )
+                except Exception as e:
+                    logger.error(f"DEBUG: Error calling list_models: {e}", exc_info=True)
+                    logger.warning(f"Error calling list_models: {e}")
+            
+            # If still not found, try common versions directly with sanitized name
+            if not found:
+                logger.info(f"DEBUG: Not found via list_models, trying common versions")
+                common_versions = ["main", "1.0.0", "latest"]
                 for v in common_versions:
                     try:
                         safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
                         s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
+                        logger.info(f"DEBUG: Trying common version: {s3_key}")
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
                         model_name = search_name
                         found = True
+                        logger.info(f"DEBUG: Found model with common version: {s3_key}")
                         break
                     except ClientError as e:
                         error_code = e.response.get("Error", {}).get("Code", "")
+                        logger.debug(f"DEBUG: Common version check failed: {s3_key}, error_code={error_code}")
                         if error_code == "NoSuchKey" or error_code == "404":
                             continue
                         else:
                             logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
             
             if not found:
+                logger.error(f"DEBUG: Model not found: id='{id}', search_name='{search_name}', sanitized='{sanitized_search_name}'")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             
             # Return with the verified model name and id
-            return {
+            result = {
                 "metadata": {
                     "name": model_name if model_name else id,
                     "id": id,
@@ -893,33 +1015,51 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     "url": f"https://huggingface.co/{model_name if model_name else id}"
                 },
             }
+            logger.info(f"DEBUG: Returning model artifact: {result}")
+            return result
         else:
+            logger.info(f"DEBUG: Processing {artifact_type} artifact with id='{id}'")
             # For dataset and code artifacts, verify they exist in S3
             artifact_name = None
+            logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
+                logger.info(f"DEBUG: Found artifact in storage: {artifact}")
                 if artifact.get("type") == artifact_type:
                     artifact_name = artifact.get("name", id)
+                    logger.info(f"DEBUG: Extracted artifact_name='{artifact_name}' from storage")
+                else:
+                    logger.warning(f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'")
+            else:
+                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage")
             
             # Verify artifact exists in S3
             artifact_exists = False
             if artifact_name:
+                logger.info(f"DEBUG: Verifying {artifact_type} exists in S3: name='{artifact_name}'")
                 try:
                     sanitized_name = sanitize_model_id_for_s3(artifact_name)
                     version = artifact.get("version", "main") if id in _artifact_storage else "main"
                     safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
                     s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+                    logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                     try:
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         artifact_exists = True
-                    except ClientError:
+                        logger.info(f"DEBUG: {artifact_type} exists in S3: {s3_key}")
+                    except ClientError as e:
+                        error_code = e.response.get("Error", {}).get("Code", "")
+                        logger.warning(f"DEBUG: {artifact_type} not found in S3: {s3_key}, error_code={error_code}")
                         pass
-                except Exception:
+                except Exception as e:
+                    logger.error(f"DEBUG: Exception verifying {artifact_type} in S3: {str(e)}", exc_info=True)
                     pass
+            else:
+                logger.warning(f"DEBUG: No artifact_name found, cannot verify in S3")
             
             if artifact_exists and id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                return {
+                result = {
                     "metadata": {
                         "name": artifact.get("name", id),
                         "id": id,
@@ -931,6 +1071,9 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         )
                     },
                 }
+                logger.info(f"DEBUG: Returning {artifact_type} artifact: {result}")
+                return result
+            logger.error(f"DEBUG: {artifact_type} not found: id='{id}', artifact_name='{artifact_name}', exists_in_s3={artifact_exists}")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
         raise
@@ -1779,46 +1922,84 @@ def get_package_rate(id: str, request: Request):
 
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
+    logger.info(f"=== GET /artifact/model/{id}/rate ===")
+    logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
+    
     if not verify_auth_token(request):
+        logger.error(f"DEBUG: Authentication failed for /artifact/model/{id}/rate")
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
+    logger.info(f"DEBUG: Authentication passed for /artifact/model/{id}/rate")
+    
     try:
+        logger.info(f"DEBUG: Validating id format: '{id}'")
         if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+            logger.error(f"DEBUG: Invalid id format: '{id}'")
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_id or it is formed improperly, or is invalid.",
             )
+        
         found = False
+        model_name = None
+        logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
+            logger.info(f"DEBUG: Found artifact in storage: {artifact}")
             if artifact.get("type") == "model":
                 found = True
+                model_name = artifact.get("name", id)
+                logger.info(f"DEBUG: Model found in storage: name='{model_name}'")
+            else:
+                logger.warning(f"DEBUG: Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+        else:
+            logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage")
+        
         if not found:
+            logger.info(f"DEBUG: Not found in storage, searching S3")
             try:
+                logger.info(f"DEBUG: Calling list_models with regex: '^{re.escape(id)}$'")
                 result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                if result.get("models"):
+                models_found = result.get("models", [])
+                logger.info(f"DEBUG: list_models returned {len(models_found)} models")
+                if models_found:
                     found = True
+                    logger.info(f"DEBUG: Model found via list_models")
                 else:
+                    logger.info(f"DEBUG: No models found, trying common versions")
                     common_versions = ["1.0.0", "main", "latest"]
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
+                            logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             found = True
+                            logger.info(f"DEBUG: Found model with common version: {s3_key}")
                             break
-                        except ClientError:
+                        except ClientError as e:
+                            error_code = e.response.get("Error", {}).get("Code", "")
+                            logger.debug(f"DEBUG: Common version check failed: {s3_key}, error_code={error_code}")
                             continue
-            except Exception:
+            except Exception as e:
+                logger.error(f"DEBUG: Exception searching S3: {str(e)}", exc_info=True)
                 pass
+        
         if not found:
+            logger.error(f"DEBUG: Model not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
         # Analyze model content - if this fails, return 500
+        logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
         try:
-            rating = analyze_model_content(id)
+            # Use model_name if available, otherwise use id
+            analysis_id = model_name if model_name else id
+            logger.info(f"DEBUG: Calling analyze_model_content with: '{analysis_id}'")
+            rating = analyze_model_content(analysis_id)
+            logger.info(f"DEBUG: analyze_model_content returned: {rating}")
             if not rating:
+                logger.error(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'")
                 raise HTTPException(
                     status_code=500,
                     detail="The artifact rating system encountered an error while computing at least one metric.",
@@ -1826,6 +2007,9 @@ def get_model_rate(id: str, request: Request):
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(
+                f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}", exc_info=True
+            )
             logger.error(
                 f"Error analyzing model content for {id}: {str(e)}", exc_info=True
             )
@@ -1835,6 +2019,7 @@ def get_model_rate(id: str, request: Request):
             )
 
         # Build ModelRating response with all required fields
+        logger.info(f"DEBUG: Building rating response for id='{id}'")
         result = {
             "name": id,
             "category": alias(rating, "category") or "unknown",
@@ -1878,6 +2063,7 @@ def get_model_rate(id: str, request: Request):
                 "aws_server": round(float(alias(rating, "size_score", "aws_server") or 0.0), 2),
             },
         }
+        logger.info(f"DEBUG: Returning rating result: {result}")
         return result
     except HTTPException:
         raise
