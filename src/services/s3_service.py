@@ -10,6 +10,7 @@ import urllib.error
 import requests
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
 from botocore.auth import SigV4Auth
@@ -291,6 +292,79 @@ def upload_model(
             )
 
 
+def store_artifact_metadata(
+    artifact_id: str, artifact_name: str, artifact_type: str, version: str, url: str
+) -> Dict[str, str]:
+    """
+    Store artifact metadata in S3 for all artifact types (model, dataset, code).
+    For models, the actual file is already stored via upload_model.
+    For datasets and code, we store a metadata JSON file.
+    
+    Args:
+        artifact_id: Unique artifact identifier
+        artifact_name: Name of the artifact
+        artifact_type: Type of artifact (model, dataset, code)
+        version: Version of the artifact
+        url: Source URL of the artifact
+    
+    Returns:
+        Dict with success message and S3 key
+    """
+    if not aws_available:
+        logger.warning("AWS not available, skipping S3 metadata storage")
+        return {"message": "Metadata storage skipped (AWS unavailable)"}
+    
+    try:
+        # Sanitize artifact name for S3 key
+        safe_name = (
+            artifact_name.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+            .replace(":", "_")
+            .replace("\\", "_")
+            .replace("?", "_")
+            .replace("*", "_")
+            .replace('"', "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+        )
+        safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+        
+        # Create metadata JSON
+        metadata = {
+            "artifact_id": artifact_id,
+            "name": artifact_name,
+            "type": artifact_type,
+            "version": version,
+            "url": url,
+            "stored_at": datetime.now(timezone.utc).isoformat(),
+        }
+        metadata_json = json.dumps(metadata, indent=2)
+        
+        # Store metadata in S3
+        s3_key = f"{artifact_type}s/{safe_name}/{safe_version}/metadata.json"
+        s3.put_object(
+            Bucket=ap_arn,
+            Key=s3_key,
+            Body=metadata_json.encode("utf-8"),
+            ContentType="application/json",
+        )
+        
+        logger.info(
+            f"AWS S3 metadata stored: {artifact_type} {artifact_name} v{version} -> {s3_key}"
+        )
+        return {"message": "Metadata stored successfully", "s3_key": s3_key}
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(
+            f"AWS S3 metadata storage failed for {artifact_type} {artifact_name}: {error_msg}",
+            exc_info=True,
+        )
+        # Don't fail ingestion if metadata storage fails, just log it
+        return {"message": f"Metadata storage failed: {error_msg}"}
+
+
 def download_model(model_id: str, version: str, component: str = "full") -> bytes:
     if not aws_available:
         raise HTTPException(
@@ -391,6 +465,87 @@ def search_model_card_content(model_id: str, version: str, regex_pattern: str) -
         return False
     except Exception:
         return False
+
+
+def list_artifacts_from_s3(
+    artifact_type: str = "model",
+    name_regex: str = None,
+    limit: int = 1000,
+) -> Dict[str, Any]:
+    """
+    List artifacts from S3 for a given type (model, dataset, code).
+    For models, looks for model.zip files.
+    For datasets and code, looks for metadata.json files.
+    
+    Args:
+        artifact_type: Type of artifact to list (model, dataset, code)
+        name_regex: Optional regex pattern to filter by name
+        limit: Maximum number of results to return
+    
+    Returns:
+        Dict with list of artifacts found
+    """
+    if not aws_available:
+        return {"artifacts": []}
+    
+    limit = min(limit, 1000)
+    results = []
+    
+    try:
+        if artifact_type == "model":
+            # List models (model.zip files)
+            params = {"Bucket": ap_arn, "Prefix": "models/", "MaxKeys": limit}
+            response = s3.list_objects_v2(**params)
+            if "Contents" in response:
+                name_pattern = None
+                if name_regex:
+                    try:
+                        name_pattern = re.compile(name_regex, re.IGNORECASE)
+                    except re.error:
+                        return {"artifacts": []}
+                
+                for item in response["Contents"]:
+                    key = item["Key"]
+                    if key.endswith("/model.zip"):
+                        parts = key.split("/")
+                        if len(parts) >= 3:
+                            model_name = parts[1]
+                            model_version = parts[2]
+                            if name_pattern and not name_pattern.search(model_name):
+                                continue
+                            results.append({"name": model_name, "version": model_version, "type": "model"})
+        else:
+            # List datasets or code (metadata.json files)
+            prefix = f"{artifact_type}s/"
+            params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": limit}
+            response = s3.list_objects_v2(**params)
+            if "Contents" in response:
+                name_pattern = None
+                if name_regex:
+                    try:
+                        name_pattern = re.compile(name_regex, re.IGNORECASE)
+                    except re.error:
+                        return {"artifacts": []}
+                
+                for item in response["Contents"]:
+                    key = item["Key"]
+                    if key.endswith("/metadata.json"):
+                        parts = key.split("/")
+                        if len(parts) >= 3:
+                            artifact_name = parts[1]
+                            artifact_version = parts[2]
+                            if name_pattern and not name_pattern.search(artifact_name):
+                                continue
+                            results.append({
+                                "name": artifact_name,
+                                "version": artifact_version,
+                                "type": artifact_type
+                            })
+        
+        return {"artifacts": results}
+    except Exception as e:
+        logger.warning(f"Error listing {artifact_type} artifacts from S3: {str(e)}")
+        return {"artifacts": []}
 
 
 def list_models(

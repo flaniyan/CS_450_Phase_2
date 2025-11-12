@@ -30,6 +30,7 @@ from .services.auth_service import (
 )
 from .services.s3_service import (
     list_models,
+    list_artifacts_from_s3,
     upload_model,
     download_model,
     reset_registry,
@@ -38,6 +39,7 @@ from .services.s3_service import (
     s3,
     ap_arn,
     model_ingestion,
+    store_artifact_metadata,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
 from .services.license_compatibility import (
@@ -147,6 +149,23 @@ async def startup_event():
 
 
 _artifact_storage = {}
+
+
+def sanitize_model_id_for_s3(model_id: str) -> str:
+    """Sanitize model ID for S3 key (same logic as upload_model)"""
+    return (
+        model_id.replace("https://huggingface.co/", "")
+        .replace("http://huggingface.co/", "")
+        .replace("/", "_")
+        .replace(":", "_")
+        .replace("\\", "_")
+        .replace("?", "_")
+        .replace("*", "_")
+        .replace('"', "_")
+        .replace("<", "_")
+        .replace(">", "_")
+        .replace("|", "_")
+    )
 
 
 def verify_auth_token(request: Request) -> bool:
@@ -625,9 +644,11 @@ async def search_artifacts_by_regex(request: Request):
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
 
-        # Search for models matching regex
+        # Search for artifacts matching regex in S3 (all types: model, dataset, code)
         artifacts = []
         seen_artifact_ids = set()
+        
+        # Search models from S3
         try:
             result = list_models(name_regex=regex_pattern, limit=1000)
             for model in result.get("models", []):
@@ -656,18 +677,113 @@ async def search_artifacts_by_regex(request: Request):
             logger.warning(
                 f"Error searching models with regex {regex_pattern}: {str(e)}"
             )
+        
+        # Search datasets from S3
+        try:
+            result = list_artifacts_from_s3(artifact_type="dataset", name_regex=regex_pattern, limit=1000)
+            for dataset in result.get("artifacts", []):
+                dataset_name = dataset.get("name", "")
+                # Find artifact_id for this dataset name in storage
+                artifact_id = None
+                for stored_id, stored_artifact in _artifact_storage.items():
+                    if stored_artifact.get("name") == dataset_name and stored_artifact.get("type") == "dataset":
+                        artifact_id = stored_id
+                        break
+                
+                if not artifact_id:
+                    artifact_id = dataset_name
+                
+                if artifact_id not in seen_artifact_ids:
+                    seen_artifact_ids.add(artifact_id)
+                    artifacts.append(
+                        {
+                            "name": dataset_name,
+                            "id": artifact_id,
+                            "type": "dataset",
+                        }
+                    )
+        except Exception as e:
+            logger.warning(
+                f"Error searching datasets with regex {regex_pattern}: {str(e)}"
+            )
+        
+        # Search code artifacts from S3
+        try:
+            result = list_artifacts_from_s3(artifact_type="code", name_regex=regex_pattern, limit=1000)
+            for code_artifact in result.get("artifacts", []):
+                code_name = code_artifact.get("name", "")
+                # Find artifact_id for this code artifact name in storage
+                artifact_id = None
+                for stored_id, stored_artifact in _artifact_storage.items():
+                    if stored_artifact.get("name") == code_name and stored_artifact.get("type") == "code":
+                        artifact_id = stored_id
+                        break
+                
+                if not artifact_id:
+                    artifact_id = code_name
+                
+                if artifact_id not in seen_artifact_ids:
+                    seen_artifact_ids.add(artifact_id)
+                    artifacts.append(
+                        {
+                            "name": code_name,
+                            "id": artifact_id,
+                            "type": "code",
+                        }
+                    )
+        except Exception as e:
+            logger.warning(
+                f"Error searching code artifacts with regex {regex_pattern}: {str(e)}"
+            )
 
-        # Search artifacts in storage matching regex
+        # Search artifacts in storage matching regex, but verify they exist in S3
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
+            artifact_type = artifact.get("type", "model")
             try:
                 if re.search(regex_pattern, artifact_name) and artifact_id not in seen_artifact_ids:
+                    # Verify artifact exists in S3 before including it
+                    artifact_exists = False
+                    try:
+                        if artifact_type == "model":
+                            # Check if model exists in S3
+                            sanitized_artifact_name = sanitize_model_id_for_s3(artifact_name)
+                            result = list_models(name_regex=f"^{re.escape(sanitized_artifact_name)}$", limit=1)
+                            if result.get("models"):
+                                model = result["models"][0]
+                                v = model.get("version", "main")
+                                model_n = model.get("name", sanitized_artifact_name)
+                                safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                s3_key = f"models/{model_n}/{safe_version}/model.zip"
+                                try:
+                                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                    artifact_exists = True
+                                except ClientError:
+                                    pass
+                        else:
+                            # For datasets and code, check if metadata.json exists in S3
+                            sanitized_name = sanitize_model_id_for_s3(artifact_name)
+                            version = artifact.get("version", "main")
+                            safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                            s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+                            try:
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                artifact_exists = True
+                            except ClientError:
+                                pass
+                    except Exception:
+                        pass
+                    
+                    # Only include if artifact exists in S3
+                    if not artifact_exists:
+                        continue
+                    
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
                         {
                             "name": artifact_name,
                             "id": artifact_id,
-                            "type": artifact.get("type", "model"),
+                            "type": artifact_type,
                         }
                     )
             except re.error:
@@ -700,34 +816,37 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
     try:
         if artifact_type == "model":
-            # First, check if id is in _artifact_storage (primary storage for artifact_id lookups)
+            # For models, ALWAYS verify existence in S3 (source of truth)
+            model_name = None
+            version = None
+            found = False
+            
+            # First, check if id is in _artifact_storage to get the model name
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 if artifact.get("type") == "model":
-                    return {
-                        "metadata": {
-                            "name": artifact.get("name", id),
-                            "id": id,
-                            "type": artifact_type,
-                        },
-                        "data": {
-                            "url": artifact.get(
-                                "url", f"https://huggingface.co/{artifact.get('name', id)}"
-                            )
-                        },
-                    }
-            # If not found in storage, try to find by model name (id might be a model name)
-            version = None
-            found = False
+                    model_name = artifact.get("name", id)
+            
+            # If we have a model name from storage, use it; otherwise use id as model name
+            search_name = model_name if model_name else id
+            
+            # Query S3 to verify the model exists
+            # Note: list_models returns sanitized model names from S3 keys, so we need to search with sanitized name
+            sanitized_search_name = sanitize_model_id_for_s3(search_name)
             try:
-                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                result = list_models(name_regex=f"^{re.escape(sanitized_search_name)}$", limit=1000)
                 if result.get("models"):
                     for model in result["models"]:
                         v = model["version"]
+                        model_n = model.get("name", sanitized_search_name)
+                        # Verify the model actually exists in S3
                         try:
-                            s3_key = f"models/{id}/{v}/model.zip"
+                            safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
+                            s3_key = f"models/{model_n}/{safe_version}/model.zip"
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             version = v
+                            # Map back to original model name if we have it
+                            model_name = search_name  # Use original name, not sanitized
                             found = True
                             break
                         except ClientError as e:
@@ -735,18 +854,22 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             if error_code == "NoSuchKey" or error_code == "404":
                                 continue
                             else:
-                                print(
+                                logger.warning(
                                     f"Unexpected error checking {s3_key}: {error_code}"
                                 )
             except Exception as e:
-                print(f"Error calling list_models: {e}")
+                logger.warning(f"Error calling list_models: {e}")
+            
+            # If not found via list_models, try common versions directly with sanitized name
             if not found:
                 common_versions = ["1.0.0", "main", "latest"]
                 for v in common_versions:
                     try:
-                        s3_key = f"models/{id}/{v}/model.zip"
+                        safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
+                        s3_key = f"models/{sanitized_search_name}/{safe_version}/model.zip"
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
+                        model_name = search_name
                         found = True
                         break
                     except ClientError as e:
@@ -754,16 +877,47 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         if error_code == "NoSuchKey" or error_code == "404":
                             continue
                         else:
-                            print(f"Unexpected error checking {s3_key}: {error_code}")
+                            logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+            
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            model = {"name": id, "version": version}
+            
+            # Return with the verified model name and id
             return {
-                "metadata": {"name": model["name"], "id": id, "type": artifact_type},
-                "data": {"url": f"https://huggingface.co/{id}"},
+                "metadata": {
+                    "name": model_name if model_name else id,
+                    "id": id,
+                    "type": artifact_type,
+                },
+                "data": {
+                    "url": f"https://huggingface.co/{model_name if model_name else id}"
+                },
             }
         else:
+            # For dataset and code artifacts, verify they exist in S3
+            artifact_name = None
             if id in _artifact_storage:
+                artifact = _artifact_storage[id]
+                if artifact.get("type") == artifact_type:
+                    artifact_name = artifact.get("name", id)
+            
+            # Verify artifact exists in S3
+            artifact_exists = False
+            if artifact_name:
+                try:
+                    sanitized_name = sanitize_model_id_for_s3(artifact_name)
+                    version = artifact.get("version", "main") if id in _artifact_storage else "main"
+                    safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+                    try:
+                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                        artifact_exists = True
+                    except ClientError:
+                        pass
+                except Exception:
+                    pass
+            
+            if artifact_exists and id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 return {
                     "metadata": {
@@ -860,6 +1014,13 @@ async def post_artifact_ingest(request: Request):
                     "url": url,
                 }
                 
+                # Store artifact metadata in S3 (model file already stored via model_ingestion)
+                try:
+                    store_artifact_metadata(artifact_id, name, artifact_type, version, url)
+                except Exception as s3_error:
+                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                    # Don't fail ingestion if S3 metadata storage fails
+                
                 return {
                     "message": "Ingest successful",
                     "details": {
@@ -882,7 +1043,7 @@ async def post_artifact_ingest(request: Request):
                     detail=f"Model ingestion failed: {str(model_error)}",
                 )
         else:
-            # For non-model artifacts, just store metadata
+            # For non-model artifacts (dataset, code), store metadata in S3
             artifact_id = str(random.randint(1000000000, 9999999999))
             url = f"https://example.com/{artifact_type}/{name}"
             _artifact_storage[artifact_id] = {
@@ -892,6 +1053,14 @@ async def post_artifact_ingest(request: Request):
                 "id": artifact_id,
                 "url": url,
             }
+            
+            # Store artifact metadata in S3
+            try:
+                store_artifact_metadata(artifact_id, name, artifact_type, version, url)
+            except Exception as s3_error:
+                logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                # Don't fail ingestion if S3 metadata storage fails
+            
             return {
                 "message": "Ingest successful",
                 "details": {
@@ -1029,6 +1198,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         "id": artifact_id,
                         "url": url,
                     }
+                    
+                    # Store artifact metadata in S3 (model file already stored via model_ingestion)
+                    try:
+                        store_artifact_metadata(artifact_id, model_id, artifact_type, version, url)
+                    except Exception as s3_error:
+                        logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                        # Don't fail ingestion if S3 metadata storage fails
+                    
                     return Response(
                         content=json.dumps(
                             {
@@ -1066,6 +1243,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     "id": artifact_id,
                     "url": url,
                 }
+                
+                # Store artifact metadata in S3
+                try:
+                    store_artifact_metadata(artifact_id, model_id, artifact_type, version, url)
+                except Exception as s3_error:
+                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                    # Don't fail ingestion if S3 metadata storage fails
+                
                 return Response(
                     content=json.dumps(
                         {
@@ -1113,6 +1298,13 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 "id": artifact_id,
                 "url": url,
             }
+            
+            # Store artifact metadata in S3
+            try:
+                store_artifact_metadata(artifact_id, artifact_name, artifact_type, version, url)
+            except Exception as s3_error:
+                logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                # Don't fail ingestion if S3 metadata storage fails
             
             return Response(
                 content=json.dumps(
@@ -1579,7 +1771,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.get("/package/{id}/rate")
+@app.get("/package/{id}")
 def get_package_rate(id: str, request: Request):
     """Alias for /artifact/model/{id}/rate to support autograder"""
     return get_model_rate(id, request)
