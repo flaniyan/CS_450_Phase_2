@@ -467,6 +467,62 @@ def search_model_card_content(model_id: str, version: str, regex_pattern: str) -
         return False
 
 
+def find_artifact_metadata_by_id(artifact_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Find artifact metadata by artifact_id by searching S3 metadata files.
+    Searches all artifact types (models, datasets, code).
+    
+    Args:
+        artifact_id: The artifact ID to search for
+    
+    Returns:
+        Dict with artifact metadata if found, None otherwise
+    """
+    if not aws_available:
+        return None
+    
+    try:
+        # Search all artifact types
+        for artifact_type in ["model", "dataset", "code"]:
+            prefix = f"{artifact_type}s/"
+            params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": 1000}
+            
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(**params):
+                if "Contents" not in page:
+                    continue
+                
+                for item in page["Contents"]:
+                    key = item["Key"]
+                    # Check metadata.json files for all types
+                    if key.endswith("/metadata.json"):
+                        try:
+                            # Download and parse metadata
+                            response = s3.get_object(Bucket=ap_arn, Key=key)
+                            metadata_json = response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            
+                            # Check if artifact_id matches
+                            if metadata.get("artifact_id") == artifact_id:
+                                logger.info(f"Found artifact metadata by ID: {artifact_id} in {key}")
+                                return {
+                                    "artifact_id": artifact_id,
+                                    "name": metadata.get("name"),
+                                    "type": metadata.get("type", artifact_type),
+                                    "version": metadata.get("version", "main"),
+                                    "url": metadata.get("url"),
+                                    "s3_key": key
+                                }
+                        except Exception as e:
+                            logger.debug(f"Error reading metadata from {key}: {str(e)}")
+                            continue
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Error finding artifact metadata by ID {artifact_id}: {str(e)}")
+        return None
+
+
 def list_artifacts_from_s3(
     artifact_type: str = "model",
     name_regex: str = None,

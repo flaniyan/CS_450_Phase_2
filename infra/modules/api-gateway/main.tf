@@ -99,6 +99,19 @@ resource "aws_api_gateway_integration_response" "root_get_200" {
   }
 }
 
+# NOTE: The /{proxy+} resource exists in AWS but should be removed
+# as it intercepts requests before specific routes can match.
+# To remove it:
+# 1. Delete it manually from AWS Console, OR
+# 2. Import it: terraform import 'module.api_gateway.aws_api_gateway_resource.proxy[0]' <rest_api_id>/<resource_id>
+# 3. Then Terraform will delete it on next apply
+# resource "aws_api_gateway_resource" "proxy" {
+#   count       = 0  # Set to 0 to remove, or 1 to import then remove
+#   rest_api_id = aws_api_gateway_rest_api.main_api.id
+#   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
+#   path_part   = "{proxy+}"
+# }
+
 resource "aws_api_gateway_resource" "health" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id

@@ -29,6 +29,7 @@ from .services.auth_service import (
     purge_tokens,
 )
 from .services.s3_service import (
+    find_artifact_metadata_by_id,
     list_models,
     list_artifacts_from_s3,
     upload_model,
@@ -912,7 +913,23 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 else:
                     logger.warning(f"DEBUG: Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
             else:
-                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage")
+                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
+                # Try to find artifact metadata in S3 by artifact_id
+                s3_metadata = find_artifact_metadata_by_id(id)
+                if s3_metadata and s3_metadata.get("type") == "model":
+                    model_name = s3_metadata.get("name")
+                    stored_version = s3_metadata.get("version", "main")
+                    logger.info(f"DEBUG: Found artifact in S3 metadata: model_name='{model_name}', version='{stored_version}'")
+                    # Restore to _artifact_storage for future lookups
+                    _artifact_storage[id] = {
+                        "name": model_name,
+                        "type": "model",
+                        "version": stored_version,
+                        "id": id,
+                        "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
+                    }
+                else:
+                    logger.info(f"DEBUG: Artifact id '{id}' not found in S3 metadata either")
             
             # If we have a model name from storage, use it; otherwise use id as model name
             search_name = model_name if model_name else id
@@ -1021,25 +1038,42 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             logger.info(f"DEBUG: Processing {artifact_type} artifact with id='{id}'")
             # For dataset and code artifacts, verify they exist in S3
             artifact_name = None
+            version = "main"
             logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
                 logger.info(f"DEBUG: Found artifact in storage: {artifact}")
                 if artifact.get("type") == artifact_type:
                     artifact_name = artifact.get("name", id)
-                    logger.info(f"DEBUG: Extracted artifact_name='{artifact_name}' from storage")
+                    version = artifact.get("version", "main")
+                    logger.info(f"DEBUG: Extracted artifact_name='{artifact_name}', version='{version}' from storage")
                 else:
                     logger.warning(f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'")
             else:
-                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage")
+                logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
+                # Try to find artifact metadata in S3 by artifact_id
+                s3_metadata = find_artifact_metadata_by_id(id)
+                if s3_metadata and s3_metadata.get("type") == artifact_type:
+                    artifact_name = s3_metadata.get("name")
+                    version = s3_metadata.get("version", "main")
+                    logger.info(f"DEBUG: Found artifact in S3 metadata: name='{artifact_name}', version='{version}'")
+                    # Restore to _artifact_storage for future lookups
+                    _artifact_storage[id] = {
+                        "name": artifact_name,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": id,
+                        "url": s3_metadata.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                    }
+                else:
+                    logger.info(f"DEBUG: Artifact id '{id}' not found in S3 metadata either")
             
             # Verify artifact exists in S3
             artifact_exists = False
             if artifact_name:
-                logger.info(f"DEBUG: Verifying {artifact_type} exists in S3: name='{artifact_name}'")
+                logger.info(f"DEBUG: Verifying {artifact_type} exists in S3: name='{artifact_name}', version='{version}'")
                 try:
                     sanitized_name = sanitize_model_id_for_s3(artifact_name)
-                    version = artifact.get("version", "main") if id in _artifact_storage else "main"
                     safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
                     s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
                     logger.info(f"DEBUG: Checking S3 key: {s3_key}")
@@ -1057,17 +1091,24 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             else:
                 logger.warning(f"DEBUG: No artifact_name found, cannot verify in S3")
             
-            if artifact_exists and id in _artifact_storage:
-                artifact = _artifact_storage[id]
+            if artifact_exists and artifact_name:
+                # Get artifact from storage (should be there now after S3 lookup)
+                artifact = _artifact_storage.get(id, {
+                    "name": artifact_name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": id,
+                    "url": f"https://example.com/{artifact_type}/{artifact_name}"
+                })
                 result = {
                     "metadata": {
-                        "name": artifact.get("name", id),
+                        "name": artifact.get("name", artifact_name),
                         "id": id,
                         "type": artifact_type,
                     },
                     "data": {
                         "url": artifact.get(
-                            "url", f"https://example.com/{artifact_type}/{id}"
+                            "url", f"https://example.com/{artifact_type}/{artifact_name}"
                         )
                     },
                 }
