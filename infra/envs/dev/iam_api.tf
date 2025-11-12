@@ -4,17 +4,13 @@ data "aws_iam_policy_document" "api_ddb_rw" {
     actions = ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:DescribeTable"]
     resources = [
       "arn:aws:dynamodb:us-east-1:838693051036:table/packages",
-      "arn:aws:dynamodb:us-east-1:838693051036:table/packages/index/*",
-      "arn:aws:dynamodb:us-east-1:838693051036:table/artifacts"
+      "arn:aws:dynamodb:us-east-1:838693051036:table/packages/index/*"
     ]
   }
   statement {
-    effect  = "Allow"
-    actions = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem"]
-    resources = [
-      "arn:aws:dynamodb:us-east-1:838693051036:table/packages",
-      "arn:aws:dynamodb:us-east-1:838693051036:table/artifacts"
-    ]
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem"]
+    resources = ["arn:aws:dynamodb:us-east-1:838693051036:table/packages"]
   }
 }
 

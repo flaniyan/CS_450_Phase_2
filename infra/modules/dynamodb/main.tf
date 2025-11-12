@@ -14,7 +14,6 @@ locals {
         }
       }
     }
-    artifacts = { hash_key = "artifact_id" }
   }
 }
 
@@ -23,12 +22,6 @@ resource "aws_dynamodb_table" "this" {
   name         = each.key
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
-
-  lifecycle {
-    # Prevent Terraform from trying to recreate tables that already exist
-    # If table exists, import it first: terraform import 'module.ddb.aws_dynamodb_table.this["table_name"]' table_name
-    create_before_destroy = false
-  }
 
   attribute {
     name = each.value.hash_key
@@ -70,5 +63,4 @@ resource "aws_dynamodb_table" "this" {
 }
 
 output "arn_map" { value = { for k, t in aws_dynamodb_table.this : k => t.arn } }
-
 

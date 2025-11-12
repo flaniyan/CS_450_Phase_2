@@ -46,14 +46,14 @@ resource "aws_ecs_task_definition" "validator_task" {
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
 
     memoryReservation = 1536
-    memory            = 2048
-
+    memory             = 2048
+    
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
-
+    
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30

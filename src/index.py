@@ -8,7 +8,6 @@ import uvicorn
 import random
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
 
 # from fastapi.security import HTTPBearer  # Not used - removed to prevent accidental security enforcement
@@ -45,13 +44,6 @@ from .services.license_compatibility import (
     extract_model_license,
     extract_github_license,
     check_license_compatibility,
-)
-from .services.artifact_storage import (
-    save_artifact_to_db,
-    load_artifact_from_db,
-    load_all_artifacts_from_db,
-    delete_artifact_from_db,
-    clear_all_artifacts_from_db,
 )
 
 # bearer = HTTPBearer(auto_error=True)  # Unused - removed to prevent any accidental security enforcement
@@ -145,60 +137,29 @@ app.add_middleware(LoggingMiddleware)
 
 @app.on_event("startup")
 async def startup_event():
-    """Log all registered routes on startup and load artifacts from DynamoDB"""
+    """Log all registered routes on startup"""
     logger.info("=== REGISTERED ROUTES ===")
     for route in app.routes:
         if hasattr(route, "path") and hasattr(route, "methods"):
             logger.info(f"Route: {list(route.methods)} {route.path}")
     logger.info("=== END REGISTERED ROUTES ===")
     ensure_default_admin()
-    
-    # Load artifacts from DynamoDB on startup
-    global _artifact_storage
-    try:
-        persisted_artifacts = load_all_artifacts_from_db()
-        _artifact_storage.update(persisted_artifacts)
-        logger.info(f"Loaded {len(persisted_artifacts)} artifacts from DynamoDB on startup")
-    except Exception as e:
-        logger.warning(f"Could not load artifacts from DynamoDB on startup: {str(e)}")
-        logger.warning("Continuing with empty artifact storage (artifacts will be lost on restart)")
 
 
 _artifact_storage = {}
 
 
-def save_artifact(artifact_id: str, artifact_data: Dict[str, Any]) -> None:
-    """
-    Save artifact to both in-memory storage and DynamoDB.
-    
-    Args:
-        artifact_id: The unique artifact ID
-        artifact_data: Dictionary containing name, type, version, url, etc.
-    """
-    global _artifact_storage
-    # Save to in-memory storage
-    _artifact_storage[artifact_id] = artifact_data.copy()
-    # Also persist to DynamoDB (non-blocking, failures are logged but don't fail the request)
-    try:
-        save_artifact_to_db(artifact_id, artifact_data)
-    except Exception as e:
-        logger.warning(f"Failed to persist artifact {artifact_id} to DynamoDB: {str(e)}")
-
-
 def verify_auth_token(request: Request) -> bool:
     """Verify auth token from either Authorization or X-Authorization header"""
-    # Check both standard and custom header names (case-insensitive)
-    raw = None
-    for header_name in ["authorization", "x-authorization", "Authorization", "X-Authorization"]:
-        raw = request.headers.get(header_name)
-        if raw:
-            break
-    
-    if not raw:
-        logger.debug(f"No auth header found. Available headers: {list(request.headers.keys())}")
-        return False
-    
+    raw = (
+        request.headers.get("authorization")
+        or request.headers.get("x-authorization")
+        or ""
+    )
     raw = raw.strip()
+
+    if not raw:
+        return False
 
     # Normalize: allow "Bearer <token>" or legacy "bearer <token>"
     if raw.lower().startswith("bearer "):
@@ -210,12 +171,7 @@ def verify_auth_token(request: Request) -> bool:
     # Very light check: looks like a JWT (three parts with dots)
     # (Replace with real verification when ready)
     parts = token.split(".")
-    is_valid = len(parts) == 3 and all(parts)
-    
-    if not is_valid:
-        logger.debug(f"Invalid token format. Token parts: {len(parts)}, All parts present: {all(parts)}")
-    
-    return is_valid
+    return len(parts) == 3 and all(parts)
 
 
 @app.get("/health")
@@ -445,11 +401,6 @@ def reset_system(request: Request):
     try:
         global _artifact_storage
         _artifact_storage.clear()
-        # Also clear from DynamoDB
-        try:
-            clear_all_artifacts_from_db()
-        except Exception as e:
-            logger.warning(f"Could not clear artifacts from DynamoDB: {str(e)}")
         result = reset_registry()
         purge_tokens()
         ensure_default_admin()
@@ -677,27 +628,20 @@ async def search_artifacts_by_regex(request: Request):
         # Search for models matching regex
         artifacts = []
         seen_artifact_ids = set()
-        logger.info(f"Searching with regex pattern: {regex_pattern}")
-        logger.info(f"Current _artifact_storage has {len(_artifact_storage)} entries: {list(_artifact_storage.keys())}")
-        
         try:
             result = list_models(name_regex=regex_pattern, limit=1000)
-            logger.info(f"S3 search returned {len(result.get('models', []))} models")
             for model in result.get("models", []):
                 model_name = model.get("name", "")
-                logger.info(f"Found model in S3: {model_name}")
                 # Find artifact_id for this model name in storage
                 artifact_id = None
                 for stored_id, stored_artifact in _artifact_storage.items():
                     if stored_artifact.get("name") == model_name and stored_artifact.get("type") == "model":
                         artifact_id = stored_id
-                        logger.info(f"Found artifact_id {artifact_id} for model {model_name} in storage")
                         break
                 
                 # Use found artifact_id or fallback to model name
                 if not artifact_id:
                     artifact_id = model.get("id", model_name)
-                    logger.info(f"Using fallback artifact_id {artifact_id} for model {model_name}")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -714,14 +658,10 @@ async def search_artifacts_by_regex(request: Request):
             )
 
         # Search artifacts in storage matching regex
-        logger.info(f"Searching {len(_artifact_storage)} artifacts in storage")
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
-            logger.info(f"Checking artifact: id={artifact_id}, name={artifact_name}, type={artifact.get('type')}")
             try:
-                match_result = re.search(regex_pattern, artifact_name)
-                logger.info(f"Regex match result for '{artifact_name}': {match_result is not None}")
-                if match_result and artifact_id not in seen_artifact_ids:
+                if re.search(regex_pattern, artifact_name) and artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
                         {
@@ -730,13 +670,10 @@ async def search_artifacts_by_regex(request: Request):
                             "type": artifact.get("type", "model"),
                         }
                     )
-                    logger.info(f"Added artifact to results: {artifact_name} (id: {artifact_id})")
-            except re.error as regex_err:
+            except re.error:
                 # Skip invalid regex matches
-                logger.warning(f"Regex error for artifact {artifact_id}: {regex_err}")
                 continue
 
-        logger.info(f"Total artifacts found: {len(artifacts)}")
         if not artifacts:
             raise HTTPException(
                 status_code=404, detail="No artifact found under this regex."
@@ -915,13 +852,13 @@ async def post_artifact_ingest(request: Request):
                 # Generate artifact ID and store metadata
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 url = f"https://huggingface.co/{name}"
-                save_artifact(artifact_id, {
+                _artifact_storage[artifact_id] = {
                     "name": name,
                     "type": artifact_type,
                     "version": version,
                     "id": artifact_id,
                     "url": url,
-                })
+                }
                 
                 return {
                     "message": "Ingest successful",
@@ -948,13 +885,13 @@ async def post_artifact_ingest(request: Request):
             # For non-model artifacts, just store metadata
             artifact_id = str(random.randint(1000000000, 9999999999))
             url = f"https://example.com/{artifact_type}/{name}"
-            save_artifact(artifact_id, {
+            _artifact_storage[artifact_id] = {
                 "name": name,
                 "type": artifact_type,
                 "version": version,
                 "id": artifact_id,
                 "url": url,
-            })
+            }
             return {
                 "message": "Ingest successful",
                 "details": {
@@ -1085,13 +1022,13 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
                     # Store artifact metadata in _artifact_storage keyed by artifact_id
-                    save_artifact(artifact_id, {
+                    _artifact_storage[artifact_id] = {
                         "name": model_id,
                         "type": artifact_type,
                         "version": version,
                         "id": artifact_id,
                         "url": url,
-                    })
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -1122,13 +1059,13 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 # Store artifact metadata in _artifact_storage keyed by artifact_id
-                save_artifact(artifact_id, {
+                _artifact_storage[artifact_id] = {
                     "name": model_id,
                     "type": artifact_type,
                     "version": version,
                     "id": artifact_id,
                     "url": url,
-                })
+                }
                 return Response(
                     content=json.dumps(
                         {
@@ -1169,13 +1106,13 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # For now, we perform basic validation and storage
             artifact_id = str(random.randint(1000000000, 9999999999))
             
-            save_artifact(artifact_id, {
+            _artifact_storage[artifact_id] = {
                 "name": artifact_name,
                 "type": artifact_type,
                 "version": version,
                 "id": artifact_id,
                 "url": url,
-            })
+            }
             
             return Response(
                 content=json.dumps(
@@ -1284,12 +1221,12 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                             status_code=400,
                             detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid. URL is required in data.",
                         )
-                    save_artifact(id, {
+                    _artifact_storage[id] = {
                         "name": metadata.get("name", artifact.get("name", id)),
                         "type": artifact_type,
                         "id": id,
                         "url": url,
-                    })
+                    }
                     return Response(status_code=200)
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
@@ -1318,11 +1255,6 @@ def delete_artifact(artifact_type: str, id: str, request: Request):
             artifact = _artifact_storage[id]
             if artifact.get("type") == artifact_type:
                 del _artifact_storage[id]
-                # Also delete from DynamoDB
-                try:
-                    delete_artifact_from_db(id)
-                except Exception as e:
-                    logger.warning(f"Failed to delete artifact {id} from DynamoDB: {str(e)}")
                 deleted = True
         if artifact_type == "model":
             deleted_count = 0
@@ -1649,14 +1581,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
 
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
-    # Check authentication
     if not verify_auth_token(request):
-        # Log available headers for debugging
-        auth_headers = {
-            k: v for k, v in request.headers.items() 
-            if 'auth' in k.lower()
-        }
-        logger.warning(f"Authentication failed for /artifact/model/{id}/rate. Auth headers found: {auth_headers}")
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
