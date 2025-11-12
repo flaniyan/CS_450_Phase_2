@@ -433,20 +433,48 @@ def get_artifact_by_name(name: str, request: Request):
         result = list_models(name_regex=name_pattern, limit=1000)
         artifacts = []
 
-        # Add models from S3
+        # Track which artifact_ids we've already added to avoid duplicates
+        seen_artifact_ids = set()
+        
+        # Add models from S3 - find their artifact_ids from storage
         for model in result.get("models", []):
-            if model.get("name") == name:  # Exact match
-                artifacts.append(
-                    {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
-                        "type": "model",
-                    }
-                )
+            model_name = model.get("name", "")
+            if model_name == name:  # Exact match
+                # Find artifact_id(s) for this model name in storage
+                found_ids = []
+                for artifact_id, artifact in _artifact_storage.items():
+                    if artifact.get("name") == model_name and artifact.get("type") == "model":
+                        if artifact_id not in seen_artifact_ids:
+                            found_ids.append(artifact_id)
+                            seen_artifact_ids.add(artifact_id)
+                
+                # If we found artifact_ids, use them; otherwise use model name as fallback
+                if found_ids:
+                    for artifact_id in found_ids:
+                        artifacts.append(
+                            {
+                                "name": model_name,
+                                "id": artifact_id,
+                                "type": "model",
+                            }
+                        )
+                else:
+                    # Fallback: use model name as id if no artifact_id found
+                    fallback_id = model.get("id", model_name)
+                    if fallback_id not in seen_artifact_ids:
+                        seen_artifact_ids.add(fallback_id)
+                        artifacts.append(
+                            {
+                                "name": model_name,
+                                "id": fallback_id,
+                                "type": "model",
+                            }
+                        )
 
-        # Add artifacts from storage (non-model artifacts)
+        # Add artifacts from storage (all artifact types including models)
         for artifact_id, artifact in _artifact_storage.items():
-            if artifact.get("name") == name:  # Exact match
+            if artifact.get("name") == name and artifact_id not in seen_artifact_ids:  # Exact match
+                seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
                         "name": artifact.get("name", artifact_id),
@@ -523,16 +551,31 @@ async def search_artifacts_by_regex(request: Request):
 
         # Search for models matching regex
         artifacts = []
+        seen_artifact_ids = set()
         try:
             result = list_models(name_regex=regex_pattern, limit=1000)
             for model in result.get("models", []):
-                artifacts.append(
-                    {
-                        "name": model["name"],
-                        "id": model.get("id", model["name"]),
-                        "type": "model",
-                    }
-                )
+                model_name = model.get("name", "")
+                # Find artifact_id for this model name in storage
+                artifact_id = None
+                for stored_id, stored_artifact in _artifact_storage.items():
+                    if stored_artifact.get("name") == model_name and stored_artifact.get("type") == "model":
+                        artifact_id = stored_id
+                        break
+                
+                # Use found artifact_id or fallback to model name
+                if not artifact_id:
+                    artifact_id = model.get("id", model_name)
+                
+                if artifact_id not in seen_artifact_ids:
+                    seen_artifact_ids.add(artifact_id)
+                    artifacts.append(
+                        {
+                            "name": model_name,
+                            "id": artifact_id,
+                            "type": "model",
+                        }
+                    )
         except Exception as e:
             logger.warning(
                 f"Error searching models with regex {regex_pattern}: {str(e)}"
@@ -542,7 +585,8 @@ async def search_artifacts_by_regex(request: Request):
         for artifact_id, artifact in _artifact_storage.items():
             artifact_name = artifact.get("name", artifact_id)
             try:
-                if re.search(regex_pattern, artifact_name):
+                if re.search(regex_pattern, artifact_name) and artifact_id not in seen_artifact_ids:
+                    seen_artifact_ids.add(artifact_id)
                     artifacts.append(
                         {
                             "name": artifact_name,
@@ -580,20 +624,23 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         )
     try:
         if artifact_type == "model":
+            # First, check if id is in _artifact_storage (primary storage for artifact_id lookups)
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
-                return {
-                    "metadata": {
-                        "name": artifact.get("name", id),
-                        "id": id,
-                        "type": artifact_type,
-                    },
-                    "data": {
-                        "url": artifact.get(
-                            "url", f"https://huggingface.co/{artifact.get('name', id)}"
-                        )
-                    },
-                }
+                if artifact.get("type") == "model":
+                    return {
+                        "metadata": {
+                            "name": artifact.get("name", id),
+                            "id": id,
+                            "type": artifact_type,
+                        },
+                        "data": {
+                            "url": artifact.get(
+                                "url", f"https://huggingface.co/{artifact.get('name', id)}"
+                            )
+                        },
+                    }
+            # If not found in storage, try to find by model name (id might be a model name)
             version = None
             found = False
             try:
@@ -777,6 +824,15 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
 
                     # Generate artifact ID and return success (per Artifact schema)
                     artifact_id = str(random.randint(1000000000, 9999999999))
+                    # Store artifact metadata in _artifact_storage keyed by artifact_id
+                    global _artifact_storage
+                    _artifact_storage[artifact_id] = {
+                        "name": model_id,
+                        "type": artifact_type,
+                        "version": version,
+                        "id": artifact_id,
+                        "url": url,
+                    }
                     return Response(
                         content=json.dumps(
                             {
@@ -806,6 +862,15 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
                 model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
                 artifact_id = str(random.randint(1000000000, 9999999999))
+                # Store artifact metadata in _artifact_storage keyed by artifact_id
+                global _artifact_storage
+                _artifact_storage[artifact_id] = {
+                    "name": model_id,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                }
                 return Response(
                     content=json.dumps(
                         {
