@@ -24,6 +24,12 @@ resource "aws_dynamodb_table" "this" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
 
+  lifecycle {
+    # Prevent Terraform from trying to recreate tables that already exist
+    # If table exists, import it first: terraform import 'module.ddb.aws_dynamodb_table.this["table_name"]' table_name
+    create_before_destroy = false
+  }
+
   attribute {
     name = each.value.hash_key
     type = "S"
