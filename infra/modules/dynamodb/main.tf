@@ -14,6 +14,7 @@ locals {
         }
       }
     }
+    artifacts = { hash_key = "artifact_id" }
   }
 }
 
