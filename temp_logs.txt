@@ -1,0 +1,318 @@
+﻿2025-11-13T22:07:44 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:07:44 INFO:     10.0.20.64:20158 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:07:44 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:44 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:07:44 INFO:     10.0.10.151:41032 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE START: GET /favicon.ico ===
+2025-11-13T22:07:47 === MIDDLEWARE START: GET /favicon.ico ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-01eb3cd7029ab72909d854de', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.117 Safari/537.36', 'accept-encoding': 'gzip, deflate', 'accept': '*/*', 'http-accept': '*/*'} ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:47 === HTTP EXCEPTION CAUGHT: 404 GET /favicon.ico ===
+2025-11-13T22:07:47 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:07:47 ERROR:src.index:Status: 404
+2025-11-13T22:07:47 ERROR:src.index:Detail: Not Found
+2025-11-13T22:07:47 ERROR:src.index:Path: /favicon.ico
+2025-11-13T22:07:47 ERROR:src.index:Method: GET
+2025-11-13T22:07:47 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-01eb3cd7029ab72909d854de', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.117 Safari/537.36', 'accept-encoding': 'gzip, deflate', 'accept': '*/*', 'http-accept': '*/*'}
+2025-11-13T22:07:47 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:07:47     await app(scope, receive, sender)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:07:47     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:07:47     await self.default(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:07:47     raise HTTPException(status_code=404)
+2025-11-13T22:07:47 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:07:47 INFO:     10.0.10.151:41040 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+2025-11-13T22:07:47 === MIDDLEWARE START: GET /aspera/faspex/ ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE START: GET /aspera/faspex/ ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.123', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-612c1a97654f04745374d7e4', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:47 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:07:47 ERROR:src.index:Status: 404
+2025-11-13T22:07:47 ERROR:src.index:Detail: Not Found
+2025-11-13T22:07:47 ERROR:src.index:Path: /aspera/faspex/
+2025-11-13T22:07:47 ERROR:src.index:Method: GET
+2025-11-13T22:07:47 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.123', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-612c1a97654f04745374d7e4', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:07:47 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:07:47     await app(scope, receive, sender)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:07:47     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:07:47     await self.default(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:07:47     raise HTTPException(status_code=404)
+2025-11-13T22:07:47 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:07:47 === HTTP EXCEPTION CAUGHT: 404 GET /aspera/faspex/ ===
+2025-11-13T22:07:47 INFO:     10.0.10.151:41040 - "GET /aspera/faspex/ HTTP/1.1" 404 Not Found
+2025-11-13T22:07:47 === MIDDLEWARE START: GET /console ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE START: GET /console ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-0373b0277f7ac17e526463b8', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:47 === HTTP EXCEPTION CAUGHT: 404 GET /console ===
+2025-11-13T22:07:47 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:07:47 ERROR:src.index:Status: 404
+2025-11-13T22:07:47 ERROR:src.index:Detail: Not Found
+2025-11-13T22:07:47 ERROR:src.index:Path: /console
+2025-11-13T22:07:47 ERROR:src.index:Method: GET
+2025-11-13T22:07:47 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656b3-0373b0277f7ac17e526463b8', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:07:47 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:07:47     await app(scope, receive, sender)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:07:47     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:07:47     await self.default(scope, receive, send)
+2025-11-13T22:07:47   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:07:47     raise HTTPException(status_code=404)
+2025-11-13T22:07:47 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:07:47 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:07:47 INFO:     10.0.10.151:41042 - "GET /console HTTP/1.1" 404 Not Found
+2025-11-13T22:07:59 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:59 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:07:59 INFO:src.index:=== MIDDLEWARE: Headers: {'host': 'localhost:3000', 'user-agent': 'curl/8.14.1', 'accept': '*/*'} ===
+2025-11-13T22:07:59 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:07:59 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:07:59 INFO:     127.0.0.1:42694 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:03 === MIDDLEWARE START: GET /admin/ ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE START: GET /admin/ ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656c3-3fbcd897320a511e2d4ae9ef', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:03 === HTTP EXCEPTION CAUGHT: 404 GET /admin/ ===
+2025-11-13T22:08:03 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:03 ERROR:src.index:Status: 404
+2025-11-13T22:08:03 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:03 ERROR:src.index:Path: /admin/
+2025-11-13T22:08:03 ERROR:src.index:Method: GET
+2025-11-13T22:08:03 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656c3-3fbcd897320a511e2d4ae9ef', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:03 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:03     await app(scope, receive, sender)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:03     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:03     await self.default(scope, receive, send)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:03     raise HTTPException(status_code=404)
+2025-11-13T22:08:03 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:03 INFO:     10.0.10.151:53600 - "GET /admin/ HTTP/1.1" 404 Not Found
+2025-11-13T22:08:03 === MIDDLEWARE START: GET /helpdesk/WebObjects/Helpdesk.woa ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE START: GET /helpdesk/WebObjects/Helpdesk.woa ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656c3-3157d25f71d52e243939de2f', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:03 === HTTP EXCEPTION CAUGHT: 404 GET /helpdesk/WebObjects/Helpdesk.woa ===
+2025-11-13T22:08:03 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:03 ERROR:src.index:Status: 404
+2025-11-13T22:08:03 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:03 ERROR:src.index:Path: /helpdesk/WebObjects/Helpdesk.woa
+2025-11-13T22:08:03 ERROR:src.index:Method: GET
+2025-11-13T22:08:03 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656c3-3157d25f71d52e243939de2f', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:03 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:03     await app(scope, receive, sender)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:03     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:03     await self.default(scope, receive, send)
+2025-11-13T22:08:03   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:03     raise HTTPException(status_code=404)
+2025-11-13T22:08:03 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:03 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:03 INFO:     10.0.10.151:53602 - "GET /helpdesk/WebObjects/Helpdesk.woa HTTP/1.1" 404 Not Found
+2025-11-13T22:08:14 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:14 INFO:     10.0.20.64:27964 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:14 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:14 INFO:     10.0.10.151:51084 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:14 === MIDDLEWARE START: GET /xmldata ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE START: GET /xmldata ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656ce-728b8538749e2bd839d628ae', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:14 === HTTP EXCEPTION CAUGHT: 404 GET /xmldata ===
+2025-11-13T22:08:14 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:14 ERROR:src.index:Status: 404
+2025-11-13T22:08:14 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:14 ERROR:src.index:Path: /xmldata
+2025-11-13T22:08:14 ERROR:src.index:Method: GET
+2025-11-13T22:08:14 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656ce-728b8538749e2bd839d628ae', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:14 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:14   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:14     await app(scope, receive, sender)
+2025-11-13T22:08:14   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:14     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:14   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:14     await self.default(scope, receive, send)
+2025-11-13T22:08:14   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:14     raise HTTPException(status_code=404)
+2025-11-13T22:08:14 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:14 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:14 INFO:     10.0.10.151:51096 - "GET /xmldata?item=all HTTP/1.1" 404 Not Found
+2025-11-13T22:08:15 === MIDDLEWARE START: GET /owncloud/status.php ===
+2025-11-13T22:08:15 INFO:src.index:=== MIDDLEWARE START: GET /owncloud/status.php ===
+2025-11-13T22:08:15 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.123', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656cf-205ebe7f6b1be9e359afc74d', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:15 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:15 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:15 ERROR:src.index:Status: 404
+2025-11-13T22:08:15 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:15 ERROR:src.index:Path: /owncloud/status.php
+2025-11-13T22:08:15 ERROR:src.index:Method: GET
+2025-11-13T22:08:15 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.123', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656cf-205ebe7f6b1be9e359afc74d', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:15 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:15   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:15     await app(scope, receive, sender)
+2025-11-13T22:08:15   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:15     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:15   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:15     await self.default(scope, receive, send)
+2025-11-13T22:08:15   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:15     raise HTTPException(status_code=404)
+2025-11-13T22:08:15 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:15 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:15 === HTTP EXCEPTION CAUGHT: 404 GET /owncloud/status.php ===
+2025-11-13T22:08:15 INFO:     10.0.10.151:51096 - "GET /owncloud/status.php HTTP/1.1" 404 Not Found
+2025-11-13T22:08:25 === MIDDLEWARE START: GET /status.php ===
+2025-11-13T22:08:25 INFO:src.index:=== MIDDLEWARE START: GET /status.php ===
+2025-11-13T22:08:25 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656d9-7afa78187baed54857cadd3b', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:25 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:25 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:25 ERROR:src.index:Status: 404
+2025-11-13T22:08:25 === HTTP EXCEPTION CAUGHT: 404 GET /status.php ===
+2025-11-13T22:08:25 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:25 ERROR:src.index:Path: /status.php
+2025-11-13T22:08:25 ERROR:src.index:Method: GET
+2025-11-13T22:08:25 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.121', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656d9-7afa78187baed54857cadd3b', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:25 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:25   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:25     await app(scope, receive, sender)
+2025-11-13T22:08:25   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:25     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:25   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:25     await self.default(scope, receive, send)
+2025-11-13T22:08:25   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:25     raise HTTPException(status_code=404)
+2025-11-13T22:08:25 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:25 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:25 INFO:     10.0.10.151:25666 - "GET /status.php HTTP/1.1" 404 Not Found
+2025-11-13T22:08:29 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:29 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:29 INFO:src.index:=== MIDDLEWARE: Headers: {'host': 'localhost:3000', 'user-agent': 'curl/8.14.1', 'accept': '*/*'} ===
+2025-11-13T22:08:29 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:29 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:29 INFO:     127.0.0.1:55620 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:36 === MIDDLEWARE START: GET /Telerik.Web.UI.WebResource.axd ===
+2025-11-13T22:08:36 INFO:src.index:=== MIDDLEWARE START: GET /Telerik.Web.UI.WebResource.axd ===
+2025-11-13T22:08:36 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656e4-1fb03e7627a3b3c0317ee2f0', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:36 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:36 === HTTP EXCEPTION CAUGHT: 404 GET /Telerik.Web.UI.WebResource.axd ===
+2025-11-13T22:08:36 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:36 ERROR:src.index:Status: 404
+2025-11-13T22:08:36 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:36 ERROR:src.index:Path: /Telerik.Web.UI.WebResource.axd
+2025-11-13T22:08:36 ERROR:src.index:Method: GET
+2025-11-13T22:08:36 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656e4-1fb03e7627a3b3c0317ee2f0', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:36 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:36   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:36     await app(scope, receive, sender)
+2025-11-13T22:08:36   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:36     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:36   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:36     await self.default(scope, receive, send)
+2025-11-13T22:08:36   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:36     raise HTTPException(status_code=404)
+2025-11-13T22:08:36 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:36 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:36 INFO:     10.0.10.151:20834 - "GET /Telerik.Web.UI.WebResource.axd?type=rau HTTP/1.1" 404 Not Found
+2025-11-13T22:08:44 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:44 INFO:     10.0.20.64:15882 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:44 === MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE START: GET /health ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Headers: {'host': '10.0.10.252:3000', 'connection': 'close', 'user-agent': 'ELB-HealthChecker/2.0', 'accept-encoding': 'gzip, compressed'} ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:44 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:44 INFO:     10.0.10.151:41158 - "GET /health HTTP/1.1" 200 OK
+2025-11-13T22:08:48 === MIDDLEWARE START: PUT /authenticate ===
+2025-11-13T22:08:48 INFO:src.index:=== MIDDLEWARE START: PUT /authenticate ===
+2025-11-13T22:08:48 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '134.68.238.6, 44.218.96.179', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': 'validator-lb-727503296.us-east-1.elb.amazonaws.com', 'x-amzn-trace-id': 'Self=1-691656f0-70cae2316b5baa7d33627cb0;Root=1-691656f0-449cc15d0989cc3d76860a50', 'content-length': '168', 'accept': '*/*', 'content-type': 'application/json', 'user-agent': 'curl/8.14.1', 'x-amzn-apigateway-api-id': '1q1x0d7k93'} ===
+2025-11-13T22:08:48 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:48 INFO:src.index:=== MIDDLEWARE: Response status 200 ===
+2025-11-13T22:08:48 INFO:     10.0.20.64:62682 - "PUT /authenticate HTTP/1.1" 200 OK
+2025-11-13T22:08:49 INFO:src.index:=== MIDDLEWARE START: GET /login.do ===
+2025-11-13T22:08:49 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656f1-3f4632593a8278016c0ea0c2', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'} ===
+2025-11-13T22:08:49 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:49 === MIDDLEWARE START: GET /login.do ===
+2025-11-13T22:08:49 === HTTP EXCEPTION CAUGHT: 404 GET /login.do ===
+2025-11-13T22:08:49 ERROR:src.index:=== HTTP EXCEPTION CAUGHT ===
+2025-11-13T22:08:49 ERROR:src.index:Status: 404
+2025-11-13T22:08:49 ERROR:src.index:Detail: Not Found
+2025-11-13T22:08:49 ERROR:src.index:Path: /login.do
+2025-11-13T22:08:49 ERROR:src.index:Method: GET
+2025-11-13T22:08:49 ERROR:src.index:Headers: {'x-forwarded-for': '45.156.128.122', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': '107.20.132.9', 'x-amzn-trace-id': 'Root=1-691656f1-3f4632593a8278016c0ea0c2', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36', 'accept': '*/*', 'accept-encoding': 'gzip'}
+2025-11-13T22:08:49 ERROR:src.index:Traceback: Traceback (most recent call last):
+2025-11-13T22:08:49   File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 51, in wrapped_app
+2025-11-13T22:08:49     await app(scope, receive, sender)
+2025-11-13T22:08:49   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+2025-11-13T22:08:49     await self.middleware_stack(scope, receive, send)
+2025-11-13T22:08:49   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 765, in app
+2025-11-13T22:08:49     await self.default(scope, receive, send)
+2025-11-13T22:08:49   File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 651, in not_found
+2025-11-13T22:08:49     raise HTTPException(status_code=404)
+2025-11-13T22:08:49 starlette.exceptions.HTTPException: 404: Not Found
+2025-11-13T22:08:49 INFO:src.index:=== MIDDLEWARE: Response status 404 ===
+2025-11-13T22:08:49 INFO:     10.0.10.151:44280 - "GET /login.do HTTP/1.1" 404 Not Found
+2025-11-13T22:08:50 === MIDDLEWARE START: POST /artifact/ingest ===
+2025-11-13T22:08:50 INFO:src.index:=== MIDDLEWARE START: POST /artifact/ingest ===
+2025-11-13T22:08:50 INFO:src.index:=== MIDDLEWARE: Headers: {'x-forwarded-for': '134.68.238.6', 'x-forwarded-proto': 'http', 'x-forwarded-port': '80', 'host': 'validator-lb-727503296.us-east-1.elb.amazonaws.com', 'x-amzn-trace-id': 'Root=1-691656f2-26e43780604c88fb68b67c60', 'content-length': '390', 'user-agent': 'curl/8.14.1', 'accept': '*/*', 'x-authorization': 'bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpc19hZG1pbiI6dHJ1ZX0.example', 'content-type': 'multipart/form-data; boundary=------------------------5c2hJUR0II9snyOKIyRNgf'} ===
+2025-11-13T22:08:50 INFO:src.index:=== MIDDLEWARE: Calling call_next ===
+2025-11-13T22:08:51 [INGEST] Downloaded in 0.43s
+2025-11-13T22:08:52 INFO:root:Found 2 GitHub URL(s) in HTML page
+2025-11-13T22:08:52 [INGEST] Found github field in hf_meta: https://github.com/google-research/bert (type: <class 'str'>)
+2025-11-13T22:08:52 [INGEST] Extracted GitHub URL from github field: https://github.com/google-research/bert
+2025-11-13T22:08:52 [INGEST] Successfully set github_url: https://github.com/google-research/bert
+2025-11-13T22:08:52 [INGEST] Fetching GitHub metadata for https://github.com/google-research/bert
+2025-11-13T22:08:52 WARNING:root:GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits.
+2025-11-13T22:08:52 ERROR:root:GitHub API rate limit exceeded. Reset at: 1763073705
+2025-11-13T22:08:52 [INGEST] Computing metrics...
+2025-11-13T22:08:52 [INGEST] Computed metrics in 0.02s
+2025-11-13T22:08:52 [INGEST] license = 1.00
+2025-11-13T22:08:52 [INGEST] ramp_up = 0.70
+2025-11-13T22:08:52 [INGEST] bus_factor = 0.50
+2025-11-13T22:08:52 [INGEST] performance_claims = 0.90
+2025-11-13T22:08:52 [INGEST] size = 1.00
+2025-11-13T22:08:52 [INGEST] dataset_code = 1.00
+2025-11-13T22:08:52 [INGEST] dataset_quality = 1.00
+2025-11-13T22:08:52 [INGEST] code_quality = 0.80
+2025-11-13T22:08:52 [INGEST] reproducibility = 0.80
+2025-11-13T22:08:52 [INGEST] reviewedness = 0.50
+2025-11-13T22:08:52 [INGEST] treescore = 0.50
+2025-11-13T22:08:52 AWS S3 upload successful: google-bert/bert-base-uncased vmain (311676 bytes) -> models/google-bert_bert-base-uncased/main/model.zip
+2025-11-13T22:08:52 [INGEST] Success in 1.21s
+2025-11-13T22:08:54 INFO:root:Found 2 GitHub URL(s) in HTML page
+2025-11-13T22:08:54 WARNING:root:GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits.
+2025-11-13T22:08:54 ERROR:root:GitHub API rate limit exceeded. Reset at: 1763073705
+2025-11-13T22:08:54 Running ACME metrics for google-bert/bert-base-uncased with 8 files
+2025-11-13T22:08:54 INFO:src.index:DEBUG: ===== GENERATING ARTIFACT ID =====
+2025-11-13T22:08:54 INFO:src.index:DEBUG: Generated artifact_id: '7014411245' for model 'google-bert/bert-base-uncased'
+2025-11-13T22:08:54 INFO:src.index:DEBUG: Storing in _artifact_storage with key: '7014411245'
