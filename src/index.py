@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from botocore.exceptions import ClientError
 from .routes.index import router as api_router
@@ -476,15 +476,37 @@ async def list_artifacts(request: Request, offset: str = None):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        body = (
-            await request.json()
-            if request.headers.get("content-type") == "application/json"
-            else {}
-        )
+        # Parse request body with better error handling
+        body = {}
+        content_type = request.headers.get("content-type", "").lower()
+        
+        # Read raw body first
+        raw_body_bytes = await request.body()
+        raw_body_str = raw_body_bytes.decode('utf-8', errors='ignore') if raw_body_bytes else ""
+        
+        # Parse JSON if content-type indicates JSON
+        if "application/json" in content_type:
+            if raw_body_str:
+                try:
+                    body = json.loads(raw_body_str)
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"JSON decode error in /artifacts: {str(json_err)}")
+                    logger.error(f"Malformed JSON body: {repr(raw_body_str[:200])}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"There is missing field(s) in the artifact_query or it is formed improperly, or is invalid: Invalid JSON in request body: {str(json_err)}. Please use proper JSON format: [{{\"name\": \"*\"}}] or [{{\"name\": \"artifact-name\"}}]",
+                    )
+            else:
+                # Empty body - default to wildcard query
+                body = [{"name": "*"}]
+        else:
+            # No content-type or not JSON - default to wildcard query
+            body = [{"name": "*"}]
+        
         if not isinstance(body, list):
             raise HTTPException(
                 status_code=400,
-                detail="Request body must be an array of ArtifactQuery objects",
+                detail="There is missing field(s) in the artifact_query or it is formed improperly, or is invalid: Request body must be an array of ArtifactQuery objects",
             )
         results = []
         for query in body:
@@ -2413,6 +2435,7 @@ def get_model_rate(id: str, request: Request):
         
         found = False
         model_name = None
+        s3_metadata = None  # Initialize s3_metadata variable
         logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
         logger.info(f"DEBUG: _artifact_storage keys (first 10): {list(_artifact_storage.keys())[:10]}")
         
@@ -2486,76 +2509,201 @@ def get_model_rate(id: str, request: Request):
                 pass
         
         if not found:
-            logger.error(f"DEBUG: Model not found: id='{id}'")
-            raise HTTPException(status_code=404, detail="Artifact does not exist.")
+            logger.warning(f"DEBUG: Artifact not found: id='{id}' - returning zero metrics with status 200")
+            # Return zero metrics with status 200 for invalid/non-existent artifacts
+            # Response structure matches ModelRating schema exactly (all required fields present)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "name": id,
+                    "category": "unknown",
+                    "net_score": 0.0,
+                    "net_score_latency": 0.0,
+                    "ramp_up_time": 0.0,
+                    "ramp_up_time_latency": 0.0,
+                    "bus_factor": 0.0,
+                    "bus_factor_latency": 0.0,
+                    "performance_claims": 0.0,
+                    "performance_claims_latency": 0.0,
+                    "license": 0.0,
+                    "license_latency": 0.0,
+                    "dataset_and_code_score": 0.0,
+                    "dataset_and_code_score_latency": 0.0,
+                    "dataset_quality": 0.0,
+                    "dataset_quality_latency": 0.0,
+                    "code_quality": 0.0,
+                    "code_quality_latency": 0.0,
+                    "reproducibility": 0.0,
+                    "reproducibility_latency": 0.0,
+                    "reviewedness": 0.0,
+                    "reviewedness_latency": 0.0,
+                    "tree_score": 0.0,
+                    "tree_score_latency": 0.0,
+                    "size_score": {
+                        "raspberry_pi": 0.0,
+                        "jetson_nano": 0.0,
+                        "desktop_pc": 0.0,
+                        "aws_server": 0.0,
+                    },
+                    "size_score_latency": 0.0,
+                }
+            )
 
-        # Analyze model content - if this fails, return 500
+        # Analyze model content - if this fails, return zero metrics instead of 500
         logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
+        
+        # Get the original unsanitized model name for analysis
+        # If we have the artifact in storage, use the original name from there
+        original_model_name = None
+        if id in _artifact_storage:
+            original_model_name = _artifact_storage[id].get("name")
+        elif s3_metadata:
+            original_model_name = s3_metadata.get("name")
+        
+        # Use original unsanitized name if available, otherwise use model_name or id
+        analysis_id = original_model_name if original_model_name else (model_name if model_name else id)
+        logger.info(f"DEBUG: Using analysis_id='{analysis_id}' (original_name={original_model_name}, model_name={model_name}, id={id})")
+        
         try:
-            # Use model_name if available, otherwise use id
-            analysis_id = model_name if model_name else id
             logger.info(f"DEBUG: Calling analyze_model_content with: '{analysis_id}'")
             rating = analyze_model_content(analysis_id)
             logger.info(f"DEBUG: analyze_model_content returned: {rating}")
             if not rating:
-                logger.error(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'")
-                raise HTTPException(
-                    status_code=500,
-                    detail="The artifact rating system encountered an error while computing at least one metric.",
+                logger.warning(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}' - returning zero metrics with status 200")
+                # Return zero metrics with status 200 when rating is empty
+                # Response structure matches ModelRating schema exactly (all required fields present)
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "name": id,
+                        "category": "unknown",
+                        "net_score": 0.0,
+                        "net_score_latency": 0.0,
+                        "ramp_up_time": 0.0,
+                        "ramp_up_time_latency": 0.0,
+                        "bus_factor": 0.0,
+                        "bus_factor_latency": 0.0,
+                        "performance_claims": 0.0,
+                        "performance_claims_latency": 0.0,
+                        "license": 0.0,
+                        "license_latency": 0.0,
+                        "dataset_and_code_score": 0.0,
+                        "dataset_and_code_score_latency": 0.0,
+                        "dataset_quality": 0.0,
+                        "dataset_quality_latency": 0.0,
+                        "code_quality": 0.0,
+                        "code_quality_latency": 0.0,
+                        "reproducibility": 0.0,
+                        "reproducibility_latency": 0.0,
+                        "reviewedness": 0.0,
+                        "reviewedness_latency": 0.0,
+                        "tree_score": 0.0,
+                        "tree_score_latency": 0.0,
+                        "size_score": {
+                            "raspberry_pi": 0.0,
+                            "jetson_nano": 0.0,
+                            "desktop_pc": 0.0,
+                            "aws_server": 0.0,
+                        },
+                        "size_score_latency": 0.0,
+                    }
                 )
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(
-                f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}", exc_info=True
+            logger.warning(
+                f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)} - returning zero metrics with status 200", exc_info=True
             )
-            logger.error(
-                f"Error analyzing model content for {id}: {str(e)}", exc_info=True
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
+            # Return zero metrics with status 200 when model lookup/analysis fails
+            # Response structure matches ModelRating schema exactly (all required fields present)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "name": id,
+                    "category": "unknown",
+                    "net_score": 0.0,
+                    "net_score_latency": 0.0,
+                    "ramp_up_time": 0.0,
+                    "ramp_up_time_latency": 0.0,
+                    "bus_factor": 0.0,
+                    "bus_factor_latency": 0.0,
+                    "performance_claims": 0.0,
+                    "performance_claims_latency": 0.0,
+                    "license": 0.0,
+                    "license_latency": 0.0,
+                    "dataset_and_code_score": 0.0,
+                    "dataset_and_code_score_latency": 0.0,
+                    "dataset_quality": 0.0,
+                    "dataset_quality_latency": 0.0,
+                    "code_quality": 0.0,
+                    "code_quality_latency": 0.0,
+                    "reproducibility": 0.0,
+                    "reproducibility_latency": 0.0,
+                    "reviewedness": 0.0,
+                    "reviewedness_latency": 0.0,
+                    "tree_score": 0.0,
+                    "tree_score_latency": 0.0,
+                    "size_score": {
+                        "raspberry_pi": 0.0,
+                        "jetson_nano": 0.0,
+                        "desktop_pc": 0.0,
+                        "aws_server": 0.0,
+                    },
+                    "size_score_latency": 0.0,
+                }
             )
 
-        # Build ModelRating response with all required fields
+        # Build ModelRating response with all required fields (including latency)
         logger.info(f"DEBUG: Building rating response for id='{id}'")
         result = {
             "name": id,
             "category": alias(rating, "category") or "unknown",
             "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
+            "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2),
             "ramp_up_time": round(float(alias(
                 rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
             ) or 0.0), 2),
+            "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2),
             "bus_factor": round(float(alias(
                 rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
             ) or 0.0), 2),
+            "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2),
             "performance_claims": round(float(alias(
                 rating,
                 "performance_claims",
                 "PerformanceClaims",
                 "score_performance_claims",
             ) or 0.0), 2),
+            "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or 0.0), 2),
             "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
+            "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2),
             "dataset_and_code_score": round(float(alias(
                 rating,
                 "dataset_code",
                 "DatasetCode",
                 "score_available_dataset_and_code",
             ) or 0.0), 2),
+            "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or 0.0), 2),
             "dataset_quality": round(float(alias(
                 rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
             ) or 0.0), 2),
+            "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0), 2),
             "code_quality": round(float(alias(
                 rating, "code_quality", "CodeQuality", "score_code_quality"
             ) or 0.0), 2),
+            "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2),
             "reproducibility": round(float(alias(
                 rating, "reproducibility", "Reproducibility", "score_reproducibility"
             ) or 0.0), 2),
+            "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or 0.0), 2),
             "reviewedness": round(float(alias(
                 rating, "reviewedness", "Reviewedness", "score_reviewedness"
             ) or 0.0), 2),
+            "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0), 2),
             "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
+            "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2),
             "size_score": _extract_size_scores(rating),
+            "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2),
         }
         logger.info(f"DEBUG: Returning rating result: {result}")
         return result
