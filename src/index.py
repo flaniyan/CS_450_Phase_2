@@ -737,18 +737,36 @@ async def search_artifacts_by_regex(request: Request):
             logger.info(f"DEBUG: Found {len(datasets_found)} datasets in S3 matching regex")
             for dataset in datasets_found:
                 dataset_name = dataset.get("name", "")
-                logger.info(f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset.get('version', 'N/A')}'")
-                # Find artifact_id for this dataset name in storage
+                dataset_version = dataset.get("version", "main")
+                logger.info(f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset_version}'")
+                # Try to get artifact_id from metadata.json file
                 artifact_id = None
-                for stored_id, stored_artifact in _artifact_storage.items():
-                    if stored_artifact.get("name") == dataset_name and stored_artifact.get("type") == "dataset":
-                        artifact_id = stored_id
-                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for dataset '{dataset_name}'")
-                        break
+                try:
+                    sanitized_name = sanitize_model_id_for_s3(dataset_name)
+                    safe_version = dataset_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    s3_key = f"datasets/{sanitized_name}/{safe_version}/metadata.json"
+                    logger.info(f"DEBUG: Reading metadata from S3: {s3_key}")
+                    response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+                    metadata_json = response["Body"].read().decode("utf-8")
+                    metadata = json.loads(metadata_json)
+                    artifact_id = metadata.get("artifact_id")
+                    if artifact_id:
+                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for dataset '{dataset_name}'")
+                except Exception as e:
+                    logger.debug(f"DEBUG: Could not read metadata.json for dataset '{dataset_name}': {str(e)}")
                 
+                # Fallback: Find artifact_id in storage
+                if not artifact_id:
+                    for stored_id, stored_artifact in _artifact_storage.items():
+                        if stored_artifact.get("name") == dataset_name and stored_artifact.get("type") == "dataset":
+                            artifact_id = stored_id
+                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for dataset '{dataset_name}'")
+                            break
+                
+                # Last fallback: use dataset name
                 if not artifact_id:
                     artifact_id = dataset_name
-                    logger.warning(f"DEBUG: No artifact_id in storage for '{dataset_name}', using fallback: '{artifact_id}'")
+                    logger.warning(f"DEBUG: No artifact_id found for '{dataset_name}', using fallback: '{artifact_id}'")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -774,18 +792,36 @@ async def search_artifacts_by_regex(request: Request):
             logger.info(f"DEBUG: Found {len(code_artifacts_found)} code artifacts in S3 matching regex")
             for code_artifact in code_artifacts_found:
                 code_name = code_artifact.get("name", "")
-                logger.info(f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_artifact.get('version', 'N/A')}'")
-                # Find artifact_id for this code artifact name in storage
+                code_version = code_artifact.get("version", "main")
+                logger.info(f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_version}'")
+                # Try to get artifact_id from metadata.json file
                 artifact_id = None
-                for stored_id, stored_artifact in _artifact_storage.items():
-                    if stored_artifact.get("name") == code_name and stored_artifact.get("type") == "code":
-                        artifact_id = stored_id
-                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for code artifact '{code_name}'")
-                        break
+                try:
+                    sanitized_name = sanitize_model_id_for_s3(code_name)
+                    safe_version = code_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    s3_key = f"codes/{sanitized_name}/{safe_version}/metadata.json"
+                    logger.info(f"DEBUG: Reading metadata from S3: {s3_key}")
+                    response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+                    metadata_json = response["Body"].read().decode("utf-8")
+                    metadata = json.loads(metadata_json)
+                    artifact_id = metadata.get("artifact_id")
+                    if artifact_id:
+                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for code artifact '{code_name}'")
+                except Exception as e:
+                    logger.debug(f"DEBUG: Could not read metadata.json for code artifact '{code_name}': {str(e)}")
                 
+                # Fallback: Find artifact_id in storage
+                if not artifact_id:
+                    for stored_id, stored_artifact in _artifact_storage.items():
+                        if stored_artifact.get("name") == code_name and stored_artifact.get("type") == "code":
+                            artifact_id = stored_id
+                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in storage for code artifact '{code_name}'")
+                            break
+                
+                # Last fallback: use code name
                 if not artifact_id:
                     artifact_id = code_name
-                    logger.warning(f"DEBUG: No artifact_id in storage for '{code_name}', using fallback: '{artifact_id}'")
+                    logger.warning(f"DEBUG: No artifact_id found for '{code_name}', using fallback: '{artifact_id}'")
                 
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
@@ -948,8 +984,13 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 else:
                     logger.info(f"DEBUG: Artifact id '{id}' not found in S3 metadata either")
             
-            # If we have a model name from storage, use it; otherwise use id as model name
-            search_name = model_name if model_name else id
+            # If we don't have a model name, we can't proceed (id is likely an artifact_id, not a model name)
+            if not model_name:
+                logger.error(f"DEBUG: No model name found for artifact_id '{id}'. Cannot search S3 without model name.")
+                raise HTTPException(status_code=404, detail="Artifact does not exist.")
+            
+            # Use the model name we found
+            search_name = model_name
             logger.info(f"DEBUG: Using search_name='{search_name}'")
             
             # Sanitize the model name for S3 lookup
