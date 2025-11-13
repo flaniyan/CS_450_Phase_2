@@ -3,7 +3,8 @@ from pathlib import Path
 import re
 import os
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
+from enum import Enum
 from starlette.datastructures import UploadFile
 import uvicorn
 import random
@@ -56,18 +57,202 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# ===== SCHEMAS FROM OPENAPI SPEC =====
+
 class User(BaseModel):
     name: str
     is_admin: bool = False
 
 
-class Secret(BaseModel):
+class UserAuthenticationInfo(BaseModel):
     password: str
 
 
-class AuthRequest(BaseModel):
+class AuthenticationRequest(BaseModel):
     user: User
-    secret: Secret
+    secret: UserAuthenticationInfo
+
+
+# Legacy aliases for backward compatibility
+Secret = UserAuthenticationInfo
+AuthRequest = AuthenticationRequest
+
+
+class ArtifactMetadata(BaseModel):
+    name: str
+    id: str
+    type: str  # "model", "dataset", or "code"
+
+
+class ArtifactData(BaseModel):
+    url: str
+    download_url: Optional[str] = None  # Optional, read-only in responses
+
+
+class Artifact(BaseModel):
+    metadata: ArtifactMetadata
+    data: ArtifactData
+
+
+class ArtifactQuery(BaseModel):
+    name: str
+    types: Optional[List[str]] = None  # Optional list of artifact types
+
+
+class ArtifactRegEx(BaseModel):
+    regex: str
+
+
+class ArtifactAuditEntry(BaseModel):
+    user: User
+    date: str  # ISO-8601 datetime
+    artifact: ArtifactMetadata
+    action: str  # "CREATE", "UPDATE", "DOWNLOAD", "RATE", "AUDIT"
+
+
+class ArtifactCostItem(BaseModel):
+    total_cost: float
+    standalone_cost: Optional[float] = None  # Optional, required when dependency=true
+
+
+class ArtifactCost(BaseModel):
+    # This is a dict mapping artifact_id to ArtifactCostItem
+    # We'll use Dict[str, ArtifactCostItem] in responses
+    pass
+
+
+class ArtifactLineageNode(BaseModel):
+    artifact_id: str
+    name: str
+    source: str
+    metadata: Optional[Dict[str, Any]] = None  # Optional metadata object
+
+
+class ArtifactLineageEdge(BaseModel):
+    from_node_artifact_id: str
+    to_node_artifact_id: str
+    relationship: str
+
+
+class ArtifactLineageGraph(BaseModel):
+    nodes: List[ArtifactLineageNode]
+    edges: List[ArtifactLineageEdge]
+
+
+class SimpleLicenseCheckRequest(BaseModel):
+    github_url: str
+
+
+class ModelRating(BaseModel):
+    name: str
+    category: str
+    net_score: float
+    net_score_latency: float
+    ramp_up_time: float
+    ramp_up_time_latency: float
+    bus_factor: float
+    bus_factor_latency: float
+    performance_claims: float
+    performance_claims_latency: float
+    license: float
+    license_latency: float
+    dataset_and_code_score: float
+    dataset_and_code_score_latency: float
+    dataset_quality: float
+    dataset_quality_latency: float
+    code_quality: float
+    code_quality_latency: float
+    reproducibility: float
+    reproducibility_latency: float
+    reviewedness: float
+    reviewedness_latency: float
+    tree_score: float
+    tree_score_latency: float
+    size_score: Dict[str, float]  # Dict with raspberry_pi, jetson_nano, desktop_pc, aws_server
+    size_score_latency: float
+
+
+class HealthStatus(str, Enum):
+    ok = "ok"
+    degraded = "degraded"
+    critical = "critical"
+    unknown = "unknown"
+
+
+class HealthRequestSummary(BaseModel):
+    window_start: str  # ISO-8601 datetime
+    window_end: str  # ISO-8601 datetime
+    total_requests: int = 0
+    per_route: Optional[Dict[str, int]] = None
+    per_artifact_type: Optional[Dict[str, int]] = None
+    unique_clients: int = 0
+
+
+class HealthComponentBrief(BaseModel):
+    id: str
+    status: str  # HealthStatus
+    display_name: Optional[str] = None
+    issue_count: int = 0
+    last_event_at: Optional[str] = None  # ISO-8601 datetime
+
+
+class HealthLogReference(BaseModel):
+    label: str
+    url: str
+    tail_available: bool = False
+    last_updated_at: Optional[str] = None  # ISO-8601 datetime
+
+
+class HealthTimelineEntry(BaseModel):
+    bucket: str  # ISO-8601 datetime
+    value: float
+    unit: Optional[str] = None
+
+
+class HealthIssue(BaseModel):
+    code: str
+    severity: str  # "info", "warning", "error"
+    summary: str
+    details: Optional[str] = None
+
+
+class HealthMetricValue:
+    # Can be int, float, str, or bool - using Any for flexibility
+    pass
+
+
+class HealthMetricMap(BaseModel):
+    # Dict[str, Any] - arbitrary key/value pairs
+    pass
+
+
+class HealthComponentDetail(BaseModel):
+    id: str
+    status: str  # HealthStatus
+    observed_at: str  # ISO-8601 datetime
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None  # HealthMetricMap
+    issues: Optional[List[HealthIssue]] = None
+    timeline: Optional[List[HealthTimelineEntry]] = None
+    logs: Optional[List[HealthLogReference]] = None
+
+
+class HealthComponentCollection(BaseModel):
+    components: List[HealthComponentDetail]
+    generated_at: str  # ISO-8601 datetime
+    window_minutes: Optional[int] = None
+
+
+class HealthSummaryResponse(BaseModel):
+    status: str  # HealthStatus
+    checked_at: str  # ISO-8601 datetime
+    window_minutes: int
+    uptime_seconds: int = 0
+    version: Optional[str] = None
+    request_summary: Optional[HealthRequestSummary] = None
+    components: Optional[List[HealthComponentBrief]] = None
+    logs: Optional[List[HealthLogReference]] = None
 
 
 app = FastAPI(
@@ -1116,11 +1301,61 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     logger.warning(f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'")
             else:
                 logger.info(f"DEBUG: ❌ Artifact id '{id}' NOT found in S3 metadata")
+                # Try comprehensive search: check all models and their metadata files
+                logger.info(f"DEBUG: ===== COMPREHENSIVE SEARCH: Checking all models for artifact_id =====")
+                try:
+                    all_models = list_models(limit=1000)
+                    logger.info(f"DEBUG: Checking {len(all_models.get('models', []))} models for artifact_id '{id}'")
+                    for model in all_models.get("models", []):
+                        model_name = model.get("name", "")
+                        model_version = model.get("version", "main")
+                        try:
+                            sanitized_name = sanitize_model_id_for_s3(model_name)
+                            safe_version = model_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                            metadata_key = f"models/{sanitized_name}/{safe_version}/metadata.json"
+                            logger.debug(f"DEBUG: Checking metadata: {metadata_key}")
+                            response = s3.get_object(Bucket=ap_arn, Key=metadata_key)
+                            metadata_json = response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            found_artifact_id = metadata.get("artifact_id")
+                            if found_artifact_id == id:
+                                logger.info(f"DEBUG: ✅✅✅ FOUND ARTIFACT_ID '{id}' in metadata for model '{model_name}' ✅✅✅")
+                                # Restore to storage
+                                _artifact_storage[id] = {
+                                    "name": model_name,
+                                    "type": "model",
+                                    "version": model_version,
+                                    "id": id,
+                                    "url": metadata.get("url", f"https://huggingface.co/{model_name}")
+                                }
+                                return {
+                                    "metadata": {
+                                        "name": model_name,
+                                        "id": id,
+                                        "type": artifact_type,
+                                    },
+                                    "data": {
+                                        "url": metadata.get("url", f"https://huggingface.co/{model_name}")
+                                    },
+                                }
+                        except Exception as e:
+                            logger.debug(f"DEBUG: Could not check metadata for {model_name}: {str(e)}")
+                            continue
+                    logger.warning(f"DEBUG: Comprehensive search found no model with artifact_id '{id}'")
+                except Exception as e:
+                    logger.warning(f"DEBUG: Error in comprehensive search: {str(e)}", exc_info=True)
+            
+            # Last resort: if id looks like a numeric artifact_id, it's definitely not a model name
+            # Only try model name lookup if id doesn't look like a numeric artifact_id
+            if id.isdigit() and len(id) >= 10:
+                logger.error(f"DEBUG: ❌❌❌ ARTIFACT NOT FOUND - artifact_id '{id}' is numeric, not a model name ❌❌❌")
+                logger.error(f"DEBUG: _artifact_storage contents: {list(_artifact_storage.keys())}")
+                raise HTTPException(status_code=404, detail="Artifact does not exist.")
             
             logger.info(f"DEBUG: ===== FALLING BACK TO MODEL NAME LOOKUP =====")
-            logger.info(f"DEBUG: Will try to use id '{id}' as model name")
+            logger.info(f"DEBUG: Will try to use id '{id}' as model name (id doesn't look like artifact_id)")
             
-            # If not found in S3 metadata, try to find model by name (id might be model name)
+            # If id doesn't look like an artifact_id, try treating it as a model name
             version = None
             found = False
             logger.info(f"DEBUG: Trying list_models with regex: '^{re.escape(id)}$'")
@@ -1130,9 +1365,11 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 if result.get("models"):
                     for model in result["models"]:
                         v = model["version"]
-                        logger.info(f"DEBUG: Checking model: name='{model.get('name')}', version='{v}'")
+                        model_name = model.get("name", id)
+                        logger.info(f"DEBUG: Checking model: name='{model_name}', version='{v}'")
                         try:
-                            s3_key = f"models/{id}/{v}/model.zip"
+                            sanitized_name = sanitize_model_id_for_s3(model_name)
+                            s3_key = f"models/{sanitized_name}/{v}/model.zip"
                             logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             version = v
@@ -1155,7 +1392,8 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 common_versions = ["1.0.0", "main", "latest"]
                 for v in common_versions:
                     try:
-                        s3_key = f"models/{id}/{v}/model.zip"
+                        sanitized_name = sanitize_model_id_for_s3(id)
+                        s3_key = f"models/{sanitized_name}/{v}/model.zip"
                         logger.info(f"DEBUG: Checking common version S3 key: {s3_key}")
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
@@ -1176,7 +1414,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 logger.error(f"DEBUG: _artifact_storage contents: {list(_artifact_storage.keys())}")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             
-            # Return model with id as name (simpler approach that works with autograder)
+            # Return model with id as name
             logger.info(f"DEBUG: ✅✅✅ RETURNING MODEL (fallback to name lookup) ✅✅✅")
             logger.info(f"DEBUG: Using id as name: id='{id}', version='{version}'")
             result = {
@@ -2163,6 +2401,15 @@ def get_model_rate(id: str, request: Request):
         
         logger.info(f"DEBUG: ===== GET_MODEL_RATE START =====")
         logger.info(f"DEBUG: Querying rate for id='{id}'")
+        logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
+        
+        if not verify_auth_token(request):
+            logger.error(f"DEBUG: Authentication failed for /artifact/model/{id}/rate")
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication failed due to invalid or missing AuthenticationToken",
+            )
+        logger.info(f"DEBUG: Authentication passed for /artifact/model/{id}/rate")
         
         found = False
         model_name = None
