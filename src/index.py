@@ -2562,6 +2562,9 @@ def get_tracks():
             status_code=500,
             detail="The system encountered an error while retrieving the student's track information.",
         )
+@app.get("/package/{id}/rate")
+def get_package_rate(id: str, request: Request):
+    return get_model_rate(id, request)
 
 
 # @app.get("/")
