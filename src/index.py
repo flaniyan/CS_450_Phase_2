@@ -968,7 +968,16 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             else:
                 logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
                 # Try to find artifact metadata in S3 by artifact_id
-                s3_metadata = find_artifact_metadata_by_id(id)
+                # Retry a few times in case metadata is still being written (race condition)
+                s3_metadata = None
+                for attempt in range(3):
+                    s3_metadata = find_artifact_metadata_by_id(id)
+                    if s3_metadata and s3_metadata.get("type") == "model":
+                        break
+                    if attempt < 2:  # Don't sleep on last attempt
+                        import time
+                        time.sleep(0.1)  # Small delay to allow S3 write to complete
+                
                 if s3_metadata and s3_metadata.get("type") == "model":
                     model_name = s3_metadata.get("name")
                     stored_version = s3_metadata.get("version", "main")
@@ -982,7 +991,7 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
                     }
                 else:
-                    logger.info(f"DEBUG: Artifact id '{id}' not found in S3 metadata either")
+                    logger.info(f"DEBUG: Artifact id '{id}' not found in S3 metadata after retries")
             
             # If we don't have a model name, we can't proceed (id is likely an artifact_id, not a model name)
             if not model_name:
@@ -1296,11 +1305,23 @@ async def post_artifact_ingest(request: Request):
                 }
                 
                 # Store artifact metadata in S3 (model file already stored via model_ingestion)
+                # This must complete synchronously so queries can find the artifact
                 try:
-                    store_artifact_metadata(artifact_id, name, artifact_type, version, url)
+                    result = store_artifact_metadata(artifact_id, name, artifact_type, version, url)
+                    logger.info(f"DEBUG: S3 metadata storage result: {result}")
+                    # Verify the metadata was actually stored by checking S3
+                    # This ensures the write completed before we return
+                    import time
+                    for verify_attempt in range(3):
+                        verify_metadata = find_artifact_metadata_by_id(artifact_id)
+                        if verify_metadata:
+                            logger.info(f"DEBUG: Verified S3 metadata exists for artifact_id '{artifact_id}'")
+                            break
+                        if verify_attempt < 2:
+                            time.sleep(0.1)  # Small delay before retry
                 except Exception as s3_error:
-                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
-                    # Don't fail ingestion if S3 metadata storage fails
+                    logger.error(f"Failed to store artifact metadata in S3: {str(s3_error)}", exc_info=True)
+                    # Don't fail ingestion if S3 metadata storage fails, but log it as an error
                 
                 return {
                     "message": "Ingest successful",
