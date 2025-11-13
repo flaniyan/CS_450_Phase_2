@@ -106,7 +106,7 @@ def _normalize_password(password: str) -> str:
 # -----------------------------------------------------------------------------
 @public_auth.api_route(
     "/authenticate",
-    methods=["PUT", "POST"],
+    methods=["PUT", "GET", "POST"],
     dependencies=[],
     openapi_extra={"security": []},
     response_class=PlainTextResponse,
