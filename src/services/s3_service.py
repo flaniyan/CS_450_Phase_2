@@ -478,6 +478,191 @@ def reset_registry() -> Dict[str, str]:
         )
 
 
+def store_artifact_metadata(
+    artifact_id: str, artifact_name: str, artifact_type: str, version: str, url: str
+) -> Dict[str, str]:
+    """
+    Store artifact metadata in S3 for all artifact types (model, dataset, code).
+    For models, the actual file is already stored via upload_model.
+    For datasets and code, we store a metadata JSON file.
+    """
+    if not aws_available:
+        return {"status": "skipped", "reason": "AWS not available"}
+    
+    try:
+        from datetime import datetime, timezone
+        from botocore.exceptions import ClientError
+        
+        # Sanitize artifact name for S3 key
+        sanitized_name = (
+            artifact_name.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+            .replace(":", "_")
+            .replace("\\", "_")
+            .replace("?", "_")
+            .replace("*", "_")
+            .replace('"', "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+        )
+        safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+        
+        # Store metadata.json file
+        metadata = {
+            "artifact_id": artifact_id,
+            "name": artifact_name,
+            "type": artifact_type,
+            "version": version,
+            "url": url,
+            "stored_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+        s3.put_object(
+            Bucket=ap_arn,
+            Key=s3_key,
+            Body=json.dumps(metadata, indent=2).encode("utf-8"),
+            ContentType="application/json",
+        )
+        
+        logger.info(f"Stored artifact metadata: {s3_key}")
+        return {"status": "success", "s3_key": s3_key}
+    except Exception as e:
+        logger.error(f"Failed to store artifact metadata: {str(e)}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+def find_artifact_metadata_by_id(artifact_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Find artifact metadata by artifact_id by searching S3 metadata files.
+    Searches all artifact types (models, datasets, code).
+    
+    Args:
+        artifact_id: The artifact ID to search for
+    
+    Returns:
+        Dict with artifact metadata if found, None otherwise
+    """
+    if not aws_available:
+        return None
+    
+    try:
+        from botocore.exceptions import ClientError
+        
+        # Search all artifact types
+        for artifact_type in ["model", "dataset", "code"]:
+            prefix = f"{artifact_type}s/"
+            params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": 1000}
+            
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(**params):
+                if "Contents" not in page:
+                    continue
+                
+                for item in page["Contents"]:
+                    key = item["Key"]
+                    # Check metadata.json files for all types
+                    if key.endswith("/metadata.json"):
+                        try:
+                            # Download and parse metadata
+                            response = s3.get_object(Bucket=ap_arn, Key=key)
+                            metadata_json = response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            
+                            # Check if artifact_id matches
+                            if metadata.get("artifact_id") == artifact_id:
+                                logger.info(f"Found artifact metadata by ID: {artifact_id} in {key}")
+                                return {
+                                    "artifact_id": artifact_id,
+                                    "name": metadata.get("name"),
+                                    "type": metadata.get("type", artifact_type),
+                                    "version": metadata.get("version", "main"),
+                                    "url": metadata.get("url"),
+                                    "s3_key": key
+                                }
+                        except Exception as e:
+                            logger.debug(f"Error reading metadata from {key}: {str(e)}")
+                            continue
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Error finding artifact metadata by ID {artifact_id}: {str(e)}")
+        return None
+
+
+def list_artifacts_from_s3(
+    artifact_type: str = "model",
+    name_regex: str = None,
+    limit: int = 1000,
+) -> Dict[str, Any]:
+    """
+    List artifacts from S3 for a given type (model, dataset, code).
+    For models, looks for model.zip files.
+    For datasets and code, looks for metadata.json files.
+    """
+    if not aws_available:
+        return {"artifacts": []}
+    
+    try:
+        from botocore.exceptions import ClientError
+        
+        artifacts = []
+        prefix = f"{artifact_type}s/"
+        params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": limit}
+        
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(**params):
+            if "Contents" not in page:
+                continue
+            
+            for item in page["Contents"]:
+                key = item["Key"]
+                
+                if artifact_type == "model":
+                    # For models, look for model.zip files
+                    if key.endswith("/model.zip"):
+                        # Extract model name and version from path
+                        # Format: models/{name}/{version}/model.zip
+                        parts = key.replace(f"{prefix}", "").split("/")
+                        if len(parts) >= 2:
+                            model_name = parts[0].replace("_", "/")
+                            version = parts[1]
+                            artifacts.append({
+                                "name": model_name,
+                                "version": version,
+                                "type": artifact_type,
+                            })
+                else:
+                    # For datasets and code, look for metadata.json files
+                    if key.endswith("/metadata.json"):
+                        try:
+                            response = s3.get_object(Bucket=ap_arn, Key=key)
+                            metadata_json = response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            artifacts.append({
+                                "name": metadata.get("name"),
+                                "version": metadata.get("version", "main"),
+                                "type": artifact_type,
+                                "artifact_id": metadata.get("artifact_id"),
+                            })
+                        except Exception as e:
+                            logger.debug(f"Error reading metadata from {key}: {str(e)}")
+                            continue
+        
+        # Apply regex filter if provided
+        if name_regex:
+            import re
+            pattern = re.compile(name_regex)
+            artifacts = [a for a in artifacts if pattern.match(a.get("name", ""))]
+        
+        return {"artifacts": artifacts[:limit]}
+    except Exception as e:
+        logger.error(f"Failed to list artifacts from S3: {str(e)}", exc_info=True)
+        return {"artifacts": []}
+
+
 def extract_config_from_model(model_zip_content: bytes) -> Optional[Dict[str, Any]]:
     try:
         with zipfile.ZipFile(io.BytesIO(model_zip_content), "r") as zip_file:
