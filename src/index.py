@@ -2150,7 +2150,7 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
         }
 
 
-@app.get("/package/{id}/rate")
+@app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
     try:
         logger.info(f"DEBUG: Validating id format: '{id}'")
