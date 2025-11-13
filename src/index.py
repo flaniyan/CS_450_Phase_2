@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import os
 import json
+from typing import Dict, Any
 from starlette.datastructures import UploadFile
 import uvicorn
 import random
@@ -2010,6 +2011,26 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
         )
 
 
+def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
+    """Extract size scores from rating object, handling dict structure"""
+    size_score = alias(rating, "size_score", "SizeScore", "score_size_score")
+    if isinstance(size_score, dict):
+        return {
+            "raspberry_pi": round(float(size_score.get("raspberry_pi", 0.0)), 2),
+            "jetson_nano": round(float(size_score.get("jetson_nano", 0.0)), 2),
+            "desktop_pc": round(float(size_score.get("desktop_pc", 0.0)), 2),
+            "aws_server": round(float(size_score.get("aws_server", 0.0)), 2),
+        }
+    else:
+        # If size_score is not a dict, return default values
+        return {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0,
+        }
+
+
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
     logger.info(f"=== GET /artifact/model/{id}/rate ===")
@@ -2146,12 +2167,7 @@ def get_model_rate(id: str, request: Request):
                 rating, "reviewedness", "Reviewedness", "score_reviewedness"
             ) or 0.0), 2),
             "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
-            "size_score": {
-                "raspberry_pi": round(float(alias(rating, "size_score", "raspberry_pi") or 0.0), 2),
-                "jetson_nano": round(float(alias(rating, "size_score", "jetson_nano") or 0.0), 2),
-                "desktop_pc": round(float(alias(rating, "size_score", "desktop_pc") or 0.0), 2),
-                "aws_server": round(float(alias(rating, "size_score", "aws_server") or 0.0), 2),
-            },
+            "size_score": _extract_size_scores(rating),
         }
         logger.info(f"DEBUG: Returning rating result: {result}")
         return result
