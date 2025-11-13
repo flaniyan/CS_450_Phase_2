@@ -435,12 +435,16 @@ def reset_system(request: Request):
 @app.get("/package/{id}")
 def get_package(id: str, request: Request):
     """Alias for /artifact/model/{id} to support autograder"""
+    logger.info(f"=== GET /package/{id} HANDLER CALLED ===")
+    logger.info(f"DEBUG: Route handler executed for /package/{id}")
     return get_artifact("model", id, request)
 
 
 @app.get("/package/{id}/rate")
 def get_package_rate(id: str, request: Request):
     """Alias for /artifact/model/{id}/rate to support autograder"""
+    logger.info(f"=== GET /package/{id}/rate HANDLER CALLED ===")
+    logger.info(f"DEBUG: Route handler executed for /package/{id}/rate")
     return get_model_rate(id, request)
 
 
