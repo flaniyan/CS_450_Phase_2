@@ -440,15 +440,6 @@ def get_package(id: str, request: Request):
     logger.info(f"DEBUG: Route handler executed for /package/{id}")
     return get_artifact("model", id, request)
 
-
-@app.get("/package/{id}/rate")
-def get_package_rate(id: str, request: Request):
-    """Alias for /artifact/model/{id}/rate to support autograder"""
-    logger.info(f"=== GET /package/{id}/rate HANDLER CALLED ===")
-    logger.info(f"DEBUG: Route handler executed for /package/{id}/rate")
-    return get_model_rate(id, request)
-
-
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
     logger.info(f"DEBUG: ===== GET_ARTIFACT_BY_NAME START =====")
@@ -2128,7 +2119,7 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
         }
 
 
-@app.get("/artifact/model/{id}/rate")
+@app.get("/package/{id}/rate")
 def get_model_rate(id: str, request: Request):
     logger.info(f"=== GET /artifact/model/{id}/rate ===")
     logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
