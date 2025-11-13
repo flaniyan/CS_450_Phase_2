@@ -1994,6 +1994,12 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
         )
 
 
+@app.get("/package/{id}")
+def get_package(id: str, request: Request):
+    """Alias for /artifact/model/{id} to support autograder"""
+    return get_artifact("model", id, request)
+
+
 @app.get("/package/{id}/rate")
 def get_package_rate(id: str, request: Request):
     """Alias for /artifact/model/{id}/rate to support autograder"""
