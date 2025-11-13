@@ -432,6 +432,18 @@ def reset_system(request: Request):
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 
+@app.get("/package/{id}")
+def get_package(id: str, request: Request):
+    """Alias for /artifact/model/{id} to support autograder"""
+    return get_artifact("model", id, request)
+
+
+@app.get("/package/{id}/rate")
+def get_package_rate(id: str, request: Request):
+    """Alias for /artifact/model/{id}/rate to support autograder"""
+    return get_model_rate(id, request)
+
+
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
     logger.info(f"=== GET /artifact/byName/{name} ===")
@@ -1992,18 +2004,6 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
             status_code=400,
             detail=f"There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid: {str(e)}",
         )
-
-
-@app.get("/package/{id}")
-def get_package(id: str, request: Request):
-    """Alias for /artifact/model/{id} to support autograder"""
-    return get_artifact("model", id, request)
-
-
-@app.get("/package/{id}/rate")
-def get_package_rate(id: str, request: Request):
-    """Alias for /artifact/model/{id}/rate to support autograder"""
-    return get_model_rate(id, request)
 
 
 @app.get("/artifact/model/{id}/rate")
