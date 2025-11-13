@@ -17,6 +17,7 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.credentials import get_credentials
 from botocore.session import Session
+from botocore.exceptions import ClientError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..acmecli.types import MetricValue
 from ..acmecli.hf_handler import fetch_hf_metadata
@@ -471,6 +472,7 @@ def find_artifact_metadata_by_id(artifact_id: str) -> Optional[Dict[str, Any]]:
     """
     Find artifact metadata by artifact_id by searching S3 metadata files.
     Searches all artifact types (models, datasets, code).
+    Also searches by model name if artifact_id search fails (for backwards compatibility).
     
     Args:
         artifact_id: The artifact ID to search for
@@ -482,7 +484,7 @@ def find_artifact_metadata_by_id(artifact_id: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        # Search all artifact types
+        # First, search by artifact_id
         for artifact_type in ["model", "dataset", "code"]:
             prefix = f"{artifact_type}s/"
             params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": 1000}
@@ -516,6 +518,80 @@ def find_artifact_metadata_by_id(artifact_id: str) -> Optional[Dict[str, Any]]:
                         except Exception as e:
                             logger.debug(f"Error reading metadata from {key}: {str(e)}")
                             continue
+        
+        # If not found by artifact_id, search all metadata files to find ones with outdated artifact_ids
+        # This handles cases where model was re-ingested with new artifact_id but metadata wasn't updated
+        logger.debug(f"Artifact ID '{artifact_id}' not found in metadata, checking all metadata files for updates")
+        try:
+            # Search all metadata files in models/ directory
+            prefix = "models/"
+            params = {"Bucket": ap_arn, "Prefix": prefix, "MaxKeys": 1000}
+            
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(**params):
+                if "Contents" not in page:
+                    continue
+                
+                for item in page["Contents"]:
+                    key = item["Key"]
+                    if key.endswith("/metadata.json"):
+                        try:
+                            # Download and parse metadata
+                            response = s3.get_object(Bucket=ap_arn, Key=key)
+                            metadata_json = response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            
+                            # Check if this metadata file has a different artifact_id
+                            # and if the model exists in S3 (indicating it was re-ingested)
+                            model_name = metadata.get("name")
+                            if model_name:
+                                # Check if model exists in S3
+                                safe_name = (
+                                    model_name.replace("https://huggingface.co/", "")
+                                    .replace("http://huggingface.co/", "")
+                                    .replace("/", "_")
+                                    .replace(":", "_")
+                                    .replace("\\", "_")
+                                    .replace("?", "_")
+                                    .replace("*", "_")
+                                    .replace('"', "_")
+                                    .replace("<", "_")
+                                    .replace(">", "_")
+                                    .replace("|", "_")
+                                )
+                                version = metadata.get("version", "main")
+                                safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                model_key = f"models/{safe_name}/{safe_version}/model.zip"
+                                
+                                # If model exists but metadata has different artifact_id, update it
+                                try:
+                                    s3.head_object(Bucket=ap_arn, Key=model_key)
+                                    # Model exists, update metadata with new artifact_id
+                                    metadata["artifact_id"] = artifact_id
+                                    metadata["stored_at"] = datetime.now(timezone.utc).isoformat()
+                                    s3.put_object(
+                                        Bucket=ap_arn,
+                                        Key=key,
+                                        Body=json.dumps(metadata, indent=2).encode("utf-8"),
+                                        ContentType="application/json",
+                                    )
+                                    logger.info(f"Updated metadata file {key} with artifact_id {artifact_id}")
+                                    return {
+                                        "artifact_id": artifact_id,
+                                        "name": metadata.get("name"),
+                                        "type": metadata.get("type", "model"),
+                                        "version": metadata.get("version", "main"),
+                                        "url": metadata.get("url"),
+                                        "s3_key": key
+                                    }
+                                except ClientError:
+                                    # Model doesn't exist, skip this metadata file
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"Error reading metadata from {key}: {str(e)}")
+                            continue
+        except Exception as e:
+            logger.debug(f"Error searching all metadata files: {str(e)}")
         
         return None
     except Exception as e:
