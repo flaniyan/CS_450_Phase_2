@@ -451,8 +451,10 @@ def get_package_rate(id: str, request: Request):
 
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
+    logger.info(f"DEBUG: ===== GET_ARTIFACT_BY_NAME START =====")
     logger.info(f"=== GET /artifact/byName/{name} ===")
     logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
+    logger.info(f"DEBUG: Searching for artifact with name: '{name}'")
     
     if not verify_auth_token(request):
         logger.error(f"DEBUG: Authentication failed for /artifact/byName/{name}")
@@ -460,7 +462,7 @@ def get_artifact_by_name(name: str, request: Request):
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
-    logger.info(f"DEBUG: Authentication passed for /artifact/byName/{name}")
+    logger.info(f"DEBUG: ✅ Authentication passed for /artifact/byName/{name}")
     
     try:
         # Validate name parameter
@@ -475,14 +477,18 @@ def get_artifact_by_name(name: str, request: Request):
         # Search for models with matching name
         escaped_name = re.escape(name)
         name_pattern = f"^{escaped_name}$"
+        logger.info(f"DEBUG: ===== SEARCHING S3 FOR MODELS =====")
         logger.info(f"DEBUG: Searching S3 for models with name pattern: {name_pattern}")
         result = list_models(name_regex=name_pattern, limit=1000)
-        logger.info(f"DEBUG: list_models returned {len(result.get('models', []))} models")
+        models_found = len(result.get('models', []))
+        logger.info(f"DEBUG: list_models returned {models_found} models")
         artifacts = []
 
         # Track which artifact_ids we've already added to avoid duplicates
         seen_artifact_ids = set()
-        logger.info(f"DEBUG: Checking _artifact_storage (size: {len(_artifact_storage)})")
+        logger.info(f"DEBUG: ===== CHECKING _ARTIFACT_STORAGE =====")
+        logger.info(f"DEBUG: _artifact_storage size: {len(_artifact_storage)}")
+        logger.info(f"DEBUG: _artifact_storage keys (first 20): {list(_artifact_storage.keys())[:20]}")
         
         # Add models from S3 - find their artifact_ids from storage
         for model in result.get("models", []):
@@ -1018,11 +1024,18 @@ def get_artifact(artifact_type: str, id: str, request: Request):
     
     try:
         if artifact_type == "model":
+            logger.info(f"DEBUG: ===== GET ARTIFACT BY ID START =====")
+            logger.info(f"DEBUG: Querying model with id='{id}', artifact_type='{artifact_type}'")
+            logger.info(f"DEBUG: _artifact_storage size: {len(_artifact_storage)}")
+            logger.info(f"DEBUG: _artifact_storage keys (first 10): {list(_artifact_storage.keys())[:10]}")
+            
             # First, check if id is in _artifact_storage (artifact_id lookup)
             if id in _artifact_storage:
                 artifact = _artifact_storage[id]
+                logger.info(f"DEBUG: ✅ Found artifact in _artifact_storage: {artifact}")
                 if artifact.get("type") == "model":
-                    return {
+                    logger.info(f"DEBUG: ✅ Artifact type matches 'model', returning immediately")
+                    result = {
                         "metadata": {
                             "name": artifact.get("name", id),
                             "id": id,
@@ -1034,81 +1047,122 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             )
                         },
                     }
+                    logger.info(f"DEBUG: Returning result: {result}")
+                    return result
+                else:
+                    logger.warning(f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+            else:
+                logger.info(f"DEBUG: ❌ Artifact id '{id}' NOT found in _artifact_storage")
             
             # If not in storage, try to find artifact metadata in S3 by artifact_id
-            logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
+            logger.info(f"DEBUG: ===== SEARCHING S3 METADATA =====")
+            logger.info(f"DEBUG: Calling find_artifact_metadata_by_id('{id}')...")
+            import time
+            s3_start = time.time()
             s3_metadata = find_artifact_metadata_by_id(id)
-            if s3_metadata and s3_metadata.get("type") == "model":
-                model_name = s3_metadata.get("name")
-                stored_version = s3_metadata.get("version", "main")
-                logger.info(f"DEBUG: Found artifact in S3 metadata: model_name='{model_name}', version='{stored_version}'")
-                # Restore to _artifact_storage for future lookups
-                _artifact_storage[id] = {
-                    "name": model_name,
-                    "type": "model",
-                    "version": stored_version,
-                    "id": id,
-                    "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                }
-                return {
-                    "metadata": {
+            s3_elapsed = time.time() - s3_start
+            logger.info(f"DEBUG: S3 metadata lookup took {s3_elapsed:.3f}s")
+            
+            if s3_metadata:
+                logger.info(f"DEBUG: ✅ Found S3 metadata: {s3_metadata}")
+                if s3_metadata.get("type") == "model":
+                    model_name = s3_metadata.get("name")
+                    stored_version = s3_metadata.get("version", "main")
+                    logger.info(f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}', version='{stored_version}'")
+                    # Restore to _artifact_storage for future lookups
+                    _artifact_storage[id] = {
                         "name": model_name,
+                        "type": "model",
+                        "version": stored_version,
                         "id": id,
-                        "type": artifact_type,
-                    },
-                    "data": {
                         "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                    },
-                }
+                    }
+                    logger.info(f"DEBUG: ✅ Restored artifact to _artifact_storage: {_artifact_storage[id]}")
+                    result = {
+                        "metadata": {
+                            "name": model_name,
+                            "id": id,
+                            "type": artifact_type,
+                        },
+                        "data": {
+                            "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
+                        },
+                    }
+                    logger.info(f"DEBUG: Returning result from S3: {result}")
+                    return result
+                else:
+                    logger.warning(f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'")
+            else:
+                logger.info(f"DEBUG: ❌ Artifact id '{id}' NOT found in S3 metadata")
+            
+            logger.info(f"DEBUG: ===== FALLING BACK TO MODEL NAME LOOKUP =====")
+            logger.info(f"DEBUG: Will try to use id '{id}' as model name")
             
             # If not found in S3 metadata, try to find model by name (id might be model name)
             version = None
             found = False
+            logger.info(f"DEBUG: Trying list_models with regex: '^{re.escape(id)}$'")
             try:
                 result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                logger.info(f"DEBUG: list_models returned {len(result.get('models', []))} models")
                 if result.get("models"):
                     for model in result["models"]:
                         v = model["version"]
+                        logger.info(f"DEBUG: Checking model: name='{model.get('name')}', version='{v}'")
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
+                            logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             version = v
                             found = True
+                            logger.info(f"DEBUG: ✅ Found model in S3: {s3_key}")
                             break
                         except ClientError as e:
                             error_code = e.response.get("Error", {}).get("Code", "")
+                            logger.debug(f"DEBUG: S3 key {s3_key} not found: {error_code}")
                             if error_code == "NoSuchKey" or error_code == "404":
                                 continue
                             else:
                                 logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
             except Exception as e:
-                logger.warning(f"Error calling list_models: {e}")
+                logger.warning(f"Error calling list_models: {e}", exc_info=True)
             
             # If not found, try common versions
             if not found:
+                logger.info(f"DEBUG: Not found via list_models, trying common versions: ['1.0.0', 'main', 'latest']")
                 common_versions = ["1.0.0", "main", "latest"]
                 for v in common_versions:
                     try:
                         s3_key = f"models/{id}/{v}/model.zip"
+                        logger.info(f"DEBUG: Checking common version S3 key: {s3_key}")
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
                         found = True
+                        logger.info(f"DEBUG: ✅ Found model with common version: {s3_key}")
                         break
                     except ClientError as e:
                         error_code = e.response.get("Error", {}).get("Code", "")
+                        logger.debug(f"DEBUG: Common version {s3_key} not found: {error_code}")
                         if error_code == "NoSuchKey" or error_code == "404":
                             continue
                         else:
                             logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
             
             if not found:
+                logger.error(f"DEBUG: ❌❌❌ MODEL NOT FOUND - All lookup methods failed ❌❌❌")
+                logger.error(f"DEBUG: Final status: found={found}, version={version}, id='{id}'")
+                logger.error(f"DEBUG: _artifact_storage contents: {list(_artifact_storage.keys())}")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             
             # Return model with id as name (simpler approach that works with autograder)
-            return {
+            logger.info(f"DEBUG: ✅✅✅ RETURNING MODEL (fallback to name lookup) ✅✅✅")
+            logger.info(f"DEBUG: Using id as name: id='{id}', version='{version}'")
+            result = {
                 "metadata": {"name": id, "id": id, "type": artifact_type},
                 "data": {"url": f"https://huggingface.co/{id}"},
             }
+            logger.info(f"DEBUG: Final result: {result}")
+            return result
         else:
             logger.info(f"DEBUG: Processing {artifact_type} artifact with id='{id}'")
             # For dataset and code artifacts, verify they exist in S3
@@ -1247,8 +1301,11 @@ async def post_artifact_ingest(request: Request):
                     )
                 
                 # Generate artifact ID and store metadata
+                logger.info(f"DEBUG: ===== GENERATING ARTIFACT ID =====")
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 url = f"https://huggingface.co/{name}"
+                logger.info(f"DEBUG: Generated artifact_id: '{artifact_id}' for model '{name}'")
+                logger.info(f"DEBUG: Storing in _artifact_storage with key: '{artifact_id}'")
                 _artifact_storage[artifact_id] = {
                     "name": name,
                     "type": artifact_type,
@@ -1256,17 +1313,44 @@ async def post_artifact_ingest(request: Request):
                     "id": artifact_id,
                     "url": url,
                 }
+                logger.info(f"DEBUG: ✅ Stored in _artifact_storage: {_artifact_storage[artifact_id]}")
+                logger.info(f"DEBUG: _artifact_storage size after storage: {len(_artifact_storage)}")
+                logger.info(f"DEBUG: Verifying artifact_id is in storage: {artifact_id in _artifact_storage}")
                 
                 # Store artifact metadata in S3 (model file already stored via model_ingestion)
                 # This must complete synchronously so queries can find the artifact
+                logger.info(f"DEBUG: ===== STORING ARTIFACT METADATA IN S3 =====")
+                logger.info(f"DEBUG: artifact_id='{artifact_id}', name='{name}', type='{artifact_type}', version='{version}'")
                 try:
                     result = store_artifact_metadata(artifact_id, name, artifact_type, version, url)
-                    logger.info(f"DEBUG: S3 metadata storage result: {result}")
+                    logger.info(f"DEBUG: ✅ S3 metadata storage result: {result}")
+                    
+                    # Verify the metadata was stored by trying to read it back
+                    # This ensures the write completed and is immediately readable
+                    import time
+                    logger.info(f"DEBUG: Verifying S3 metadata is readable...")
+                    verify_metadata = None
+                    for verify_attempt in range(3):
+                        logger.info(f"DEBUG: Verification attempt {verify_attempt + 1}/3")
+                        verify_metadata = find_artifact_metadata_by_id(artifact_id)
+                        if verify_metadata:
+                            logger.info(f"DEBUG: ✅✅✅ VERIFIED: S3 metadata exists for artifact_id '{artifact_id}' ✅✅✅")
+                            logger.info(f"DEBUG: Verified metadata: {verify_metadata}")
+                            break
+                        else:
+                            logger.warning(f"DEBUG: ⚠️ Verification attempt {verify_attempt + 1} failed - metadata not found")
+                        if verify_attempt < 2:
+                            logger.info(f"DEBUG: Waiting 0.1s before retry...")
+                            time.sleep(0.1)  # Small delay before retry
+                    
+                    if not verify_metadata:
+                        logger.error(f"DEBUG: ❌❌❌ WARNING: Could not verify S3 metadata for artifact_id '{artifact_id}' after 3 attempts ❌❌❌")
+                        logger.error(f"DEBUG: This may cause query failures if hitting different instance")
                 except Exception as s3_error:
-                    logger.error(f"Failed to store artifact metadata in S3: {str(s3_error)}", exc_info=True)
+                    logger.error(f"DEBUG: ❌ Exception storing artifact metadata in S3: {str(s3_error)}", exc_info=True)
                     # Don't fail ingestion if S3 metadata storage fails, but log it as an error
                 
-                return {
+                result = {
                     "message": "Ingest successful",
                     "details": {
                         "name": name,
@@ -1276,6 +1360,14 @@ async def post_artifact_ingest(request: Request):
                         "url": url,
                     },
                 }
+                logger.info(f"DEBUG: ===== INGESTION COMPLETE =====")
+                logger.info(f"DEBUG: ✅✅✅ Returning ingestion result: {result} ✅✅✅")
+                logger.info(f"DEBUG: Artifact should now be queryable by:")
+                logger.info(f"DEBUG:   - artifact_id: '{artifact_id}' (GET /package/{artifact_id})")
+                logger.info(f"DEBUG:   - name: '{name}' (GET /artifact/byName/{name})")
+                logger.info(f"DEBUG: _artifact_storage final size: {len(_artifact_storage)}")
+                logger.info(f"DEBUG: Verifying artifact_id in storage before return: {artifact_id in _artifact_storage}")
+                return result
             except HTTPException:
                 raise
             except Exception as model_error:
@@ -2058,34 +2150,51 @@ def get_model_rate(id: str, request: Request):
                 detail="There is missing field(s) in the artifact_id or it is formed improperly, or is invalid.",
             )
         
+        logger.info(f"DEBUG: ===== GET_MODEL_RATE START =====")
+        logger.info(f"DEBUG: Querying rate for id='{id}'")
+        
         found = False
         model_name = None
         logger.info(f"DEBUG: Checking _artifact_storage for id='{id}' (storage size: {len(_artifact_storage)})")
+        logger.info(f"DEBUG: _artifact_storage keys (first 10): {list(_artifact_storage.keys())[:10]}")
+        
         if id in _artifact_storage:
             artifact = _artifact_storage[id]
-            logger.info(f"DEBUG: Found artifact in storage: {artifact}")
+            logger.info(f"DEBUG: ✅ Found artifact in storage: {artifact}")
             if artifact.get("type") == "model":
                 found = True
                 model_name = artifact.get("name", id)
-                logger.info(f"DEBUG: Model found in storage: name='{model_name}'")
+                logger.info(f"DEBUG: ✅ Model found in storage: name='{model_name}'")
             else:
-                logger.warning(f"DEBUG: Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+                logger.warning(f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
         else:
-            logger.info(f"DEBUG: Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
+            logger.info(f"DEBUG: ❌ Artifact id '{id}' not found in _artifact_storage, searching S3 metadata")
             # Try to find artifact metadata in S3 by artifact_id
+            import time
+            s3_start = time.time()
             s3_metadata = find_artifact_metadata_by_id(id)
-            if s3_metadata and s3_metadata.get("type") == "model":
-                found = True
-                model_name = s3_metadata.get("name")
-                logger.info(f"DEBUG: Found artifact in S3 metadata: model_name='{model_name}'")
-                # Restore to _artifact_storage for future lookups
-                _artifact_storage[id] = {
-                    "name": model_name,
-                    "type": "model",
-                    "version": s3_metadata.get("version", "main"),
-                    "id": id,
-                    "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                }
+            s3_elapsed = time.time() - s3_start
+            logger.info(f"DEBUG: S3 metadata lookup took {s3_elapsed:.3f}s")
+            
+            if s3_metadata:
+                logger.info(f"DEBUG: ✅ Found S3 metadata: {s3_metadata}")
+                if s3_metadata.get("type") == "model":
+                    found = True
+                    model_name = s3_metadata.get("name")
+                    logger.info(f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}'")
+                    # Restore to _artifact_storage for future lookups
+                    _artifact_storage[id] = {
+                        "name": model_name,
+                        "type": "model",
+                        "version": s3_metadata.get("version", "main"),
+                        "id": id,
+                        "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
+                    }
+                    logger.info(f"DEBUG: ✅ Restored to _artifact_storage: {_artifact_storage[id]}")
+                else:
+                    logger.warning(f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'")
+            else:
+                logger.warning(f"DEBUG: ❌ S3 metadata not found for artifact_id '{id}'")
         
         if not found:
             logger.info(f"DEBUG: Not found in storage or S3 metadata, searching S3 by model name")
