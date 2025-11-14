@@ -839,9 +839,9 @@ def get_artifact_by_name(name: str, request: Request):
                             {
                                 "name": model_name,
                                 "id": fallback_id,
-                                "type": "model",
-                            }
-                        )
+                        "type": "model",
+                    }
+                )
 
         # Add artifacts from database (all artifact types including models)
         logger.info(f"DEBUG: Searching database for artifacts with name='{name}'")
@@ -1465,71 +1465,61 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             return result
         else:
             logger.info(f"DEBUG: Processing {artifact_type} artifact with id='{id}'")
-            # For dataset and code artifacts, verify they exist in S3
-            artifact_name = None
-            version = "main"
-            # Check database for artifact
+            # For dataset and code artifacts, check database first (primary source of truth)
             artifact = get_artifact_from_db(id)
             if artifact:
                 logger.info(f"DEBUG: Found artifact in database: {artifact}")
                 if artifact.get("type") == artifact_type:
+                    # Artifact found in database with correct type - return it immediately
+                    # S3 verification is optional, not required
                     artifact_name = artifact.get("name", id)
-                    version = artifact.get("version", "main")
-                    logger.info(f"DEBUG: Extracted artifact_name='{artifact_name}', version='{version}' from database")
-                else:
-                    logger.warning(f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'")
-            else:
-                logger.info(f"DEBUG: Artifact id '{id}' not found in database")
-            
-            # Verify artifact exists in S3
-            artifact_exists = False
-            if artifact_name:
-                logger.info(f"DEBUG: Verifying {artifact_type} exists in S3: name='{artifact_name}', version='{version}'")
-                try:
-                    sanitized_name = sanitize_model_id_for_s3(artifact_name)
-                    safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
-                    s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
-                    logger.info(f"DEBUG: Checking S3 key: {s3_key}")
-                    try:
-                        s3.head_object(Bucket=ap_arn, Key=s3_key)
-                        artifact_exists = True
-                        logger.info(f"DEBUG: {artifact_type} exists in S3: {s3_key}")
-                    except ClientError as e:
-                        error_code = e.response.get("Error", {}).get("Code", "")
-                        logger.warning(f"DEBUG: {artifact_type} not found in S3: {s3_key}, error_code={error_code}")
-                        pass
-                except Exception as e:
-                    logger.error(f"DEBUG: Exception verifying {artifact_type} in S3: {str(e)}", exc_info=True)
-                    pass
-            else:
-                logger.warning(f"DEBUG: No artifact_name found, cannot verify in S3")
-            
-            if artifact_exists and artifact_name:
-                # Get artifact from database (should be there now after S3 lookup)
-                artifact = get_artifact_from_db(id)
-                if not artifact:
-                    artifact = {
-                        "name": artifact_name,
-                        "type": artifact_type,
-                        "version": version,
-                        "id": id,
-                        "url": f"https://example.com/{artifact_type}/{artifact_name}"
-                    }
-                result = {
+                    artifact_url = artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                    result = {
                     "metadata": {
-                        "name": artifact.get("name", artifact_name),
+                            "name": artifact_name,
                         "id": id,
                         "type": artifact_type,
                     },
                     "data": {
-                        "url": artifact.get(
-                            "url", f"https://example.com/{artifact_type}/{artifact_name}"
-                        )
-                    },
-                }
-                logger.info(f"DEBUG: Returning {artifact_type} artifact: {result}")
-                return result
-            logger.error(f"DEBUG: {artifact_type} not found: id='{id}', artifact_name='{artifact_name}', exists_in_s3={artifact_exists}")
+                            "url": artifact_url
+                        },
+                    }
+                    logger.info(f"DEBUG: Returning {artifact_type} artifact from database: {result}")
+                    return result
+                else:
+                    logger.warning(f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'")
+                    raise HTTPException(status_code=404, detail="Artifact does not exist.")
+            else:
+                logger.info(f"DEBUG: Artifact id '{id}' not found in database")
+                # Try S3 metadata as fallback (for backward compatibility)
+                logger.info(f"DEBUG: Trying S3 metadata as fallback for {artifact_type} artifact")
+                s3_metadata = find_artifact_metadata_by_id(id)
+                if s3_metadata and s3_metadata.get("type") == artifact_type:
+                    artifact_name = s3_metadata.get("name", id)
+                    artifact_url = s3_metadata.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                    # Restore to database for future lookups
+                    save_artifact(id, {
+                        "name": artifact_name,
+                        "type": artifact_type,
+                        "version": s3_metadata.get("version", "main"),
+                        "id": id,
+                        "url": artifact_url
+                    })
+                    logger.info(f"DEBUG: Restored {artifact_type} artifact from S3 to database: id='{id}'")
+                    result = {
+                        "metadata": {
+                            "name": artifact_name,
+                            "id": id,
+                            "type": artifact_type,
+                        },
+                        "data": {
+                            "url": artifact_url
+                        },
+                    }
+                    logger.info(f"DEBUG: Returning {artifact_type} artifact from S3: {result}")
+                    return result
+            
+            logger.error(f"DEBUG: {artifact_type} not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
         raise
@@ -2785,7 +2775,7 @@ def get_model_lineage(id: str, request: Request):
         found = False
         artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
-            found = True
+                found = True
 
         if not found:
             try:
@@ -2889,7 +2879,7 @@ async def check_model_license(id: str, request: Request):
         found = False
         artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
-            found = True
+                found = True
 
         if not found:
             try:
