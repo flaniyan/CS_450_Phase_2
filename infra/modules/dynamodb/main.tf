@@ -4,6 +4,7 @@ locals {
     tokens   = { hash_key = "token_id", ttl_attr = "exp_ts" }
     packages = { hash_key = "pkg_key" }
     uploads  = { hash_key = "upload_id" }
+    artifacts = { hash_key = "artifact_id" }
     downloads = {
       hash_key = "event_id"
       gsi = {
