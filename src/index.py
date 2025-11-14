@@ -637,6 +637,7 @@ def _link_dataset_code_to_models(artifact_id: str, artifact_name: str, artifact_
                     logger.info(f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via name matching")
 
 
+@app.delete("/reset")
 def reset_system(request: Request):
     global _rating_status, _rating_locks, _rating_results
     
@@ -1932,6 +1933,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
                         # Don't fail ingestion if S3 metadata storage fails
                     
+                    # Per spec: Return 202 when rating is deferred (async)
+                    # "Artifact ingest accepted but the rating pipeline deferred the evaluation"
                     return Response(
                         content=json.dumps(
                             {
@@ -1944,7 +1947,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                             }
                         ),
                         media_type="application/json",
-                        status_code=201,
+                        status_code=202,
                     )
                 except HTTPException:
                     raise
