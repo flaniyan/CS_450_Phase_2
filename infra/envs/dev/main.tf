@@ -28,6 +28,7 @@ locals {
     packages  = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/packages"
     uploads   = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/uploads"
     downloads = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/downloads"
+    artifacts = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/artifacts"
   }
 }
 

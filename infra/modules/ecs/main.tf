@@ -96,6 +96,10 @@ resource "aws_ecs_task_definition" "validator_task" {
         value = "tokens"
       },
       {
+        name  = "DDB_TABLE_ARTIFACTS"
+        value = "artifacts"
+      },
+      {
         name  = "PYTHON_ENV"
         value = "production"
       }
