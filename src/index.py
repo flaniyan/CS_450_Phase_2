@@ -412,6 +412,7 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
 
 @app.post("/artifacts")
 async def list_artifacts(request: Request, offset: str = None):
+    global _artifact_storage
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
@@ -460,7 +461,6 @@ async def list_artifacts(request: Request, offset: str = None):
                 
                 # Search _artifact_storage for datasets and code (immediate consistency)
                 if not types_filter or "dataset" in types_filter or "code" in types_filter:
-                    global _artifact_storage
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_type_stored = artifact_data.get("type", "")
                         if (not types_filter or artifact_type_stored in types_filter):
@@ -514,7 +514,6 @@ async def list_artifacts(request: Request, offset: str = None):
                 
                 # Search _artifact_storage for datasets and code (immediate consistency)
                 if not types_filter or "dataset" in types_filter or "code" in types_filter:
-                    global _artifact_storage
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_name = artifact_data.get("name", "")
                         artifact_type_stored = artifact_data.get("type", "")
@@ -857,6 +856,7 @@ def get_package(id: str, request: Request):
 
 @app.get("/artifact/byName/{name}")
 def get_artifact_by_name(name: str, request: Request):
+    global _artifact_storage
     logger.info(f"DEBUG: ===== GET_ARTIFACT_BY_NAME START =====")
     logger.info(f"=== GET /artifact/byName/{name} ===")
     logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
@@ -984,7 +984,6 @@ def get_artifact_by_name(name: str, request: Request):
 
         # Search _artifact_storage for datasets and code (immediate consistency)
         logger.info(f"DEBUG: Searching _artifact_storage for datasets and code with name='{name}'")
-        global _artifact_storage
         for artifact_id, artifact_data in _artifact_storage.items():
             artifact_name = artifact_data.get("name", "")
             artifact_type = artifact_data.get("type", "")
@@ -1927,7 +1926,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
     For models: Downloads, validates, rates, and uploads to S3.
     For datasets/code: Validates and stores artifact metadata.
     """
-    
+    global _artifact_storage
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
@@ -2151,7 +2150,6 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
             
             # Check if artifact already exists (check both _artifact_storage and database)
-            global _artifact_storage
             for existing_id, existing_data in _artifact_storage.items():
                 if (existing_data.get("url") == url and existing_data.get("type") == artifact_type) or (
                     existing_data.get("name") == artifact_name and existing_data.get("type") == artifact_type
@@ -2360,6 +2358,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
 
 @app.delete("/artifacts/{artifact_type}/{id}")
 def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
+    global _artifact_storage
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
@@ -2372,7 +2371,6 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
             delete_artifact(id)
             # Also remove from _artifact_storage if it's a dataset or code
             if artifact_type in ["dataset", "code"]:
-                global _artifact_storage
                 if id in _artifact_storage:
                     del _artifact_storage[id]
             deleted = True
