@@ -1,11 +1,19 @@
+# Variables
+variable "enable_github_token_secret" {
+  type        = bool
+  default     = false
+  description = "Whether to enable GitHub token from Secrets Manager (set to true after creating the secret)"
+}
+
 # Data source for JWT secret
 data "aws_secretsmanager_secret" "jwt_secret" {
   name = "acme-jwt-secret"
 }
 
-# Data source for GitHub token secret
+# Optional data source for GitHub token - only created if enabled
 data "aws_secretsmanager_secret" "github_token" {
-  name = "acme-github-token"
+  count = var.enable_github_token_secret ? 1 : 0
+  name  = "acme-github-token"
 }
 
 # ECR Repository
@@ -110,16 +118,20 @@ resource "aws_ecs_task_definition" "validator_task" {
       }
     ]
 
-    secrets = [
-      {
-        name      = "JWT_SECRET"
-        valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
-      },
-      {
-        name      = "GITHUB_TOKEN"
-        valueFrom = "${data.aws_secretsmanager_secret.github_token.arn}:github_token::"
-      }
-    ]
+    secrets = concat(
+      [
+        {
+          name      = "JWT_SECRET"
+          valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
+        }
+      ],
+      var.enable_github_token_secret ? [
+        {
+          name      = "GITHUB_TOKEN"
+          valueFrom = "${data.aws_secretsmanager_secret.github_token[0].arn}:github_token::"
+        }
+      ] : []
+    )
 
     logConfiguration = {
       logDriver = "awslogs"
@@ -329,10 +341,10 @@ resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = [
-          data.aws_secretsmanager_secret.jwt_secret.arn,
-          data.aws_secretsmanager_secret.github_token.arn
-        ]
+        Resource = concat(
+          [data.aws_secretsmanager_secret.jwt_secret.arn],
+          var.enable_github_token_secret ? [data.aws_secretsmanager_secret.github_token[0].arn] : []
+        )
       },
       {
         Effect = "Allow"
