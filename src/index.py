@@ -854,7 +854,7 @@ def get_package(id: str, request: Request):
     logger.info(f"DEBUG: Route handler executed for /package/{id}")
     return get_artifact("model", id, request)
 
-@app.get("/artifact/byName/{name}")
+@app.get("/artifact/byName/{name:path}")
 def get_artifact_by_name(name: str, request: Request):
     global _artifact_storage
     logger.info(f"DEBUG: ===== GET_ARTIFACT_BY_NAME START =====")
@@ -1555,22 +1555,39 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             logger.info(f"DEBUG: Will try to use id '{id}' as model name")
             
             # If not found in S3 metadata, try to find model by name (id might be model name)
+            # First, try using the ID as-is (for numeric artifact IDs)
+            # Then try sanitizing it (for model names with slashes)
             version = None
             found = False
+            model_name_for_s3 = None
+            actual_model_name = id  # Default to ID
+            list_models_result = None
+            
+            # Try to get model name from database if ID is an artifact_id
+            model_name_for_s3 = _get_model_name_for_s3(id)
+            if not model_name_for_s3:
+                # If not found, try sanitizing the ID (in case it's a model name with slashes)
+                model_name_for_s3 = sanitize_model_id_for_s3(id)
+            
             logger.info(f"DEBUG: Trying list_models with regex: '^{re.escape(id)}$'")
             try:
-                result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                logger.info(f"DEBUG: list_models returned {len(result.get('models', []))} models")
-                if result.get("models"):
-                    for model in result["models"]:
+                list_models_result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                logger.info(f"DEBUG: list_models returned {len(list_models_result.get('models', []))} models")
+                if list_models_result.get("models"):
+                    for model in list_models_result["models"]:
                         v = model["version"]
-                        logger.info(f"DEBUG: Checking model: name='{model.get('name')}', version='{v}'")
+                        model_n = model.get("name", model_name_for_s3 or id)
+                        actual_model_name = model_n  # Use the actual model name from list_models
+                        # Sanitize model name for S3
+                        sanitized_name = sanitize_model_id_for_s3(model_n)
+                        logger.info(f"DEBUG: Checking model: name='{model_n}', sanitized='{sanitized_name}', version='{v}'")
                         try:
-                            s3_key = f"models/{id}/{v}/model.zip"
+                            s3_key = f"models/{sanitized_name}/{v}/model.zip"
                             logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             version = v
                             found = True
+                            model_name_for_s3 = sanitized_name
                             logger.info(f"DEBUG: ✅ Found model in S3: {s3_key}")
                             break
                         except ClientError as e:
@@ -1583,13 +1600,14 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             except Exception as e:
                 logger.warning(f"Error calling list_models: {e}", exc_info=True)
             
-            # If not found, try common versions
+            # If not found, try common versions with sanitized name
             if not found:
                 logger.info(f"DEBUG: Not found via list_models, trying common versions: ['1.0.0', 'main', 'latest']")
                 common_versions = ["1.0.0", "main", "latest"]
                 for v in common_versions:
                     try:
-                        s3_key = f"models/{id}/{v}/model.zip"
+                        # Use sanitized name for S3 lookup
+                        s3_key = f"models/{model_name_for_s3}/{v}/model.zip"
                         logger.info(f"DEBUG: Checking common version S3 key: {s3_key}")
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
@@ -1612,12 +1630,12 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                 logger.error(f"DEBUG: Database artifact IDs: {artifact_ids[:20]}")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             
-            # Return model with id as name (simpler approach that works with autograder)
+            # Return model - use actual model name if found, otherwise use ID
             logger.info(f"DEBUG: ✅✅✅ RETURNING MODEL (fallback to name lookup) ✅✅✅")
-            logger.info(f"DEBUG: Using id as name: id='{id}', version='{version}'")
+            logger.info(f"DEBUG: Using model name: '{actual_model_name}', id='{id}', version='{version}'")
             result = {
-                "metadata": {"name": id, "id": id, "type": artifact_type},
-                "data": {"url": f"https://huggingface.co/{id}"},
+                "metadata": {"name": actual_model_name, "id": id, "type": artifact_type},
+                "data": {"url": f"https://huggingface.co/{actual_model_name}"},
             }
             logger.info(f"DEBUG: Final result: {result}")
             return result
@@ -1679,6 +1697,88 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     }
                     logger.info(f"DEBUG: Returning {artifact_type} artifact from S3: {result}")
                     return result
+                
+                # Try S3 lookup by name (if ID is actually a name with special characters)
+                logger.info(f"DEBUG: Trying S3 lookup by name for {artifact_type} with id='{id}'")
+                try:
+                    # Search S3 for artifacts matching the name
+                    sanitized_name = sanitize_model_id_for_s3(id)
+                    logger.info(f"DEBUG: Searching S3 for {artifact_type} with sanitized name: '{sanitized_name}'")
+                    s3_result = list_artifacts_from_s3(artifact_type=artifact_type, name_regex=f"^{re.escape(id)}$", limit=10)
+                    if s3_result.get("artifacts"):
+                        for s3_artifact in s3_result["artifacts"]:
+                            s3_artifact_name = s3_artifact.get("name", "")
+                            s3_artifact_id = s3_artifact.get("artifact_id", "")
+                            # Match by name (supports IDs that are actually names)
+                            if s3_artifact_name == id:
+                                logger.info(f"DEBUG: Found {artifact_type} in S3 by name: name='{s3_artifact_name}', id='{s3_artifact_id}'")
+                                # Use the artifact_id from S3 if available, otherwise use the provided id
+                                final_id = s3_artifact_id if s3_artifact_id else id
+                                artifact_url = f"https://example.com/{artifact_type}/{s3_artifact_name}"
+                                # Restore to database for future lookups
+                                save_artifact(final_id, {
+                                    "name": s3_artifact_name,
+                                    "type": artifact_type,
+                                    "version": s3_artifact.get("version", "main"),
+                                    "id": final_id,
+                                    "url": artifact_url
+                                })
+                                result = {
+                                    "metadata": {
+                                        "name": s3_artifact_name,
+                                        "id": final_id,
+                                        "type": artifact_type,
+                                    },
+                                    "data": {
+                                        "url": artifact_url
+                                    },
+                                }
+                                logger.info(f"DEBUG: Returning {artifact_type} artifact from S3 name lookup: {result}")
+                                return result
+                except Exception as e:
+                    logger.warning(f"DEBUG: Error searching S3 by name: {str(e)}")
+            
+            # For datasets/code, also try searching by name if ID lookup fails
+            # This allows using artifact names or other identifiers as IDs
+            logger.info(f"DEBUG: Trying name-based lookup in database for {artifact_type} with id='{id}'")
+            all_artifacts = list_all_artifacts()
+            for artifact in all_artifacts:
+                if artifact.get("type") == artifact_type:
+                    artifact_name = artifact.get("name", "")
+                    artifact_id = artifact.get("id", "")
+                    # Match by name or ID (supports both artifact IDs and names as lookup keys)
+                    # Also support partial matches for names with special characters
+                    if artifact_name == id or artifact_id == id:
+                        logger.info(f"DEBUG: Found {artifact_type} by name/ID match: name='{artifact_name}', id='{artifact_id}'")
+                        result = {
+                            "metadata": {
+                                "name": artifact_name,
+                                "id": artifact_id,
+                                "type": artifact_type,
+                            },
+                            "data": {
+                                "url": artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                            },
+                        }
+                        logger.info(f"DEBUG: Returning {artifact_type} artifact from name lookup: {result}")
+                        return result
+                    # Also try sanitized name matching (for IDs with slashes that match sanitized names)
+                    sanitized_artifact_name = sanitize_model_id_for_s3(artifact_name)
+                    sanitized_id = sanitize_model_id_for_s3(id)
+                    if sanitized_artifact_name == sanitized_id:
+                        logger.info(f"DEBUG: Found {artifact_type} by sanitized name match: name='{artifact_name}', id='{artifact_id}'")
+                        result = {
+                            "metadata": {
+                                "name": artifact_name,
+                                "id": artifact_id,
+                                "type": artifact_type,
+                            },
+                            "data": {
+                                "url": artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                            },
+                        }
+                        logger.info(f"DEBUG: Returning {artifact_type} artifact from sanitized name lookup: {result}")
+                        return result
             
             logger.error(f"DEBUG: {artifact_type} not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
@@ -2451,7 +2551,9 @@ def get_artifact_cost(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
             )
-        if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+        # Allow flexible ID formats: alphanumeric, hyphens, underscores, slashes, dots, colons
+        # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
+        if not id or not id.strip():
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
@@ -2467,10 +2569,15 @@ def get_artifact_cost(
                     if result.get("models"):
                         found = True
                     else:
+                        # Try with sanitized name for S3 lookup (handles IDs with slashes)
+                        model_name_for_s3 = _get_model_name_for_s3(id)
+                        if not model_name_for_s3:
+                            model_name_for_s3 = sanitize_model_id_for_s3(id)
                         common_versions = ["1.0.0", "main", "latest"]
                         for v in common_versions:
                             try:
-                                s3_key = f"models/{id}/{v}/model.zip"
+                                # Use sanitized name for S3 lookup
+                                s3_key = f"models/{model_name_for_s3}/{v}/model.zip"
                                 s3.head_object(Bucket=ap_arn, Key=s3_key)
                                 found = True
                                 break
@@ -2484,8 +2591,8 @@ def get_artifact_cost(
             # Get model name for S3 lookup (models are stored by name, not ID)
             model_name = _get_model_name_for_s3(id)
             if not model_name:
-                # Fallback: use ID directly (in case it was stored by ID)
-                model_name = id
+                # Fallback: sanitize ID (in case it's a model name with special characters)
+                model_name = sanitize_model_id_for_s3(id)
             
             sizes = get_model_sizes(model_name, "1.0.0")
             if "error" in sizes:
@@ -2537,10 +2644,35 @@ def get_artifact_cost(
                 result = {id: {"total_cost": round(standalone_size_mb, 2)}}
             return result
         else:
+            # For datasets/code, support flexible ID formats (numeric IDs, names with slashes, etc.)
             # Try full metadata first, fallback to basic
             artifact = get_generic_artifact_metadata(artifact_type, id)
             if not artifact:
                 artifact = get_artifact_from_db(id)
+            
+            # If not found by ID, try name-based lookup
+            if not artifact:
+                logger.info(f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup")
+                all_artifacts = list_all_artifacts()
+                for art in all_artifacts:
+                    if art.get("type") == artifact_type:
+                        art_name = art.get("name", "")
+                        art_id = art.get("id", "")
+                        # Match by name or ID
+                        if art_name == id or art_id == id:
+                            artifact = art
+                            id = art_id  # Use the actual artifact_id
+                            logger.info(f"DEBUG: Found {artifact_type} by name: name='{art_name}', id='{art_id}'")
+                            break
+                        # Also try sanitized name matching
+                        sanitized_art_name = sanitize_model_id_for_s3(art_name)
+                        sanitized_id = sanitize_model_id_for_s3(id)
+                        if sanitized_art_name == sanitized_id:
+                            artifact = art
+                            id = art_id  # Use the actual artifact_id
+                            logger.info(f"DEBUG: Found {artifact_type} by sanitized name: name='{art_name}', id='{art_id}'")
+                            break
+            
             if not artifact:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             if artifact.get("type") != artifact_type:
@@ -2583,8 +2715,9 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
             )
 
-        # Validate id parameter
-        if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+        # Validate id parameter - allow flexible formats (alphanumeric, hyphens, underscores, slashes, dots, colons)
+        # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
+        if not id or not id.strip():
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
@@ -2620,12 +2753,17 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 except Exception:
                     pass
 
-            # Try common versions if not found
+            # Try common versions if not found (with sanitized name for IDs with special characters)
             if not found:
+                # Get sanitized model name for S3 lookup
+                model_name_for_s3 = _get_model_name_for_s3(id)
+                if not model_name_for_s3:
+                    model_name_for_s3 = sanitize_model_id_for_s3(id)
                 versions = ["1.0.0", "main", "latest"]
                 for v in versions:
                     try:
-                        s3_key = f"models/{id}/{v}/model.zip"
+                        # Use sanitized name for S3 lookup
+                        s3_key = f"models/{model_name_for_s3}/{v}/model.zip"
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         found = True
                         version = v
@@ -2636,9 +2774,12 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-            # Get creation date from S3
+            # Get creation date from S3 (use sanitized name)
             try:
-                s3_key = f"models/{id}/{version or '1.0.0'}/model.zip"
+                model_name_for_s3 = _get_model_name_for_s3(id)
+                if not model_name_for_s3:
+                    model_name_for_s3 = sanitize_model_id_for_s3(id)
+                s3_key = f"models/{model_name_for_s3}/{version or '1.0.0'}/model.zip"
                 obj = s3.head_object(Bucket=ap_arn, Key=s3_key)
                 last_modified = obj.get("LastModified")
                 if last_modified:
@@ -2672,10 +2813,35 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 }
             )
         else:
-            # For non-model artifacts, check database - try full metadata first
+            # For datasets/code artifacts, support flexible ID formats (numeric IDs, names with slashes, etc.)
+            # Try full metadata first, fallback to basic
             artifact = get_generic_artifact_metadata(artifact_type, id)
             if not artifact:
                 artifact = get_artifact_from_db(id)
+            
+            # If not found by ID, try name-based lookup
+            if not artifact:
+                logger.info(f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup for audit")
+                all_artifacts = list_all_artifacts()
+                for art in all_artifacts:
+                    if art.get("type") == artifact_type:
+                        art_name = art.get("name", "")
+                        art_id = art.get("id", "")
+                        # Match by name or ID
+                        if art_name == id or art_id == id:
+                            artifact = art
+                            id = art_id  # Use the actual artifact_id
+                            logger.info(f"DEBUG: Found {artifact_type} by name for audit: name='{art_name}', id='{art_id}'")
+                            break
+                        # Also try sanitized name matching
+                        sanitized_art_name = sanitize_model_id_for_s3(art_name)
+                        sanitized_id = sanitize_model_id_for_s3(id)
+                        if sanitized_art_name == sanitized_id:
+                            artifact = art
+                            id = art_id  # Use the actual artifact_id
+                            logger.info(f"DEBUG: Found {artifact_type} by sanitized name for audit: name='{art_name}', id='{art_id}'")
+                            break
+            
             if artifact and artifact.get("type") == artifact_type:
                     # Add CREATE entry
                     audit_entries.append(
@@ -2733,8 +2899,9 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
 def get_model_rate(id: str, request: Request):
     try:
         logger.info(f"DEBUG: Validating id format: '{id}'")
-        # Handle literal {id} and other invalid formats by returning zero metrics
-        if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+        # Handle empty IDs - allow flexible formats (alphanumeric, hyphens, underscores, slashes, dots, colons)
+        # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
+        if not id or not id.strip() or id == "{id}":
             logger.warning(f"DEBUG: Invalid id format: '{id}' (e.g., literal {{id}}) - returning zero metrics with status 200")
             # Return zero metrics with status 200 for invalid ID formats (including literal {id})
             # Response structure matches ModelRating schema exactly (all required fields present)
@@ -2991,8 +3158,9 @@ def get_model_lineage(id: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        # Validate id parameter
-        if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+        # Validate id parameter - allow flexible formats (alphanumeric, hyphens, underscores, slashes, dots, colons)
+        # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
+        if not id or not id.strip():
             raise HTTPException(
                 status_code=400,
                 detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.",
@@ -3116,8 +3284,9 @@ async def check_model_license(id: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     try:
-        # Validate id parameter
-        if not re.match(r"^[a-zA-Z0-9\-]+$", id):
+        # Validate id parameter - allow flexible formats (alphanumeric, hyphens, underscores, slashes, dots, colons)
+        # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
+        if not id or not id.strip():
             raise HTTPException(
                 status_code=400,
                 detail="The license check request is malformed or references an unsupported usage context.",

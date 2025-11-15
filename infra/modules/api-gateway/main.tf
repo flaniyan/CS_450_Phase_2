@@ -305,7 +305,7 @@ resource "aws_api_gateway_resource" "artifact_byname" {
 resource "aws_api_gateway_resource" "artifact_byname_name" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_resource.artifact_byname.id
-  path_part   = "{name}"
+  path_part   = "{proxy+}"
 }
 
 # /artifact/byRegEx
@@ -2753,7 +2753,7 @@ resource "aws_api_gateway_method" "artifact_byname_name_get" {
   authorization = "NONE"
 
   request_parameters = {
-    "method.request.path.name"              = true
+    "method.request.path.proxy"              = true
     "method.request.header.X-Authorization" = true
   }
 }
@@ -2768,7 +2768,7 @@ resource "aws_api_gateway_integration" "artifact_byname_name_get" {
   uri                     = "${var.validator_service_url}/artifact/byName/{name}"
 
   request_parameters = {
-    "integration.request.path.name"              = "method.request.path.name"
+    "integration.request.path.name"              = "method.request.path.proxy"
     "integration.request.header.X-Authorization" = "method.request.header.X-Authorization"
   }
 }
