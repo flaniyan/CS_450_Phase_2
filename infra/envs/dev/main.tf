@@ -55,11 +55,11 @@ module "iam" {
 }
 
 module "ecs" {
-  source                     = "../../modules/ecs"
-  artifacts_bucket           = local.artifacts_bucket
-  image_tag                  = var.image_tag
-  ddb_tables_arnmap          = local.ddb_tables_arnmap
-  enable_github_token_secret = false # Set to true after creating the secret
+  source                    = "../../modules/ecs"
+  artifacts_bucket          = local.artifacts_bucket
+  image_tag                 = var.image_tag
+  ddb_tables_arnmap         = local.ddb_tables_arnmap
+  enable_github_token_secret = false  # Set to true after creating the secret
 }
 
 module "api_gateway" {
