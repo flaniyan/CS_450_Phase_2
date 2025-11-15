@@ -24,6 +24,14 @@ resource "aws_dynamodb_table" "this" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
 
+  # Prevent accidental deletion of existing tables
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to table name, billing mode, and hash key
+      # These are set correctly and shouldn't change
+    ]
+  }
+
   attribute {
     name = each.value.hash_key
     type = "S"

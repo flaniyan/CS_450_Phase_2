@@ -124,6 +124,19 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
+      - name: Import existing DynamoDB tables
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        run: |
+          # Import existing tables (ignore errors if already imported)
+          terraform import 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts || true
+          terraform import 'module.ddb.aws_dynamodb_table.this["users"]' users || true
+          terraform import 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads || true
+          terraform import 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens || true
+          terraform import 'module.ddb.aws_dynamodb_table.this["packages"]' packages || true
+          terraform import 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads || true
+
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}

@@ -11,8 +11,12 @@ terraform {
     bucket         = "pkg-artifacts"
     key            = "terraform/state"
     region         = "us-east-1"
-    dynamodb_table = "terraform-state-lock"
     encrypt        = true
+    
+    dynamodb {
+      name         = "terraform-state-lock"
+      use_lockfile = true
+    }
   }
 }
 
