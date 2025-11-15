@@ -24,14 +24,11 @@ resource "aws_dynamodb_table" "this" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
 
-  # Prevent accidental deletion and unnecessary modifications of existing tables
+  # Prevent accidental deletion of existing tables
   lifecycle {
     ignore_changes = [
       # Ignore changes to table name, billing mode, and hash key
       # These are set correctly and shouldn't change
-      # Also ignore GSI changes to prevent long modification times
-      # GSIs take 5+ minutes to modify when they have existing data
-      global_secondary_index,
     ]
   }
 
