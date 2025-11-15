@@ -132,13 +132,25 @@ jobs:
           TF_VAR_aws_region: us-east-1
           TF_VAR_artifacts_bucket: pkg-artifacts
         run: |
-          # Import existing tables (ignore errors if already imported)
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts || true
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["users"]' users || true
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads || true
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens || true
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["packages"]' packages || true
-          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads || true
+          # Import existing tables only if not already in state
+          # Check if resource exists in state before importing
+          import_table() {
+            local resource_address=$1
+            local table_name=$2
+            if terraform state list | grep -q "^${resource_address}$"; then
+              echo "Table ${table_name} already in state, skipping import"
+            else
+              echo "Importing ${table_name}..."
+              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" "${resource_address}" "${table_name}" || echo "Failed to import ${table_name} (may not exist or already imported)"
+            fi
+          }
+          
+          import_table 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts
+          import_table 'module.ddb.aws_dynamodb_table.this["users"]' users
+          import_table 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads
+          import_table 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens
+          import_table 'module.ddb.aws_dynamodb_table.this["packages"]' packages
+          import_table 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads
 
       - name: Terraform plan
         shell: bash

@@ -156,13 +156,35 @@ app.add_middleware(LoggingMiddleware)
 
 @app.on_event("startup")
 async def startup_event():
-    """Log all registered routes on startup"""
+    """Log all registered routes on startup and initialize _artifact_storage"""
     logger.info("=== REGISTERED ROUTES ===")
     for route in app.routes:
         if hasattr(route, "path") and hasattr(route, "methods"):
             logger.info(f"Route: {list(route.methods)} {route.path}")
     logger.info("=== END REGISTERED ROUTES ===")
     ensure_default_admin()
+    
+    # Initialize _artifact_storage from DynamoDB (for datasets and code)
+    # This ensures immediate consistency for queries
+    try:
+        global _artifact_storage
+        all_artifacts = list_all_artifacts()
+        for artifact in all_artifacts:
+            artifact_type = artifact.get("type", "")
+            if artifact_type in ["dataset", "code"]:
+                artifact_id = artifact.get("id", "")
+                if artifact_id:
+                    _artifact_storage[artifact_id] = {
+                        "name": artifact.get("name", ""),
+                        "type": artifact_type,
+                        "version": artifact.get("version", "main"),
+                        "id": artifact_id,
+                        "url": artifact.get("url", ""),
+                    }
+        logger.info(f"Initialized _artifact_storage with {len(_artifact_storage)} dataset/code artifacts")
+    except Exception as e:
+        logger.warning(f"Failed to initialize _artifact_storage from DynamoDB: {str(e)}")
+        # Continue without initialization - _artifact_storage will be populated as artifacts are created
 
 
 # Rating status tracking for async rating (kept in-memory as it's transient)
@@ -170,6 +192,11 @@ async def startup_event():
 _rating_status = {}
 _rating_locks = {}  # threading.Event objects for blocking requests
 _rating_results = {}  # Store rating results by artifact_id
+
+# In-memory storage for dataset and code artifacts (for immediate consistency in queries)
+# Key: artifact_id, Value: dict with name, type, version, id, url
+# This provides immediate consistency like the reference code's _artifact_storage
+_artifact_storage = {}
 
 
 def sanitize_model_id_for_s3(model_id: str) -> str:
@@ -415,27 +442,44 @@ async def list_artifacts(request: Request, offset: str = None):
                 )
             types_filter = query.get("types", [])
             if name == "*":
-                result = list_models(limit=1000)
-                if result is None:
-                    result = {"models": []}
-                models = result.get("models") or []
-                for model in models:
-                    if isinstance(model, dict) and (
-                        not types_filter or "model" in types_filter
-                    ):
-                        results.append(
-                            {
-                                "name": model.get("name", ""),
-                                "id": model.get("id", model.get("name", "")),
-                                "type": "model",
-                            }
-                        )
-                # Get artifacts from database
+                # Search S3 for models
+                if not types_filter or "model" in types_filter:
+                    result = list_models(limit=1000)
+                    if result is None:
+                        result = {"models": []}
+                    models = result.get("models") or []
+                    for model in models:
+                        if isinstance(model, dict):
+                            results.append(
+                                {
+                                    "name": model.get("name", ""),
+                                    "id": model.get("id", model.get("name", "")),
+                                    "type": "model",
+                                }
+                            )
+                
+                # Search _artifact_storage for datasets and code (immediate consistency)
+                if not types_filter or "dataset" in types_filter or "code" in types_filter:
+                    global _artifact_storage
+                    for artifact_id, artifact_data in _artifact_storage.items():
+                        artifact_type_stored = artifact_data.get("type", "")
+                        if (not types_filter or artifact_type_stored in types_filter):
+                            results.append(
+                                {
+                                    "name": artifact_data.get("name", ""),
+                                    "id": artifact_id,
+                                    "type": artifact_type_stored,
+                                }
+                            )
+                
+                # Also get artifacts from database (for models and any missing datasets/code)
                 all_artifacts = list_all_artifacts()
+                seen_ids = {r.get("id") for r in results}  # Avoid duplicates
                 for artifact in all_artifacts:
                     artifact_type_stored = artifact.get("type", "")
                     artifact_id = artifact.get("id", "")
-                    if not types_filter or artifact_type_stored in types_filter:
+                    # Only add if not already in results and matches filter
+                    if artifact_id not in seen_ids and (not types_filter or artifact_type_stored in types_filter):
                         results.append(
                             {
                                 "name": artifact.get("name", artifact_id),
@@ -443,32 +487,58 @@ async def list_artifacts(request: Request, offset: str = None):
                                 "type": artifact_type_stored,
                             }
                         )
+                        seen_ids.add(artifact_id)
             else:
                 escaped_name = re.escape(name)
                 name_pattern = f"^{escaped_name}$"
-                result = list_models(name_regex=name_pattern, limit=1000)
-                if result is None:
-                    result = {"models": []}
-                models = result.get("models") or []
-                for model in models:
-                    if isinstance(model, dict) and (
-                        not types_filter or "model" in types_filter
-                    ):
-                        results.append(
-                            {
-                                "name": model.get("name", ""),
-                                "id": model.get("id", model.get("name", "")),
-                                "type": "model",
-                            }
-                        )
+                seen_ids = set()
+                
+                # Search S3 for models
+                if not types_filter or "model" in types_filter:
+                    result = list_models(name_regex=name_pattern, limit=1000)
+                    if result is None:
+                        result = {"models": []}
+                    models = result.get("models") or []
+                    for model in models:
+                        if isinstance(model, dict):
+                            model_id = model.get("id", model.get("name", ""))
+                            if model_id not in seen_ids:
+                                results.append(
+                                    {
+                                        "name": model.get("name", ""),
+                                        "id": model_id,
+                                        "type": "model",
+                                    }
+                                )
+                                seen_ids.add(model_id)
+                
+                # Search _artifact_storage for datasets and code (immediate consistency)
+                if not types_filter or "dataset" in types_filter or "code" in types_filter:
+                    global _artifact_storage
+                    for artifact_id, artifact_data in _artifact_storage.items():
+                        artifact_name = artifact_data.get("name", "")
+                        artifact_type_stored = artifact_data.get("type", "")
+                        if (re.match(name_pattern, artifact_name) and 
+                            (not types_filter or artifact_type_stored in types_filter) and
+                            artifact_id not in seen_ids):
+                            results.append(
+                                {
+                                    "name": artifact_name,
+                                    "id": artifact_id,
+                                    "type": artifact_type_stored,
+                                }
+                            )
+                            seen_ids.add(artifact_id)
+                
+                # Also search database for any missing artifacts
                 all_artifacts = list_all_artifacts()
                 for artifact in all_artifacts:
                     artifact_id = artifact.get("id", "")
                     artifact_name = artifact.get("name", artifact_id)
                     artifact_type_stored = artifact.get("type", "")
-                    if re.match(name_pattern, artifact_name) and (
-                        not types_filter or artifact_type_stored in types_filter
-                    ):
+                    if (re.match(name_pattern, artifact_name) and 
+                        (not types_filter or artifact_type_stored in types_filter) and
+                        artifact_id not in seen_ids):
                         results.append(
                             {
                                 "name": artifact_name,
@@ -476,6 +546,7 @@ async def list_artifacts(request: Request, offset: str = None):
                                 "type": artifact_type_stored,
                             }
                         )
+                        seen_ids.add(artifact_id)
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
@@ -596,29 +667,52 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
     if not dataset_name and not code_name:
         return
     
-    # Find matching artifacts from database
+    # Find matching artifacts from database and _artifact_storage (for immediate consistency)
     dataset_id = None
     code_id = None
     
-    # Search for datasets
+    # Search for datasets (check _artifact_storage first, then database)
     if dataset_name:
-        datasets = find_artifacts_by_type("dataset")
-        for artifact in datasets:
-            artifact_name = artifact.get("name", "")
-            if dataset_name.lower() in artifact_name.lower() or artifact_name.lower() in dataset_name.lower():
-                dataset_id = artifact.get("id")
-                logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id})")
-                break
+        # First check _artifact_storage for immediate consistency
+        global _artifact_storage
+        for artifact_id, artifact_data in _artifact_storage.items():
+            if artifact_data.get("type") == "dataset":
+                artifact_name = artifact_data.get("name", "")
+                if dataset_name.lower() in artifact_name.lower() or artifact_name.lower() in dataset_name.lower():
+                    dataset_id = artifact_id
+                    logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from _artifact_storage")
+                    break
+        
+        # If not found in _artifact_storage, check database
+        if not dataset_id:
+            datasets = find_artifacts_by_type("dataset")
+            for artifact in datasets:
+                artifact_name = artifact.get("name", "")
+                if dataset_name.lower() in artifact_name.lower() or artifact_name.lower() in dataset_name.lower():
+                    dataset_id = artifact.get("id")
+                    logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from database")
+                    break
     
-    # Search for code
+    # Search for code (check _artifact_storage first, then database)
     if code_name:
-        code_artifacts = find_artifacts_by_type("code")
-        for artifact in code_artifacts:
-            artifact_name = artifact.get("name", "")
-            if code_name.lower() in artifact_name.lower() or artifact_name.lower() in code_name.lower():
-                code_id = artifact.get("id")
-                logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id})")
-                break
+        # First check _artifact_storage for immediate consistency
+        for artifact_id, artifact_data in _artifact_storage.items():
+            if artifact_data.get("type") == "code":
+                artifact_name = artifact_data.get("name", "")
+                if code_name.lower() in artifact_name.lower() or artifact_name.lower() in code_name.lower():
+                    code_id = artifact_id
+                    logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from _artifact_storage")
+                    break
+        
+        # If not found in _artifact_storage, check database
+        if not code_id:
+            code_artifacts = find_artifacts_by_type("code")
+            for artifact in code_artifacts:
+                artifact_name = artifact.get("name", "")
+                if code_name.lower() in artifact_name.lower() or artifact_name.lower() in code_name.lower():
+                    code_id = artifact.get("id")
+                    logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from database")
+                    break
     
     # Update model entry with links
     updates = {}
@@ -740,6 +834,9 @@ def reset_system(request: Request):
         _rating_status.clear()
         _rating_locks.clear()
         _rating_results.clear()
+        # Clear _artifact_storage (in-memory)
+        global _artifact_storage
+        _artifact_storage.clear()
         result = reset_registry()
         purge_tokens()
         ensure_default_admin()
@@ -885,6 +982,23 @@ def get_artifact_by_name(name: str, request: Request):
                     }
                 )
 
+        # Search _artifact_storage for datasets and code (immediate consistency)
+        logger.info(f"DEBUG: Searching _artifact_storage for datasets and code with name='{name}'")
+        global _artifact_storage
+        for artifact_id, artifact_data in _artifact_storage.items():
+            artifact_name = artifact_data.get("name", "")
+            artifact_type = artifact_data.get("type", "")
+            if artifact_name == name and artifact_id and artifact_id not in seen_artifact_ids:
+                logger.info(f"DEBUG: Found {artifact_type} in _artifact_storage: id='{artifact_id}', name='{artifact_name}'")
+                seen_artifact_ids.add(artifact_id)
+                artifacts.append(
+                    {
+                        "name": artifact_name,
+                        "id": artifact_id,
+                        "type": artifact_type,
+                    }
+                )
+        
         # Add artifacts from database (all artifact types including models)
         logger.info(f"DEBUG: Searching database for artifacts with name='{name}'")
         storage_matches = 0
@@ -903,7 +1017,7 @@ def get_artifact_by_name(name: str, request: Request):
                 )
         logger.info(f"DEBUG: Found {storage_matches} additional artifacts in database")
         
-        # Also search S3 for datasets and code artifacts
+        # Also search S3 for datasets and code artifacts (fallback)
         for artifact_type in ["dataset", "code"]:
             try:
                 logger.info(f"DEBUG: Searching S3 for {artifact_type} artifacts with name='{name}'")
@@ -2036,7 +2150,17 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # For dataset and code artifacts, perform ingestion
             artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
             
-            # Check if artifact already exists
+            # Check if artifact already exists (check both _artifact_storage and database)
+            global _artifact_storage
+            for existing_id, existing_data in _artifact_storage.items():
+                if (existing_data.get("url") == url and existing_data.get("type") == artifact_type) or (
+                    existing_data.get("name") == artifact_name and existing_data.get("type") == artifact_type
+                ):
+                    raise HTTPException(
+                        status_code=409, detail="Artifact exists already."
+                    )
+            
+            # Also check database
             all_artifacts = list_all_artifacts()
             for existing_artifact in all_artifacts:
                 existing_id = existing_artifact.get("id", "")
@@ -2060,6 +2184,16 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # For now, we perform basic validation and storage
             artifact_id = str(random.randint(1000000000, 9999999999))
             
+            # Store in _artifact_storage for immediate consistency
+            _artifact_storage[artifact_id] = {
+                "name": artifact_name,
+                "type": artifact_type,
+                "version": version,
+                "id": artifact_id,
+                "url": url,
+            }
+            
+            # Also save to DynamoDB for persistence
             save_artifact(artifact_id, {
                 "name": artifact_name,
                 "type": artifact_type,
@@ -2236,6 +2370,11 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
         artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == artifact_type:
             delete_artifact(id)
+            # Also remove from _artifact_storage if it's a dataset or code
+            if artifact_type in ["dataset", "code"]:
+                global _artifact_storage
+                if id in _artifact_storage:
+                    del _artifact_storage[id]
             deleted = True
         if artifact_type == "model":
             deleted_count = 0
