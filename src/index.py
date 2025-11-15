@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import os
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from starlette.datastructures import UploadFile
 import uvicorn
 import random
@@ -228,6 +228,47 @@ def _run_async_rating(artifact_id: str, model_name: str, version: str):
         _rating_results[artifact_id] = None
         if artifact_id in _rating_locks:
             _rating_locks[artifact_id].set()
+
+
+def _get_model_name_for_s3(artifact_id: str) -> Optional[str]:
+    """
+    Helper function to get the model name from artifact_id for S3 lookups.
+    Models are stored in S3 by name (sanitized), not by artifact_id.
+    
+    Args:
+        artifact_id: The artifact ID to look up
+        
+    Returns:
+        Sanitized model name for S3, or None if not found
+    """
+    try:
+        # Try to get artifact from database
+        artifact = get_generic_artifact_metadata("model", artifact_id)
+        if not artifact:
+            artifact = get_artifact_from_db(artifact_id)
+        
+        if artifact and artifact.get("type") == "model":
+            name = artifact.get("name", "")
+            if name:
+                # Sanitize name for S3 (same logic as in model_ingestion)
+                sanitized_name = (
+                    name.replace("https://huggingface.co/", "")
+                    .replace("http://huggingface.co/", "")
+                    .replace("/", "_")
+                    .replace(":", "_")
+                    .replace("\\", "_")
+                    .replace("?", "_")
+                    .replace("*", "_")
+                    .replace('"', "_")
+                    .replace("<", "_")
+                    .replace(">", "_")
+                    .replace("|", "_")
+                )
+                return sanitized_name
+        return None
+    except Exception as e:
+        logger.debug(f"Error getting model name for S3: {str(e)}")
+        return None
 
 
 def verify_auth_token(request: Request) -> bool:
@@ -2095,26 +2136,47 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                 detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid.",
             )
         if artifact_type == "model":
-            # Check if artifact exists by trying to find it in S3
+            # Check if artifact exists - first try by ID in database, then by name in S3
             found = False
-            common_versions = ["1.0.0", "main", "latest"]
-            for v in common_versions:
-                try:
-                    s3_key = f"models/{id}/{v}/model.zip"
-                    s3.head_object(Bucket=ap_arn, Key=s3_key)
-                    found = True
-                    break
-                except ClientError as e:
-                    error_code = e.response.get("Error", {}).get("Code", "")
-                    if error_code == "NoSuchKey" or error_code == "404":
-                        continue
-            if not found:
-                try:
-                    result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                    if result.get("models"):
-                        found = True
-                except Exception:
-                    pass
+            artifact = get_artifact_from_db(id)
+            if artifact and artifact.get("type") == "model":
+                found = True
+            else:
+                # Try to get model name from database for S3 lookup
+                model_name = _get_model_name_for_s3(id)
+                if model_name:
+                    common_versions = ["1.0.0", "main", "latest"]
+                    for v in common_versions:
+                        try:
+                            s3_key = f"models/{model_name}/{v}/model.zip"
+                            s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            found = True
+                            break
+                        except ClientError as e:
+                            error_code = e.response.get("Error", {}).get("Code", "")
+                            if error_code == "NoSuchKey" or error_code == "404":
+                                continue
+                # Fallback: try by ID directly (in case it was stored by ID)
+                if not found:
+                    common_versions = ["1.0.0", "main", "latest"]
+                    for v in common_versions:
+                        try:
+                            s3_key = f"models/{id}/{v}/model.zip"
+                            s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            found = True
+                            break
+                        except ClientError as e:
+                            error_code = e.response.get("Error", {}).get("Code", "")
+                            if error_code == "NoSuchKey" or error_code == "404":
+                                continue
+                # Also try by name regex
+                if not found:
+                    try:
+                        result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                        if result.get("models"):
+                            found = True
+                    except Exception:
+                        pass
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
@@ -2281,7 +2343,14 @@ def get_artifact_cost(
                     pass
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            sizes = get_model_sizes(id, "1.0.0")
+            
+            # Get model name for S3 lookup (models are stored by name, not ID)
+            model_name = _get_model_name_for_s3(id)
+            if not model_name:
+                # Fallback: use ID directly (in case it was stored by ID)
+                model_name = id
+            
+            sizes = get_model_sizes(model_name, "1.0.0")
             if "error" in sizes:
                 raise HTTPException(status_code=404, detail=sizes["error"])
             standalone_size_mb = sizes.get("full", 0) / (1024 * 1024)
@@ -2298,8 +2367,13 @@ def get_artifact_cost(
                     ),  # Will be updated with total after dependencies
                 }
 
+                # Get model name for S3 lookup (models are stored by name, not ID)
+                model_name_for_lineage = _get_model_name_for_s3(id)
+                if not model_name_for_lineage:
+                    model_name_for_lineage = id
+                
                 # Get lineage and add dependencies
-                lineage_result = get_model_lineage_from_config(id, "1.0.0")
+                lineage_result = get_model_lineage_from_config(model_name_for_lineage, "1.0.0")
                 if "error" not in lineage_result:
                     lineage_map = lineage_result.get("lineage_map", {})
                     for dep_id, dep_metadata in lineage_map.items():
@@ -2801,24 +2875,43 @@ def get_model_lineage(id: str, request: Request):
                 if result_check.get("models"):
                     found = True
                 else:
-                    # Try common versions
-                    common_versions = ["1.0.0", "main", "latest"]
-                    for v in common_versions:
-                        try:
-                            s3_key = f"models/{id}/{v}/model.zip"
-                            s3.head_object(Bucket=ap_arn, Key=s3_key)
-                            found = True
-                            break
-                        except ClientError:
-                            continue
+                    # Try to get model name from database for S3 lookup
+                    model_name = _get_model_name_for_s3(id)
+                    if model_name:
+                        common_versions = ["1.0.0", "main", "latest"]
+                        for v in common_versions:
+                            try:
+                                s3_key = f"models/{model_name}/{v}/model.zip"
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                found = True
+                                break
+                            except ClientError:
+                                continue
+                    # Fallback: try by ID directly (in case it was stored by ID)
+                    if not found:
+                        common_versions = ["1.0.0", "main", "latest"]
+                        for v in common_versions:
+                            try:
+                                s3_key = f"models/{id}/{v}/model.zip"
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                found = True
+                                break
+                            except ClientError:
+                                continue
             except Exception:
                 pass
 
         if not found:
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
+        # Get model name for S3 lookup (models are stored by name, not ID)
+        model_name = _get_model_name_for_s3(id)
+        if not model_name:
+            # Fallback: use ID directly (in case it was stored by ID)
+            model_name = id
+
         # Get lineage from config
-        result = get_model_lineage_from_config(id, "1.0.0")
+        result = get_model_lineage_from_config(model_name, "1.0.0")
         if "error" in result:
             error_msg = result["error"].lower()
             if (
@@ -2950,9 +3043,15 @@ async def check_model_license(id: str, request: Request):
                 detail="The license check request is malformed or references an unsupported usage context.",
             )
 
+        # Get model name for license extraction (models are stored by name, not ID)
+        model_name_for_license = _get_model_name_for_s3(id)
+        if not model_name_for_license:
+            # Fallback: use ID directly (in case it was stored by ID)
+            model_name_for_license = id
+
         # Extract licenses and check compatibility
         try:
-            model_license = extract_model_license(id)
+            model_license = extract_model_license(model_name_for_license)
             if model_license is None:
                 raise HTTPException(
                     status_code=404,
