@@ -4,67 +4,14 @@ import os
 from base64 import b64decode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from typing import Any, Dict, Optional
-
-
-def _get_github_token_from_secrets_manager() -> Optional[str]:
-    """
-    Retrieve GitHub token from AWS Secrets Manager.
-    Falls back to environment variable if Secrets Manager is unavailable.
-    """
-    # First try environment variable (ECS injects secrets as env vars)
-    github_token = os.environ.get("GITHUB_TOKEN")
-    if github_token:
-        return github_token
-    
-    # Try Secrets Manager directly (for programmatic access)
-    try:
-        import boto3
-        from botocore.exceptions import ClientError
-        
-        secret_name = "acme-github-token"
-        region_name = os.environ.get("AWS_REGION", "us-east-1")
-        
-        session = boto3.session.Session()
-        client = session.client(
-            service_name="secretsmanager",
-            region_name=region_name
-        )
-        
-        try:
-            get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-            secret = get_secret_value_response.get("SecretString")
-            if secret:
-                secret_dict = json.loads(secret)
-                # Try different possible keys
-                token = (
-                    secret_dict.get("github_token") or
-                    secret_dict.get("GITHUB_TOKEN") or
-                    secret_dict.get("token") or
-                    secret  # If it's just a plain string
-                )
-                if token:
-                    logging.info("GitHub token retrieved from Secrets Manager")
-                    return token
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code == "ResourceNotFoundException":
-                logging.debug(f"Secret {secret_name} not found in Secrets Manager")
-            else:
-                logging.warning(f"Error retrieving GitHub token from Secrets Manager: {e}")
-    except ImportError:
-        logging.debug("boto3 not available, skipping Secrets Manager retrieval")
-    except Exception as e:
-        logging.debug(f"Failed to retrieve GitHub token from Secrets Manager: {e}")
-    
-    return None
+from typing import Any, Dict
 
 
 class GitHubHandler:
     """Handler for GitHub repository metadata fetching using stdlib HTTP."""
 
     def __init__(self):
-        github_token = _get_github_token_from_secrets_manager()
+        github_token = os.environ.get("GITHUB_TOKEN")
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",
@@ -77,12 +24,11 @@ class GitHubHandler:
             else:
                 self._headers["Authorization"] = f"token {github_token}"
             logging.info(
-                "GitHub token found - using authenticated requests (5000 req/hour)"
+                "GitHub token found in environment variable - using authenticated requests (5000 req/hour)"
             )
         else:
             logging.warning(
-                "GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). "
-                "Set GITHUB_TOKEN environment variable or configure Secrets Manager for higher rate limits."
+                "GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour). Set GITHUB_TOKEN environment variable for higher rate limits."
             )
 
     def _get_json(self, url: str) -> Dict[str, Any]:

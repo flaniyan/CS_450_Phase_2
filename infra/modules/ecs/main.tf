@@ -3,11 +3,6 @@ data "aws_secretsmanager_secret" "jwt_secret" {
   name = "acme-jwt-secret"
 }
 
-# Data source for GitHub token secret
-data "aws_secretsmanager_secret" "github_token" {
-  name = "acme-github-token"
-}
-
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
   name                 = "validator-service"
@@ -114,10 +109,6 @@ resource "aws_ecs_task_definition" "validator_task" {
       {
         name      = "JWT_SECRET"
         valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
-      },
-      {
-        name      = "GITHUB_TOKEN"
-        valueFrom = "${data.aws_secretsmanager_secret.github_token.arn}:github_token::"
       }
     ]
 
@@ -329,10 +320,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = [
-          data.aws_secretsmanager_secret.jwt_secret.arn,
-          data.aws_secretsmanager_secret.github_token.arn
-        ]
+        Resource = data.aws_secretsmanager_secret.jwt_secret.arn
       },
       {
         Effect = "Allow"
@@ -395,7 +383,9 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Resource = values(var.ddb_tables_arnmap)
       }
