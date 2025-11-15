@@ -3,7 +3,6 @@ import sys
 import os
 import json
 from pathlib import Path
-from urllib.parse import quote
 
 BASE_URL = os.getenv("API_GATEWAY_URL", "https://1q1x0d7k93.execute-api.us-east-1.amazonaws.com/prod/")
 DEFAULT_UPLOAD_FILE = os.getenv("UPLOAD_FILE_PATH", r"C:\Users\mdali\Downloads\manual-upload-model_1.0.0_full.zip")
@@ -193,14 +192,13 @@ def get_real_models(token=None):
 def test_endpoint(endpoint, method="GET", data=None, files=None, token=None):
     """Test an endpoint and return the result"""
     try:
-        # URL encode the endpoint to handle special characters like "/" in model names
-        # But preserve the path structure (only encode the actual parameter values)
+        # For byName endpoint, use the exact model name (don't URL encode it)
+        # The endpoint expects the exact name as stored in the database
+        # URL encoding is handled by requests library automatically
         if "/byName/" in endpoint:
-            # Split the endpoint to preserve path structure but encode the name parameter
-            parts = endpoint.split("/byName/")
-            if len(parts) == 2:
-                encoded_name = quote(parts[1], safe="")
-                endpoint = f"{parts[0]}/byName/{encoded_name}"
+            # Don't modify the endpoint - let requests handle URL encoding
+            # The model name should already be the exact name from the database
+            pass
         
         if BASE_URL.endswith("/") and endpoint.startswith("/"):
             url = f"{BASE_URL.rstrip('/')}{endpoint}"
@@ -260,8 +258,8 @@ if not real_model_id or not real_version:
 print(f"Using real model ID: {real_model_id}, version: {real_version}")
 artifact_type = "model"
 
-# For byName endpoint, we need the model name, not the ID
-# Try to get the name from the artifact metadata
+# For byName endpoint, we need the model name as stored in S3 (sanitized with underscores)
+# The byName endpoint searches S3, which uses sanitized names (slashes replaced with underscores)
 model_name = real_model_id  # Default to ID, will try to get name from GET endpoint
 try:
     # Try to get artifact metadata to find the name
@@ -280,8 +278,11 @@ try:
     if r.status_code == 200:
         data = r.json()
         if "metadata" in data and "name" in data["metadata"]:
-            model_name = data["metadata"]["name"]
-            print(f"Found model name: {model_name}")
+            db_name = data["metadata"]["name"]
+            # Sanitize the name for S3/byName endpoint (replace / with _)
+            # This matches how models are stored in S3
+            model_name = db_name.replace("/", "_")
+            print(f"Found model name: {db_name} (using sanitized: {model_name} for byName)")
 except Exception as e:
     print(f"Could not fetch model name, using ID: {e}")
     model_name = real_model_id
