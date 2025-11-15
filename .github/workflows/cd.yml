@@ -128,14 +128,17 @@ jobs:
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         continue-on-error: true
+        env:
+          TF_VAR_aws_region: us-east-1
+          TF_VAR_artifacts_bucket: pkg-artifacts
         run: |
           # Import existing tables (ignore errors if already imported)
-          terraform import 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts || true
-          terraform import 'module.ddb.aws_dynamodb_table.this["users"]' users || true
-          terraform import 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads || true
-          terraform import 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens || true
-          terraform import 'module.ddb.aws_dynamodb_table.this["packages"]' packages || true
-          terraform import 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["users"]' users || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["packages"]' packages || true
+          terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads || true
 
       - name: Terraform plan
         shell: bash
