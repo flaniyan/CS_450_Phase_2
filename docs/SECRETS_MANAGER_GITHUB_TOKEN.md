@@ -52,27 +52,7 @@ Or using the AWS Console:
 5. Click "Generate token"
 6. Copy the token (starts with `ghp_`)
 
-### 3. Enable the Secret in Terraform
-
-After creating the secret, update `infra/envs/dev/main.tf`:
-
-```terraform
-module "ecs" {
-  source                    = "../../modules/ecs"
-  artifacts_bucket          = local.artifacts_bucket
-  image_tag                 = var.image_tag
-  ddb_tables_arnmap         = local.ddb_tables_arnmap
-  enable_github_token_secret = true  # Change from false to true
-}
-```
-
-Then run:
-```bash
-terraform plan
-terraform apply
-```
-
-### 4. Update the Secret
+### 3. Update the Secret
 
 If you need to update the token later:
 
@@ -138,13 +118,6 @@ INFO: GitHub token found - using authenticated requests (5000 req/hour)
 # Instead of:
 WARNING: GITHUB_TOKEN not set - using unauthenticated requests (60 req/hour)
 ```
-
-## Important Notes
-
-- **The secret is optional**: Terraform is configured to work without the GitHub token secret initially
-- **Set `enable_github_token_secret = false`** in `infra/envs/dev/main.tf` until you create the secret
-- **After creating the secret**, set `enable_github_token_secret = true` and run `terraform apply`
-- The code will fall back to unauthenticated requests (60 req/hour) if the token is not available
 
 ## Troubleshooting
 
