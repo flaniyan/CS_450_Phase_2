@@ -213,13 +213,17 @@ def list_all_artifacts() -> List[Dict[str, Any]]:
         table = get_artifacts_table()
         artifacts = []
         
-        # Scan the table (for small tables, this is fine)
-        response = table.scan()
+        # Scan the table with ConsistentRead=True to ensure we see all recently written items
+        # This matches the behavior of the reference code's _artifact_storage (in-memory dict)
+        response = table.scan(ConsistentRead=True)
         artifacts.extend(response.get("Items", []))
         
         # Handle pagination
         while "LastEvaluatedKey" in response:
-            response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+            response = table.scan(
+                ExclusiveStartKey=response["LastEvaluatedKey"],
+                ConsistentRead=True
+            )
             artifacts.extend(response.get("Items", []))
         
         # Convert DynamoDB items to regular dicts
@@ -338,3 +342,123 @@ def clear_all_artifacts() -> bool:
         logger.error(f"Error clearing artifacts: {type(e).__name__}: {str(e)}")
         return False
 
+
+def store_generic_artifact_metadata(
+    artifact_type: str, artifact_id: str, metadata: Dict[str, Any]
+) -> None:
+    """
+    Store generic artifact metadata in DynamoDB.
+    This is the DynamoDB equivalent of the S3 store_generic_artifact_metadata function.
+    
+    Args:
+        artifact_type: Type of artifact (model, dataset, code)
+        artifact_id: The artifact ID
+        metadata: Dictionary containing any metadata to store
+    """
+    try:
+        table = get_artifacts_table()
+        
+        # Prepare item for DynamoDB
+        # Store the full metadata as JSON string for flexibility
+        item = {
+            "artifact_id": artifact_id,
+            "type": artifact_type,
+            "metadata_json": json.dumps(metadata),
+        }
+        
+        # Also extract common fields if present for easier querying
+        if "name" in metadata:
+            item["name"] = str(metadata["name"])
+        if "version" in metadata:
+            item["version"] = str(metadata.get("version", "main"))
+        if "url" in metadata:
+            item["url"] = str(metadata["url"])
+        if "artifact_id" in metadata:
+            item["artifact_id"] = str(metadata["artifact_id"])
+        
+        # Store any additional fields from metadata
+        for key, value in metadata.items():
+            if key not in ["name", "version", "url", "artifact_id", "type"]:
+                # Store as string if it's a simple type, otherwise JSON encode
+                if isinstance(value, (str, int, float, bool)):
+                    item[key] = value
+                else:
+                    item[key] = json.dumps(value)
+        
+        table.put_item(Item=item)
+        logger.debug(f"Stored generic {artifact_type} metadata for {artifact_id} in DynamoDB")
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code == "ResourceNotFoundException":
+            logger.warning(f"Artifacts table doesn't exist yet: {str(e)}")
+        else:
+            logger.warning(
+                f"Failed to store {artifact_type} metadata for {artifact_id}: {error_code} - {str(e)}"
+            )
+    except Exception as e:
+        logger.warning(
+            f"Failed to store {artifact_type} metadata for {artifact_id}: {type(e).__name__}: {str(e)}"
+        )
+
+
+def get_generic_artifact_metadata(
+    artifact_type: str, artifact_id: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Get generic artifact metadata from DynamoDB.
+    This is the DynamoDB equivalent of the S3 get_generic_artifact_metadata function.
+    
+    Args:
+        artifact_type: Type of artifact (model, dataset, code)
+        artifact_id: The artifact ID to retrieve
+    
+    Returns:
+        Dictionary with metadata if found, None otherwise
+    """
+    try:
+        table = get_artifacts_table()
+        response = table.get_item(Key={"artifact_id": artifact_id})
+        
+        if "Item" in response:
+            item = response["Item"]
+            
+            # If metadata_json exists, parse and return it
+            if "metadata_json" in item:
+                try:
+                    metadata = json.loads(item["metadata_json"])
+                    return metadata
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Failed to parse metadata_json for {artifact_id}")
+            
+            # Otherwise, reconstruct metadata from individual fields
+            metadata = {}
+            
+            # Copy all fields from DynamoDB item
+            for key, value in item.items():
+                if key != "artifact_id":  # artifact_id is the key, not part of metadata
+                    # Try to parse JSON strings, otherwise use as-is
+                    if isinstance(value, str):
+                        try:
+                            parsed = json.loads(value)
+                            metadata[key] = parsed
+                        except (json.JSONDecodeError, TypeError):
+                            metadata[key] = value
+                    else:
+                        metadata[key] = value
+            
+            # Ensure artifact_id is in metadata
+            metadata["artifact_id"] = artifact_id
+            
+            return metadata
+        
+        return None
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code == "ResourceNotFoundException":
+            logger.debug(f"Artifacts table doesn't exist yet: {str(e)}")
+        else:
+            logger.debug(f"Error getting {artifact_type} metadata for {artifact_id}: {error_code} - {str(e)}")
+        return None
+    except Exception as e:
+        logger.debug(f"Unexpected error getting {artifact_type} metadata for {artifact_id}: {type(e).__name__}: {str(e)}")
+        return None

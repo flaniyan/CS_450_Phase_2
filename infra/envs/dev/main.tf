@@ -37,9 +37,9 @@ locals {
 #   artifacts_name = var.artifacts_bucket
 # }
 
-# module "ddb" {
-#   source = "../../modules/dynamodb"
-# }
+module "ddb" {
+  source = "../../modules/dynamodb"
+}
 
 module "monitoring" {
   source                = "../../modules/monitoring"

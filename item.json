@@ -1,0 +1,4 @@
+{
+  "artifact_id": { "S": "test1" },
+  "example_field": { "S": "hello" }
+}

@@ -238,34 +238,30 @@ model_name = real_model_id
 
 # Debug: Print the endpoints to verify f-strings are evaluated
 print(f"DEBUG: real_model_id = {real_model_id!r}")
-print(f"DEBUG: Testing endpoint will be: /artifact/model/{real_model_id}/upload")
+print(f"DEBUG: Testing endpoints from OpenAPI spec with model_id: {real_model_id}")
 
-# Test all endpoints from index.py with real values
+# Test all endpoints from OpenAPI spec (ece461_fall_2025_openapi_spec (2).yaml)
+# Only endpoints defined in the spec are included
 endpoints = [
-    ("/", "GET"),
+    # Public endpoints (no auth required)
     ("/health", "GET"),
     ("/health/components", "GET"),
     ("/authenticate", "PUT"),
+    ("/tracks", "GET"),
+    
+    # Authenticated endpoints (require X-Authorization header)
     ("/artifacts", "POST"),
-    ("/artifact", "GET"),
-    (f"/artifact/{artifact_type}", "GET"),
+    (f"/artifacts/{artifact_type}/{real_model_id}", "GET"),
+    (f"/artifacts/{artifact_type}/{real_model_id}", "PUT"),
+    (f"/artifacts/{artifact_type}/{real_model_id}", "DELETE"),
     (f"/artifact/{artifact_type}", "POST"),
-    (f"/artifact/{artifact_type}/{real_model_id}", "GET"),
-    (f"/artifact/byName/{model_name}", "GET"),
-    ("/artifact/byRegEx", "POST"),
-    (f"/artifact/{artifact_type}/{real_model_id}", "PUT"),
-    (f"/artifact/{artifact_type}/{real_model_id}", "DELETE"),
     (f"/artifact/{artifact_type}/{real_model_id}/cost", "GET"),
     (f"/artifact/{artifact_type}/{real_model_id}/audit", "GET"),
     (f"/artifact/model/{real_model_id}/rate", "GET"),
     (f"/artifact/model/{real_model_id}/lineage", "GET"),
     (f"/artifact/model/{real_model_id}/license-check", "POST"),
-    (f"/artifact/model/{real_model_id}/upload", "POST"),
-    (f"/artifact/model/{real_model_id}/download", "GET"),
-    ("/artifact/ingest", "GET"),
-    ("/artifact/ingest", "POST"),
-    ("/artifact/directory", "GET"),
-    ("/admin", "GET"),
+    (f"/artifact/byName/{model_name}", "GET"),
+    ("/artifact/byRegEx", "POST"),
     ("/reset", "DELETE"),
 ]
 
@@ -276,11 +272,15 @@ for endpoint, method in endpoints:
     if endpoint == "/artifact/byRegEx" and method == "POST":
         data = {"regex": ".*"}
     elif endpoint == "/artifacts" and method == "POST":
-        data = {"metadata": {"name": real_model_id, "type": "model"}, "data": {"name": real_model_id}}
-    elif f"/artifact/{artifact_type}" == endpoint and method == "POST":
-        data = {"url": f"https://example.com/{real_model_id}", "version": real_version}
-    elif f"/artifact/{artifact_type}/{real_model_id}" == endpoint and method == "PUT":
-        data = {"metadata": {"name": real_model_id}, "data": {"version": real_version}}
+        # POST /artifacts - requires array of ArtifactQuery per spec
+        # ArtifactQuery requires: name (required), types (optional array)
+        data = [{"name": "*", "types": ["model"]}]  # Use "*" to enumerate all
+    elif f"/artifacts/{artifact_type}/{real_model_id}" == endpoint and method == "PUT":
+        # PUT /artifacts/{artifact_type}/{id} - requires Artifact schema per spec
+        data = {
+            "metadata": {"name": real_model_id, "id": real_model_id, "type": artifact_type},
+            "data": {"url": f"https://huggingface.co/{real_model_id}"}
+        }
     elif endpoint == "/authenticate" and method == "PUT":
         # Use auth.json for authentication
         try:
@@ -288,29 +288,19 @@ for endpoint, method in endpoints:
         except Exception as e:
             print(f"Warning: Could not load auth.json: {e}")
             data = None
-    elif endpoint == "/artifact/ingest" and method == "POST":
-        ingest_model_id = os.getenv("INGEST_MODEL_ID", DEFAULT_TEST_MODEL)
-        ingest_version = os.getenv("INGEST_MODEL_VERSION", "main")
-        data = {"name": ingest_model_id, "version": ingest_version}
-    elif endpoint == "/upload" and method == "POST":
-        if os.path.exists(DEFAULT_UPLOAD_FILE):
-            with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
-                file_content = f.read()
-            files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
-    elif endpoint == f"/artifact/model/{real_model_id}/upload" and method == "POST":
-        if os.path.exists(DEFAULT_UPLOAD_FILE):
-            with open(DEFAULT_UPLOAD_FILE, 'rb') as f:
-                file_content = f.read()
-            files = {"file": (os.path.basename(DEFAULT_UPLOAD_FILE), file_content, "application/zip")}
+    elif f"/artifact/{artifact_type}" == endpoint and method == "POST":
+        # POST /artifact/{artifact_type} - requires url in request body per spec
+        data = {"url": f"https://huggingface.co/{real_model_id}"}
     elif f"/artifact/model/{real_model_id}/license-check" == endpoint and method == "POST":
+        # POST /artifact/model/{id}/license-check - requires github_url per spec
         data = {"github_url": "https://github.com/test/repo"}
     
-    # Determine if endpoint requires authentication
-    # Public endpoints that don't need auth
-    public_endpoints = ["/", "/health", "/health/components", "/authenticate", "/login", "/tracks"]
-    requires_auth = not any(endpoint.startswith(public) for public in public_endpoints)
+    # Determine if endpoint requires authentication based on OpenAPI spec
+    # Public endpoints that don't need auth (from spec)
+    public_endpoints = ["/health", "/health/components", "/authenticate", "/tracks"]
+    requires_auth = not any(endpoint == public or endpoint.startswith(public + "/") for public in public_endpoints)
     
-    # Use token for authenticated endpoints
+    # Use token for authenticated endpoints (all endpoints except public ones require X-Authorization per spec)
     token_to_use = auth_token if requires_auth else None
     status, response = test_endpoint(endpoint, method, data=data, files=files, token=token_to_use)
     results.append((endpoint, method, status, response))

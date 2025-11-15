@@ -49,6 +49,7 @@ from .services.s3_service import (
 from .services.artifact_storage import (
     save_artifact,
     get_artifact as get_artifact_from_db,
+    get_generic_artifact_metadata,
     update_artifact,
     delete_artifact,
     list_all_artifacts,
@@ -1307,7 +1308,10 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             logger.info(f"DEBUG: Querying model with id='{id}', artifact_type='{artifact_type}'")
             
             # First, check if id is in database (artifact_id lookup)
-            artifact = get_artifact_from_db(id)
+            # Try to get full metadata first, fallback to basic if needed
+            artifact = get_generic_artifact_metadata("model", id)
+            if not artifact:
+                artifact = get_artifact_from_db(id)
             if artifact:
                 logger.info(f"DEBUG: ✅ Found artifact in database: {artifact}")
                 if artifact.get("type") == "model":
@@ -1466,7 +1470,10 @@ def get_artifact(artifact_type: str, id: str, request: Request):
         else:
             logger.info(f"DEBUG: Processing {artifact_type} artifact with id='{id}'")
             # For dataset and code artifacts, check database first (primary source of truth)
-            artifact = get_artifact_from_db(id)
+            # Try to get full metadata first, fallback to basic if needed
+            artifact = get_generic_artifact_metadata(artifact_type, id)
+            if not artifact:
+                artifact = get_artifact_from_db(id)
             if artifact:
                 logger.info(f"DEBUG: Found artifact in database: {artifact}")
                 if artifact.get("type") == artifact_type:
@@ -2319,7 +2326,10 @@ def get_artifact_cost(
                 result = {id: {"total_cost": round(standalone_size_mb, 2)}}
             return result
         else:
-            artifact = get_artifact_from_db(id)
+            # Try full metadata first, fallback to basic
+            artifact = get_generic_artifact_metadata(artifact_type, id)
+            if not artifact:
+                artifact = get_artifact_from_db(id)
             if not artifact:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             if artifact.get("type") != artifact_type:
@@ -2378,8 +2388,10 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
             version = None
             artifact_name = id
 
-            # Check in database first
-            artifact = get_artifact_from_db(id)
+            # Check in database first - try full metadata first
+            artifact = get_generic_artifact_metadata("model", id)
+            if not artifact:
+                artifact = get_artifact_from_db(id)
             if artifact and artifact.get("type") == "model":
                     found = True
                     artifact_name = artifact.get("name", id)
@@ -2449,8 +2461,10 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 }
             )
         else:
-            # For non-model artifacts, check database
-            artifact = get_artifact_from_db(id)
+            # For non-model artifacts, check database - try full metadata first
+            artifact = get_generic_artifact_metadata(artifact_type, id)
+            if not artifact:
+                artifact = get_artifact_from_db(id)
             if artifact and artifact.get("type") == artifact_type:
                     # Add CREATE entry
                     audit_entries.append(
@@ -2555,8 +2569,10 @@ def get_model_rate(id: str, request: Request):
         
         found = False
         model_name = None
-        # Check database for artifact
-        artifact = get_artifact_from_db(id)
+        # Check database for artifact - try full metadata first
+        artifact = get_generic_artifact_metadata("model", id)
+        if not artifact:
+            artifact = get_artifact_from_db(id)
         if artifact:
             logger.info(f"DEBUG: ✅ Found artifact in database: {artifact}")
             if artifact.get("type") == "model":
@@ -2771,9 +2787,11 @@ def get_model_lineage(id: str, request: Request):
                 detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.",
             )
 
-        # Check if artifact exists
+        # Check if artifact exists - try full metadata first
         found = False
-        artifact = get_artifact_from_db(id)
+        artifact = get_generic_artifact_metadata("model", id)
+        if not artifact:
+            artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
                 found = True
 
@@ -2875,9 +2893,11 @@ async def check_model_license(id: str, request: Request):
                 detail="The license check request is malformed or references an unsupported usage context.",
             )
 
-        # Check if artifact exists
+        # Check if artifact exists - try full metadata first
         found = False
-        artifact = get_artifact_from_db(id)
+        artifact = get_generic_artifact_metadata("model", id)
+        if not artifact:
+            artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
                 found = True
 
