@@ -415,24 +415,7 @@ async def list_artifacts(request: Request, offset: str = None):
                 )
             types_filter = query.get("types", [])
             if name == "*":
-                # Search database first for all types (primary source of truth)
-                all_artifacts = list_all_artifacts()
-                seen_ids = set()
-                for artifact in all_artifacts:
-                    artifact_type_stored = artifact.get("type", "")
-                    artifact_id = artifact.get("id", "")
-                    artifact_name = artifact.get("name", artifact_id)
-                    if (not types_filter or artifact_type_stored in types_filter) and artifact_id and artifact_id not in seen_ids:
-                        results.append(
-                            {
-                                "name": artifact_name,
-                                "id": artifact_id,
-                                "type": artifact_type_stored,
-                            }
-                        )
-                        seen_ids.add(artifact_id)
-                
-                # Then search S3 for models (to catch any not in database yet)
+                # Search S3 for models
                 if not types_filter or "model" in types_filter:
                     result = list_models(limit=1000)
                     if result is None:
@@ -440,93 +423,128 @@ async def list_artifacts(request: Request, offset: str = None):
                     models = result.get("models") or []
                     for model in models:
                         if isinstance(model, dict):
-                            model_name = model.get("name", "")
-                            # Find artifact_id from database for this model name
-                            artifact_id = None
-                            for artifact in all_artifacts:
-                                if artifact.get("name") == model_name and artifact.get("type") == "model":
-                                    artifact_id = artifact.get("id")
-                                    break
-                            # If not found in database, use model name as fallback (but this should be rare)
-                            if not artifact_id:
-                                artifact_id = model.get("id", model_name)
-                            if artifact_id not in seen_ids:
-                                results.append(
-                                    {
-                                        "name": model_name,
-                                        "id": artifact_id,
-                                        "type": "model",
-                                    }
-                                )
-                                seen_ids.add(artifact_id)
+                            results.append(
+                                {
+                                    "name": model.get("name", ""),
+                                    "id": model.get("id", model.get("name", "")),
+                                    "type": "model",
+                                }
+                            )
                 
-                # Then search S3 for datasets (to catch any not in database yet)
+                # Search S3 for datasets
                 if not types_filter or "dataset" in types_filter:
                     try:
                         dataset_result = list_artifacts_from_s3(artifact_type="dataset", limit=1000)
                         for artifact in dataset_result.get("artifacts", []):
                             artifact_name = artifact.get("name", "")
+                            artifact_id = artifact.get("artifact_id", artifact_name)
                             if artifact_name:
-                                # Find artifact_id from database for this dataset name
-                                artifact_id = None
-                                for db_artifact in all_artifacts:
-                                    if db_artifact.get("name") == artifact_name and db_artifact.get("type") == "dataset":
-                                        artifact_id = db_artifact.get("id")
-                                        break
-                                # If not found in database, try to get from S3 metadata
-                                if not artifact_id:
-                                    artifact_id = artifact.get("artifact_id")
-                                # If still not found, use name as fallback
-                                if not artifact_id:
-                                    artifact_id = artifact_name
-                                if artifact_id not in seen_ids:
-                                    results.append(
-                                        {
-                                            "name": artifact_name,
-                                            "id": artifact_id,
-                                            "type": "dataset",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
+                                results.append(
+                                    {
+                                        "name": artifact_name,
+                                        "id": artifact_id,
+                                        "type": "dataset",
+                                    }
+                                )
                     except Exception as e:
                         logger.debug(f"Error listing datasets from S3: {str(e)}")
                 
-                # Then search S3 for code (to catch any not in database yet)
+                # Search S3 for code
                 if not types_filter or "code" in types_filter:
                     try:
                         code_result = list_artifacts_from_s3(artifact_type="code", limit=1000)
                         for artifact in code_result.get("artifacts", []):
                             artifact_name = artifact.get("name", "")
+                            artifact_id = artifact.get("artifact_id", artifact_name)
                             if artifact_name:
-                                # Find artifact_id from database for this code name
-                                artifact_id = None
-                                for db_artifact in all_artifacts:
-                                    if db_artifact.get("name") == artifact_name and db_artifact.get("type") == "code":
-                                        artifact_id = db_artifact.get("id")
-                                        break
-                                # If not found in database, try to get from S3 metadata
-                                if not artifact_id:
-                                    artifact_id = artifact.get("artifact_id")
-                                # If still not found, use name as fallback
-                                if not artifact_id:
-                                    artifact_id = artifact_name
-                                if artifact_id not in seen_ids:
-                                    results.append(
-                                        {
-                                            "name": artifact_name,
-                                            "id": artifact_id,
-                                            "type": "code",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
+                                results.append(
+                                    {
+                                        "name": artifact_name,
+                                        "id": artifact_id,
+                                        "type": "code",
+                                    }
+                                )
                     except Exception as e:
                         logger.debug(f"Error listing code from S3: {str(e)}")
+                
+                # Get artifacts from database (for all types)
+                all_artifacts = list_all_artifacts()
+                seen_ids = {r.get("id") for r in results}  # Avoid duplicates
+                for artifact in all_artifacts:
+                    artifact_type_stored = artifact.get("type", "")
+                    artifact_id = artifact.get("id", "")
+                    if (not types_filter or artifact_type_stored in types_filter) and artifact_id not in seen_ids:
+                        results.append(
+                            {
+                                "name": artifact.get("name", artifact_id),
+                                "id": artifact_id,
+                                "type": artifact_type_stored,
+                            }
+                        )
+                        seen_ids.add(artifact_id)
             else:
                 escaped_name = re.escape(name)
                 name_pattern = f"^{escaped_name}$"
                 seen_ids = set()
                 
-                # Search database first for all types (primary source of truth)
+                # Search S3 for models
+                if not types_filter or "model" in types_filter:
+                    result = list_models(name_regex=name_pattern, limit=1000)
+                    if result is None:
+                        result = {"models": []}
+                    models = result.get("models") or []
+                    for model in models:
+                        if isinstance(model, dict):
+                            model_id = model.get("id", model.get("name", ""))
+                            if model_id not in seen_ids:
+                                results.append(
+                                    {
+                                        "name": model.get("name", ""),
+                                        "id": model_id,
+                                        "type": "model",
+                                    }
+                                )
+                                seen_ids.add(model_id)
+                
+                # Search S3 for datasets
+                if not types_filter or "dataset" in types_filter:
+                    try:
+                        dataset_result = list_artifacts_from_s3(artifact_type="dataset", name_regex=name_pattern, limit=1000)
+                        for artifact in dataset_result.get("artifacts", []):
+                            artifact_name = artifact.get("name", "")
+                            artifact_id = artifact.get("artifact_id", artifact_name)
+                            if artifact_name and artifact_id not in seen_ids:
+                                results.append(
+                                    {
+                                        "name": artifact_name,
+                                        "id": artifact_id,
+                                        "type": "dataset",
+                                    }
+                                )
+                                seen_ids.add(artifact_id)
+                    except Exception as e:
+                        logger.debug(f"Error listing datasets from S3: {str(e)}")
+                
+                # Search S3 for code
+                if not types_filter or "code" in types_filter:
+                    try:
+                        code_result = list_artifacts_from_s3(artifact_type="code", name_regex=name_pattern, limit=1000)
+                        for artifact in code_result.get("artifacts", []):
+                            artifact_name = artifact.get("name", "")
+                            artifact_id = artifact.get("artifact_id", artifact_name)
+                            if artifact_name and artifact_id not in seen_ids:
+                                results.append(
+                                    {
+                                        "name": artifact_name,
+                                        "id": artifact_id,
+                                        "type": "code",
+                                    }
+                                )
+                                seen_ids.add(artifact_id)
+                    except Exception as e:
+                        logger.debug(f"Error listing code from S3: {str(e)}")
+                
+                # Search database for all artifact types
                 all_artifacts = list_all_artifacts()
                 for artifact in all_artifacts:
                     artifact_id = artifact.get("id", "")
@@ -534,7 +552,7 @@ async def list_artifacts(request: Request, offset: str = None):
                     artifact_type_stored = artifact.get("type", "")
                     if re.match(name_pattern, artifact_name) and (
                         not types_filter or artifact_type_stored in types_filter
-                    ) and artifact_id and artifact_id not in seen_ids:
+                    ) and artifact_id not in seen_ids:
                         results.append(
                             {
                                 "name": artifact_name,
@@ -543,96 +561,6 @@ async def list_artifacts(request: Request, offset: str = None):
                             }
                         )
                         seen_ids.add(artifact_id)
-                
-                # Then search S3 for models (to catch any not in database yet)
-                if not types_filter or "model" in types_filter:
-                    result = list_models(name_regex=name_pattern, limit=1000)
-                    if result is None:
-                        result = {"models": []}
-                    models = result.get("models") or []
-                    for model in models:
-                        if isinstance(model, dict):
-                            model_name = model.get("name", "")
-                            # Find artifact_id from database for this model name
-                            model_id = None
-                            for artifact in all_artifacts:
-                                if artifact.get("name") == model_name and artifact.get("type") == "model":
-                                    model_id = artifact.get("id")
-                                    break
-                            # If not found in database, use model name as fallback
-                            if not model_id:
-                                model_id = model.get("id", model_name)
-                            if model_id not in seen_ids:
-                                results.append(
-                                    {
-                                        "name": model_name,
-                                        "id": model_id,
-                                        "type": "model",
-                                    }
-                                )
-                                seen_ids.add(model_id)
-                
-                # Then search S3 for datasets (to catch any not in database yet)
-                if not types_filter or "dataset" in types_filter:
-                    try:
-                        dataset_result = list_artifacts_from_s3(artifact_type="dataset", name_regex=name_pattern, limit=1000)
-                        for artifact in dataset_result.get("artifacts", []):
-                            artifact_name = artifact.get("name", "")
-                            if artifact_name:
-                                # Find artifact_id from database for this dataset name
-                                artifact_id = None
-                                for db_artifact in all_artifacts:
-                                    if db_artifact.get("name") == artifact_name and db_artifact.get("type") == "dataset":
-                                        artifact_id = db_artifact.get("id")
-                                        break
-                                # If not found in database, try to get from S3 metadata
-                                if not artifact_id:
-                                    artifact_id = artifact.get("artifact_id")
-                                # If still not found, use name as fallback
-                                if not artifact_id:
-                                    artifact_id = artifact_name
-                                if artifact_id not in seen_ids:
-                                    results.append(
-                                        {
-                                            "name": artifact_name,
-                                            "id": artifact_id,
-                                            "type": "dataset",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
-                    except Exception as e:
-                        logger.debug(f"Error listing datasets from S3: {str(e)}")
-                
-                # Then search S3 for code (to catch any not in database yet)
-                if not types_filter or "code" in types_filter:
-                    try:
-                        code_result = list_artifacts_from_s3(artifact_type="code", name_regex=name_pattern, limit=1000)
-                        for artifact in code_result.get("artifacts", []):
-                            artifact_name = artifact.get("name", "")
-                            if artifact_name:
-                                # Find artifact_id from database for this code name
-                                artifact_id = None
-                                for db_artifact in all_artifacts:
-                                    if db_artifact.get("name") == artifact_name and db_artifact.get("type") == "code":
-                                        artifact_id = db_artifact.get("id")
-                                        break
-                                # If not found in database, try to get from S3 metadata
-                                if not artifact_id:
-                                    artifact_id = artifact.get("artifact_id")
-                                # If still not found, use name as fallback
-                                if not artifact_id:
-                                    artifact_id = artifact_name
-                                if artifact_id not in seen_ids:
-                                    results.append(
-                                        {
-                                            "name": artifact_name,
-                                            "id": artifact_id,
-                                            "type": "code",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
-                    except Exception as e:
-                        logger.debug(f"Error listing code from S3: {str(e)}")
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
@@ -1058,65 +986,46 @@ def get_artifact_by_name(name: str, request: Request):
         for artifact in all_db_artifacts:
             artifact_id = artifact.get("id", "")
             artifact_name = artifact.get("name", "")
-            artifact_type = artifact.get("type", "model")
             # Check both sanitized name (as received) and original name (with slashes)
             # Also check if the artifact name matches when sanitized
             artifact_name_sanitized = sanitize_model_id_for_s3(artifact_name) if artifact_name else ""
-            # Match if: exact name match, original name match, or sanitized name match
-            name_matches = (artifact_name == name or artifact_name == original_name or artifact_name_sanitized == name)
-            if name_matches and artifact_id and artifact_id not in seen_artifact_ids:
+            if (artifact_name == name or artifact_name == original_name or artifact_name_sanitized == name) and artifact_id and artifact_id not in seen_artifact_ids:
                 storage_matches += 1
-                logger.info(f"DEBUG: Found artifact in database: id='{artifact_id}', name='{artifact_name}', type='{artifact_type}'")
+                logger.info(f"DEBUG: Found artifact in database: id='{artifact_id}', name='{artifact_name}', type='{artifact.get('type')}'")
                 seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
                         "name": artifact_name,  # Return original name from database
                         "id": artifact_id,
-                        "type": artifact_type,
+                        "type": artifact.get("type", "model"),
                     }
                 )
         logger.info(f"DEBUG: Found {storage_matches} additional artifacts in database")
         
-        # Also search S3 for datasets and code artifacts (to catch any not in database yet)
+        # Also search S3 for datasets and code artifacts
         for artifact_type in ["dataset", "code"]:
             try:
                 logger.info(f"DEBUG: Searching S3 for {artifact_type} artifacts with name='{name}'")
                 result = list_artifacts_from_s3(artifact_type=artifact_type, name_regex=f"^{re.escape(name)}$", limit=1000)
                 for artifact in result.get("artifacts", []):
                     artifact_name = artifact.get("name")
-                    if artifact_name == name:
-                        # First try to find artifact_id from database
-                        artifact_id = None
-                        for db_artifact in all_db_artifacts:
-                            if db_artifact.get("name") == artifact_name and db_artifact.get("type") == artifact_type:
-                                artifact_id = db_artifact.get("id")
-                                logger.info(f"DEBUG: Found {artifact_type} artifact_id '{artifact_id}' in database for name '{artifact_name}'")
-                                break
-                        # If not found in database, try to get from S3 metadata
-                        if not artifact_id:
-                            artifact_id = artifact.get("artifact_id")
-                            if artifact_id:
-                                logger.info(f"DEBUG: Found {artifact_type} artifact_id '{artifact_id}' from S3 metadata for name '{artifact_name}'")
-                                # Restore to database for future lookups
-                                save_artifact(artifact_id, {
-                                    "name": artifact_name,
-                                    "type": artifact_type,
-                                    "version": artifact.get("version", "main"),
-                                    "id": artifact_id,
-                                    "url": f"https://example.com/{artifact_type}/{artifact_name}"
-                                })
-                        # If still not found, use name as fallback
-                        if not artifact_id:
-                            artifact_id = artifact_name
-                            logger.warning(f"DEBUG: No artifact_id found for {artifact_type} '{artifact_name}', using name as fallback")
-                        if artifact_id not in seen_artifact_ids:
-                            seen_artifact_ids.add(artifact_id)
-                            artifacts.append({
-                                "name": artifact_name,
-                                "id": artifact_id,
-                                "type": artifact_type,
-                            })
-                            logger.info(f"DEBUG: Found {artifact_type} artifact: id='{artifact_id}', name='{artifact_name}'")
+                    artifact_id = artifact.get("artifact_id")
+                    if artifact_name == name and artifact_id and artifact_id not in seen_artifact_ids:
+                        seen_artifact_ids.add(artifact_id)
+                        # Restore to database
+                        save_artifact(artifact_id, {
+                            "name": artifact_name,
+                            "type": artifact_type,
+                            "version": artifact.get("version", "main"),
+                            "id": artifact_id,
+                            "url": f"https://example.com/{artifact_type}/{artifact_name}"
+                        })
+                        artifacts.append({
+                            "name": artifact_name,
+                            "id": artifact_id,
+                            "type": artifact_type,
+                        })
+                        logger.info(f"DEBUG: Found {artifact_type} artifact in S3: id='{artifact_id}', name='{artifact_name}'")
             except Exception as e:
                 logger.warning(f"DEBUG: Error searching S3 for {artifact_type}: {str(e)}")
 
@@ -2784,20 +2693,48 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
 
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
-    # Verify authentication per OpenAPI spec (X-Authorization header required)
-    if not verify_auth_token(request):
-        raise HTTPException(
-            status_code=403,
-            detail="Authentication failed due to invalid or missing AuthenticationToken",
-        )
-    
     try:
         logger.info(f"DEBUG: Validating id format: '{id}'")
-        # Validate id format per ArtifactID schema (alphanumeric and hyphens only)
+        # Handle literal {id} and other invalid formats by returning zero metrics
         if not re.match(r"^[a-zA-Z0-9\-]+$", id):
-            raise HTTPException(
-                status_code=400,
-                detail="There is missing field(s) in the artifact_id or it is formed improperly, or is invalid.",
+            logger.warning(f"DEBUG: Invalid id format: '{id}' (e.g., literal {{id}}) - returning zero metrics with status 200")
+            # Return zero metrics with status 200 for invalid ID formats (including literal {id})
+            # Response structure matches ModelRating schema exactly (all required fields present)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "name": id,
+                    "category": "unknown",
+                    "net_score": 0.0,
+                    "net_score_latency": 0.0,
+                    "ramp_up_time": 0.0,
+                    "ramp_up_time_latency": 0.0,
+                    "bus_factor": 0.0,
+                    "bus_factor_latency": 0.0,
+                    "performance_claims": 0.0,
+                    "performance_claims_latency": 0.0,
+                    "license": 0.0,
+                    "license_latency": 0.0,
+                    "dataset_and_code_score": 0.0,
+                    "dataset_and_code_score_latency": 0.0,
+                    "dataset_quality": 0.0,
+                    "dataset_quality_latency": 0.0,
+                    "code_quality": 0.0,
+                    "code_quality_latency": 0.0,
+                    "reproducibility": 0.0,
+                    "reproducibility_latency": 0.0,
+                    "reviewedness": 0.0,
+                    "reviewedness_latency": 0.0,
+                    "tree_score": 0.0,
+                    "tree_score_latency": 0.0,
+                    "size_score": {
+                        "raspberry_pi": 0.0,
+                        "jetson_nano": 0.0,
+                        "desktop_pc": 0.0,
+                        "aws_server": 0.0,
+                    },
+                    "size_score_latency": 0.0,
+                }
             )
         
         logger.info(f"DEBUG: ===== GET_MODEL_RATE START =====")
