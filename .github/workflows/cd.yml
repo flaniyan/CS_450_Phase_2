@@ -124,6 +124,34 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
+      - name: Import existing DynamoDB tables
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        env:
+          TF_VAR_aws_region: us-east-1
+          TF_VAR_artifacts_bucket: pkg-artifacts
+        run: |
+          # Import existing tables only if not already in state
+          # Check if resource exists in state before importing
+          import_table() {
+            local resource_address=$1
+            local table_name=$2
+            if terraform state list | grep -q "^${resource_address}$"; then
+              echo "Table ${table_name} already in state, skipping import"
+            else
+              echo "Importing ${table_name}..."
+              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" "${resource_address}" "${table_name}" || echo "Failed to import ${table_name} (may not exist or already imported)"
+            fi
+          }
+          
+          import_table 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts
+          import_table 'module.ddb.aws_dynamodb_table.this["users"]' users
+          import_table 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads
+          import_table 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens
+          import_table 'module.ddb.aws_dynamodb_table.this["packages"]' packages
+          import_table 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads
+
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
@@ -157,6 +185,9 @@ jobs:
           MAX_ATTEMPTS=60
           ATTEMPT=0
           SLEEP_INTERVAL=15
+          
+          FAILED_ATTEMPTS=0
+          MAX_FAILED_ATTEMPTS=5  # Fail after 5 consecutive failures (75 seconds)
           
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
@@ -203,6 +234,59 @@ jobs:
                 fi
               else
                 echo "No running tasks found yet"
+              fi
+            fi
+            
+            # Check for stopped/failed tasks if no progress after a few attempts
+            if [ "$RUNNING_COUNT" -eq 0 ] && [ "$DESIRED_COUNT" -gt 0 ] && [ $ATTEMPT -ge 3 ]; then
+              STOPPED_TASK=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status STOPPED --query 'taskArns[0]' --output text)
+              if [ "$STOPPED_TASK" != "None" ] && [ ! -z "$STOPPED_TASK" ]; then
+                STOPPED_REASON=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $STOPPED_TASK --query 'tasks[0].stoppedReason' --output text)
+                EXIT_CODE=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $STOPPED_TASK --query 'tasks[0].containers[0].exitCode' --output text)
+                echo "WARNING: Found stopped task. Reason: $STOPPED_REASON, Exit Code: $EXIT_CODE"
+                
+                if [ "$EXIT_CODE" != "None" ] && [ "$EXIT_CODE" != "0" ]; then
+                  FAILED_ATTEMPTS=$((FAILED_ATTEMPTS + 1))
+                  echo "Task failed (exit code: $EXIT_CODE). Failed attempts: $FAILED_ATTEMPTS/$MAX_FAILED_ATTEMPTS"
+                  
+                  if [ $FAILED_ATTEMPTS -ge $MAX_FAILED_ATTEMPTS ]; then
+                    echo "ERROR: Tasks are consistently failing to start. Checking logs..."
+                    # Get log stream name
+                    LOG_GROUP="/ecs/validator-service"
+                    LOG_STREAM=$(aws logs describe-log-streams \
+                      --log-group-name "$LOG_GROUP" \
+                      --order-by LastEventTime \
+                      --descending \
+                      --max-items 1 \
+                      --query 'logStreams[0].logStreamName' \
+                      --output text 2>/dev/null || echo "N/A")
+                    
+                    if [ "$LOG_STREAM" != "None" ] && [ "$LOG_STREAM" != "N/A" ]; then
+                      echo "Recent logs from $LOG_STREAM:"
+                      aws logs get-log-events \
+                        --log-group-name "$LOG_GROUP" \
+                        --log-stream-name "$LOG_STREAM" \
+                        --limit 50 \
+                        --query 'events[*].message' \
+                        --output text 2>/dev/null || echo "Could not retrieve logs"
+                    fi
+                    
+                    echo "Task details:"
+                    aws ecs describe-tasks \
+                      --cluster $ECS_CLUSTER \
+                      --tasks $STOPPED_TASK \
+                      --query 'tasks[0].{lastStatus:lastStatus,stoppedReason:stoppedReason,containers:containers[*].{name:name,lastStatus:lastStatus,reason:reason,exitCode:exitCode}}' \
+                      --output table
+                    
+                    echo "Service deployment failed: Tasks are failing to start"
+                    exit 1
+                  fi
+                fi
+              fi
+            else
+              # Reset failed attempts if we see progress
+              if [ "$RUNNING_COUNT" -gt 0 ]; then
+                FAILED_ATTEMPTS=0
               fi
             fi
             

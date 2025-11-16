@@ -4,6 +4,7 @@ locals {
     tokens   = { hash_key = "token_id", ttl_attr = "exp_ts" }
     packages = { hash_key = "pkg_key" }
     uploads  = { hash_key = "upload_id" }
+    artifacts = { hash_key = "artifact_id" }
     downloads = {
       hash_key = "event_id"
       gsi = {
@@ -22,6 +23,14 @@ resource "aws_dynamodb_table" "this" {
   name         = each.key
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
+
+  # Prevent accidental deletion of existing tables
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to table name, billing mode, and hash key
+      # These are set correctly and shouldn't change
+    ]
+  }
 
   attribute {
     name = each.value.hash_key
