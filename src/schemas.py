@@ -60,8 +60,9 @@ ArtifactID = Annotated[
 ]
 
 
-# ArtifactName - just use str type alias for Pydantic v2 compatibility
-ArtifactName = str
+class ArtifactName(str):
+    """Name of an artifact."""
+    pass
 
 
 class AuthenticationToken(str):
