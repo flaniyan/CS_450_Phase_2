@@ -437,9 +437,11 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
             # query is already validated as ArtifactQuery
             name = query.name
             types_filter = query.types  # Optional[List[ArtifactType]]
+            # Convert enum list to set of string values for easier comparison
+            types_filter_str = {t.value for t in types_filter} if types_filter else None
             if name == "*":
                 # Search S3 for models
-                if not types_filter or "model" in types_filter:
+                if not types_filter_str or "model" in types_filter_str:
                     result = list_models(limit=1000)
                     if result is None:
                         result = {"models": []}
@@ -455,10 +457,10 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
                             )
                 
                 # Search _artifact_storage for datasets and code (immediate consistency)
-                if not types_filter or "dataset" in types_filter or "code" in types_filter:
+                if not types_filter_str or "dataset" in types_filter_str or "code" in types_filter_str:
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_type_stored = artifact_data.get("type", "")
-                        if (not types_filter or artifact_type_stored in types_filter):
+                        if (not types_filter_str or artifact_type_stored in types_filter_str):
                             artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                             results.append(
                                 ArtifactMetadata(
@@ -475,7 +477,7 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
                     artifact_type_stored = artifact.get("type", "")
                     artifact_id = artifact.get("id", "")
                     # Only add if not already in results and matches filter
-                    if artifact_id not in seen_ids and (not types_filter or artifact_type_stored in types_filter):
+                    if artifact_id not in seen_ids and (not types_filter_str or artifact_type_stored in types_filter_str):
                         artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                         results.append(
                             ArtifactMetadata(
@@ -491,7 +493,7 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
                 seen_ids = set()
                 
                 # Search S3 for models
-                if not types_filter or "model" in types_filter:
+                if not types_filter_str or "model" in types_filter_str:
                     result = list_models(name_regex=name_pattern, limit=1000)
                     if result is None:
                         result = {"models": []}
@@ -510,12 +512,12 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
                                 seen_ids.add(model_id)
                 
                 # Search _artifact_storage for datasets and code (immediate consistency)
-                if not types_filter or "dataset" in types_filter or "code" in types_filter:
+                if not types_filter_str or "dataset" in types_filter_str or "code" in types_filter_str:
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_name = artifact_data.get("name", "")
                         artifact_type_stored = artifact_data.get("type", "")
                         if (re.match(name_pattern, artifact_name) and 
-                            (not types_filter or artifact_type_stored in types_filter) and
+                            (not types_filter_str or artifact_type_stored in types_filter_str) and
                             artifact_id not in seen_ids):
                             artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                             results.append(
@@ -534,7 +536,7 @@ async def list_artifacts(queries: List[ArtifactQuery], request: Request, offset:
                     artifact_name = artifact.get("name", artifact_id)
                     artifact_type_stored = artifact.get("type", "")
                     if (re.match(name_pattern, artifact_name) and 
-                        (not types_filter or artifact_type_stored in types_filter) and
+                        (not types_filter_str or artifact_type_stored in types_filter_str) and
                         artifact_id not in seen_ids):
                         artifact_type_enum = ArtifactType(artifact_type_stored) if artifact_type_stored in ["model", "dataset", "code"] else ArtifactType.model
                         results.append(
