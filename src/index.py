@@ -1213,7 +1213,6 @@ async def search_artifacts_by_regex(regex_query: ArtifactRegEx, request: Request
             )
         
         # Validate regex pattern syntax
-        compiled_pattern = None
         try:
             compiled_pattern = re.compile(regex_pattern)
         except re.error as regex_error:
@@ -1235,27 +1234,6 @@ async def search_artifacts_by_regex(regex_query: ArtifactRegEx, request: Request
         logger.info(f"DEBUG: Starting regex search with pattern: '{regex_pattern}'")
         artifacts = []
         seen_artifact_ids = set()
-        
-        # First, search _artifact_storage for datasets and code (faster access)
-        global _artifact_storage
-        logger.info(f"DEBUG: Searching _artifact_storage for datasets and code with regex: '{regex_pattern}'")
-        for artifact_id, artifact_data in _artifact_storage.items():
-            artifact_name = artifact_data.get("name", "")
-            artifact_type = artifact_data.get("type", "")
-            # Only check datasets and code in _artifact_storage
-            if artifact_type in ["dataset", "code"]:
-                # Check if name matches regex pattern
-                if compiled_pattern.search(artifact_name) and artifact_id not in seen_artifact_ids:
-                    logger.info(f"DEBUG: Found {artifact_type} in _artifact_storage matching regex: id='{artifact_id}', name='{artifact_name}'")
-                    seen_artifact_ids.add(artifact_id)
-                    artifact_type_enum = ArtifactType(artifact_type) if artifact_type in ["dataset", "code"] else ArtifactType.dataset
-                    artifacts.append(
-                        ArtifactMetadata(
-                            name=artifact_name,
-                            id=artifact_id,
-                            type=artifact_type_enum,
-                        )
-                    )
         
         # Search models from S3 (with reduced limit to prevent ReDoS)
         logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}'")
@@ -1722,27 +1700,11 @@ def get_artifact(artifact_type: ArtifactType, id: str, request: Request):
             return result
         else:
             logger.info(f"DEBUG: Processing {artifact_type_str} artifact with id='{id}'")
-            # For dataset and code artifacts, check _artifact_storage first for faster access
-            artifact = None
-            if artifact_type_str in ["dataset", "code"]:
-                global _artifact_storage
-                if id in _artifact_storage:
-                    artifact_data = _artifact_storage[id]
-                    if artifact_data.get("type") == artifact_type_str:
-                        logger.info(f"DEBUG: Found {artifact_type_str} artifact in _artifact_storage: id='{id}'")
-                        artifact = {
-                            "id": id,
-                            "name": artifact_data.get("name", id),
-                            "type": artifact_type_str,
-                            "version": artifact_data.get("version", "main"),
-                            "url": artifact_data.get("url", f"https://example.com/{artifact_type_str}/{artifact_data.get('name', id)}"),
-                        }
-            
-            # If not found in _artifact_storage, check database
+            # For dataset and code artifacts, check database first (primary source of truth)
+            # Try to get full metadata first, fallback to basic if needed
+            artifact = get_generic_artifact_metadata(artifact_type_str, id)
             if not artifact:
-                artifact = get_generic_artifact_metadata(artifact_type_str, id)
-                if not artifact:
-                    artifact = get_artifact_from_db(id)
+                artifact = get_artifact_from_db(id)
             if artifact:
                 logger.info(f"DEBUG: Found artifact in database: {artifact}")
                 if artifact.get("type") == artifact_type_str:
@@ -2542,20 +2504,12 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                         status_code=400,
                         detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid. URL is required in data.",
                     )
-                updated_data = {
+                update_artifact(id, {
                     "name": metadata.get("name", artifact.get("name", id)),
                     "type": artifact_type,
                     "id": id,
                     "url": url,
-                    "version": artifact.get("version", "main"),
-                }
-                update_artifact(id, updated_data)
-                
-                # Also update _artifact_storage for dataset/code artifacts (faster access)
-                if artifact_type in ["dataset", "code"]:
-                    global _artifact_storage
-                    _artifact_storage[id] = updated_data
-                
+                })
                 return Response(status_code=200)
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
