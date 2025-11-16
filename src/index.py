@@ -2206,47 +2206,49 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         # Extract version if provided (for backward compatibility with model ingestion)
         version = body.get("version", "main")
         
-        # Extract name from URL if needed
+        # Extract name from body if provided, otherwise extract from URL
         # For GitHub URLs and other URLs with paths, replace "/" with "-" in the name
-        name = None
-        if artifact_type == "model" and "huggingface.co" in url:
-            clean_url = url.replace("https://huggingface.co/", "").replace(
-                "http://huggingface.co/", ""
-            )
-            if "/tree/" in clean_url:
-                clean_url = clean_url.split("/tree/")[0]
-            elif "/resolve/" in clean_url:
-                clean_url = clean_url.split("/resolve/")[0]
-            name = clean_url.strip("/")
-        elif "github.com" in url:
-            # Extract GitHub repo path and replace "/" with "-"
-            # Example: https://github.com/google-research/bert -> google-research-bert
-            github_match = re.search(r'github\.com/([^/]+/[^/?#]+)', url)
-            if github_match:
-                repo_path = github_match.group(1)
-                # Remove trailing .git if present
-                repo_path = repo_path.rstrip('.git')
-                # Replace "/" with "-"
-                name = repo_path.replace("/", "-")
-            else:
-                # Fallback: use last part of URL
-                name = url.split("/")[-1].rstrip('.git') if url else f"{artifact_type}-new"
-        else:
-            # For other URLs, extract the path and replace "/" with "-"
-            # Example: https://example.com/org/repo -> org-repo
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                path_parts = [p for p in parsed.path.split("/") if p]
-                if path_parts:
-                    # Join path parts with "-"
-                    name = "-".join(path_parts)
+        name = body.get("name")  # Check if name is provided in request body first
+        if not name:
+            # Extract name from URL if not provided in body
+            if artifact_type == "model" and "huggingface.co" in url:
+                clean_url = url.replace("https://huggingface.co/", "").replace(
+                    "http://huggingface.co/", ""
+                )
+                if "/tree/" in clean_url:
+                    clean_url = clean_url.split("/tree/")[0]
+                elif "/resolve/" in clean_url:
+                    clean_url = clean_url.split("/resolve/")[0]
+                name = clean_url.strip("/")
+            elif "github.com" in url:
+                # Extract GitHub repo path and replace "/" with "-"
+                # Example: https://github.com/google-research/bert -> google-research-bert
+                github_match = re.search(r'github\.com/([^/]+/[^/?#]+)', url)
+                if github_match:
+                    repo_path = github_match.group(1)
+                    # Remove trailing .git if present
+                    repo_path = repo_path.rstrip('.git')
+                    # Replace "/" with "-"
+                    name = repo_path.replace("/", "-")
                 else:
                     # Fallback: use last part of URL
+                    name = url.split("/")[-1].rstrip('.git') if url else f"{artifact_type}-new"
+            else:
+                # For other URLs, extract the path and replace "/" with "-"
+                # Example: https://example.com/org/repo -> org-repo
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    path_parts = [p for p in parsed.path.split("/") if p]
+                    if path_parts:
+                        # Join path parts with "-"
+                        name = "-".join(path_parts)
+                    else:
+                        # Fallback: use last part of URL
+                        name = url.split("/")[-1] if url else f"{artifact_type}-new"
+                except Exception:
+                    # Fallback: use last part of URL
                     name = url.split("/")[-1] if url else f"{artifact_type}-new"
-            except Exception:
-                # Fallback: use last part of URL
-                name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
             # Determine model_id from name or URL
             model_id = None
@@ -2420,7 +2422,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
-            # Use the name extracted from URL (which already has "/" replaced with "-")
+            # Use the name from request body if provided, otherwise use name extracted from URL
             artifact_name = name if name else f"{artifact_type}-new"
             
             # Check if artifact already exists (check both _artifact_storage and database)

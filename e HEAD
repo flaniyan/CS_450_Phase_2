@@ -1,0 +1,15 @@
+* [33mf8ec0ea[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mREST_API[m[33m, [m[1;31morigin/REST_API[m[33m)[m delete
+* [33md7296b4[m reverted back to 58/101
+* [33m648b8ca[m Revert "adding back pydantic approach (for validation ad serialization purposes)"
+* [33m54454ff[m Revert "fix"
+* [33m0a54225[m Revert "fix"
+* [33m971aa5e[m Revert "fix"
+* [33m7dfe90c[m Revert "fix"
+* [33me48b4e7[m Revert "fix"
+* [33md6fb1d7[m Revert "JSON Serialization fix"
+* [33mb793b02[m Revert "artifact storage optimization"
+* [33me119eb2[m Revert "dataset and code queries fix"
+* [33m6b0711d[m Revert "delete"
+* [33m19de31b[m delete
+* [33m715563f[m dataset and code queries fix
+* [33mfd7e2b5[m artifact storage optimization
