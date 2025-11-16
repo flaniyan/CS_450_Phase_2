@@ -2604,7 +2604,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
         )
 
 
-@app.get("/artifact/{artifact_type}/{id}/cost")
+@app.get("/artifact/{artifact_type}/{id}/cost", response_model=Dict[str, ArtifactCostEntry])
 def get_artifact_cost(
     artifact_type: ArtifactType, id: str, dependency: bool = False, request: Request = None
 ):
