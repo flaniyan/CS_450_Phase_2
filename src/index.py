@@ -403,10 +403,8 @@ def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
         display_name="Validator Service",
         description="Main API validator service handling artifact ingestion and validation",
         metrics=HealthMetricMap(
-            metrics={
-                "uptime_seconds": 3600,
-                "requests_processed": 0,
-            }
+            uptime_seconds=3600,
+            requests_processed=0,
         ),
         issues=[],
         timeline=[] if includeTimeline else None,
@@ -2869,13 +2867,8 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 )
 
             # Add CREATE entry
-            # Parse ISO format datetime string if needed
-            if isinstance(create_date, str):
-                # Remove 'Z' suffix and parse
-                create_date_clean = create_date.replace("Z", "+00:00")
-                create_datetime = datetime.fromisoformat(create_date_clean)
-            else:
-                create_datetime = create_date
+            from dateutil import parser
+            create_datetime = parser.isoparse(create_date) if isinstance(create_date, str) else create_date
             audit_entries.append(
                 ArtifactAuditEntry(
                     user=SchemaUser(name="system", is_admin=False),

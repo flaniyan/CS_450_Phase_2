@@ -125,42 +125,9 @@ def _normalize_password(password: str) -> str:
     openapi_extra={"security": []},
     response_model=AuthenticationToken,
 )
-async def authenticate(request: Request):
+async def authenticate(auth_request: AuthenticationRequest):
     """Main autograder authentication endpoint."""
-    # Parse request body once
-    try:
-        body = await request.json()
-    except Exception as exc:
-        raw = (await request.body()).decode(errors="ignore")
-        logger.warning(f"Bad JSON from client: {raw!r} ({exc})")
-        raise HTTPException(
-            status_code=400,
-            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly",
-        )
-
-    if not isinstance(body, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="There is missing field(s) in the AuthenticationRequest or it is formed improperly",
-        )
-
-    # Try to parse as Pydantic model first, fallback to manual parsing
-    try:
-        auth_request = AuthenticationRequest(**body)
-        return await _authenticate_from_schema(auth_request)
-    except Exception:
-        # Fallback to manual parsing for compatibility
-        user = body.get("user") or {}
-        secret = body.get("secret") or {}
-        name = user.get("name")
-        password = secret.get("password")
-
-        normalized_password = _normalize_password(password)
-
-        if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
-            return AuthenticationToken(token="bearer " + STATIC_TOKEN)
-
-        raise HTTPException(status_code=401, detail="The user or password is invalid.")
+    return await _authenticate_from_schema(auth_request)
 
 
 @public_auth.post(
