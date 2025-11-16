@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 import logging
 import unicodedata
-from ..schemas import AuthenticationRequest, AuthenticationToken
 
 # -----------------------------------------------------------------------------
 # Router setup
@@ -42,7 +41,7 @@ STATIC_TOKEN = (
 # Core logic
 # -----------------------------------------------------------------------------
 async def _authenticate(request: Request):
-    """Shared authentication logic for all routes (legacy Request-based)."""
+    """Shared authentication logic for all routes."""
     try:
         body = await request.json()
     except Exception as exc:
@@ -69,19 +68,6 @@ async def _authenticate(request: Request):
 
     if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
         return PlainTextResponse("bearer " + STATIC_TOKEN, media_type="text/plain")
-
-    raise HTTPException(status_code=401, detail="The user or password is invalid.")
-
-
-async def _authenticate_from_schema(auth_request: AuthenticationRequest):
-    """Authentication logic using Pydantic schema."""
-    name = auth_request.user.name
-    password = auth_request.secret.password
-
-    normalized_password = _normalize_password(password)
-
-    if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
-        return AuthenticationToken(token="bearer " + STATIC_TOKEN)
 
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
@@ -123,11 +109,11 @@ def _normalize_password(password: str) -> str:
     methods=["PUT", "GET", "POST"],
     dependencies=[],
     openapi_extra={"security": []},
-    response_model=AuthenticationToken,
+    response_class=PlainTextResponse,
 )
-async def authenticate(auth_request: AuthenticationRequest):
+async def authenticate(request: Request):
     """Main autograder authentication endpoint."""
-    return await _authenticate_from_schema(auth_request)
+    return await _authenticate(request)
 
 
 @public_auth.post(
