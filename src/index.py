@@ -2268,7 +2268,7 @@ async def create_artifact_by_type(artifact_type: ArtifactType, data: ArtifactDat
                                 type=artifact_type_enum,
                             ),
                             data=ArtifactData(url=url),
-                        ).model_dump(),
+                        ).model_dump(mode='json'),
                         status_code=202,
                     )
                 except HTTPException:
@@ -2311,7 +2311,7 @@ async def create_artifact_by_type(artifact_type: ArtifactType, data: ArtifactDat
                             type=artifact_type_enum,
                         ),
                         data=ArtifactData(url=url),
-                    ).model_dump(),
+                    ).model_dump(mode='json'),
                     status_code=201,
                 )
         elif artifact_type_str in ["dataset", "code"]:
@@ -2389,7 +2389,7 @@ async def create_artifact_by_type(artifact_type: ArtifactType, data: ArtifactDat
                         type=artifact_type_enum,
                     ),
                     data=ArtifactData(url=url),
-                ).model_dump(),
+                ).model_dump(mode='json'),
                 status_code=201,
             )
         else:
