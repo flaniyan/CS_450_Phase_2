@@ -670,45 +670,75 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
     dataset_id = None
     code_id = None
     
+    # Normalize names by replacing "/" with "-" for consistent matching
+    # This ensures names like "google-research/bert" match "google-research-bert"
+    def normalize_name(name: str) -> str:
+        """Normalize name by replacing '/' with '-' for consistent matching"""
+        if not name:
+            return ""
+        return name.replace("/", "-")
+    
     # Search for datasets (check _artifact_storage first, then database)
     if dataset_name:
+        normalized_dataset_name = normalize_name(dataset_name)
         # First check _artifact_storage for immediate consistency
         global _artifact_storage
         for artifact_id, artifact_data in _artifact_storage.items():
             if artifact_data.get("type") == "dataset":
                 artifact_name = artifact_data.get("name", "")
-                if dataset_name.lower() in artifact_name.lower() or artifact_name.lower() in dataset_name.lower():
+                normalized_artifact_name = normalize_name(artifact_name)
+                # Match using normalized names (handles both "google-research/bert" and "google-research-bert")
+                if (normalized_dataset_name.lower() in normalized_artifact_name.lower() or 
+                    normalized_artifact_name.lower() in normalized_dataset_name.lower() or
+                    dataset_name.lower() in artifact_name.lower() or 
+                    artifact_name.lower() in dataset_name.lower()):
                     dataset_id = artifact_id
                     logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from _artifact_storage")
                     break
-        
+
         # If not found in _artifact_storage, check database
         if not dataset_id:
             datasets = find_artifacts_by_type("dataset")
             for artifact in datasets:
                 artifact_name = artifact.get("name", "")
-                if dataset_name.lower() in artifact_name.lower() or artifact_name.lower() in dataset_name.lower():
+                normalized_artifact_name = normalize_name(artifact_name)
+                # Match using normalized names
+                if (normalized_dataset_name.lower() in normalized_artifact_name.lower() or 
+                    normalized_artifact_name.lower() in normalized_dataset_name.lower() or
+                    dataset_name.lower() in artifact_name.lower() or 
+                    artifact_name.lower() in dataset_name.lower()):
                     dataset_id = artifact.get("id")
                     logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from database")
                     break
-    
+
     # Search for code (check _artifact_storage first, then database)
     if code_name:
+        normalized_code_name = normalize_name(code_name)
         # First check _artifact_storage for immediate consistency
         for artifact_id, artifact_data in _artifact_storage.items():
             if artifact_data.get("type") == "code":
                 artifact_name = artifact_data.get("name", "")
-                if code_name.lower() in artifact_name.lower() or artifact_name.lower() in code_name.lower():
+                normalized_artifact_name = normalize_name(artifact_name)
+                # Match using normalized names
+                if (normalized_code_name.lower() in normalized_artifact_name.lower() or 
+                    normalized_artifact_name.lower() in normalized_code_name.lower() or
+                    code_name.lower() in artifact_name.lower() or 
+                    artifact_name.lower() in code_name.lower()):
                     code_id = artifact_id
                     logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from _artifact_storage")
                     break
-        
+
         # If not found in _artifact_storage, check database
         if not code_id:
             code_artifacts = find_artifacts_by_type("code")
             for artifact in code_artifacts:
                 artifact_name = artifact.get("name", "")
-                if code_name.lower() in artifact_name.lower() or artifact_name.lower() in code_name.lower():
+                normalized_artifact_name = normalize_name(artifact_name)
+                # Match using normalized names
+                if (normalized_code_name.lower() in normalized_artifact_name.lower() or 
+                    normalized_artifact_name.lower() in normalized_code_name.lower() or
+                    code_name.lower() in artifact_name.lower() or 
+                    artifact_name.lower() in code_name.lower()):
                     code_id = artifact.get("id")
                     logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from database")
                     break
@@ -740,9 +770,15 @@ def _link_dataset_code_to_models(artifact_id: str, artifact_name: str, artifact_
             model_name = model.get("name", "")
             model_dataset_name = model.get("dataset_name", "")
             
+            # Normalize names for matching (replace "/" with "-")
+            normalized_artifact_name = artifact_name.replace("/", "-")
+            normalized_model_dataset_name = model_dataset_name.replace("/", "-") if model_dataset_name else ""
+            
             if model_dataset_name:
-                # Match stored dataset_name with artifact name
-                if (artifact_name.lower() in model_dataset_name.lower() or 
+                # Match stored dataset_name with artifact name (using normalized names)
+                if (normalized_artifact_name.lower() in normalized_model_dataset_name.lower() or 
+                    normalized_model_dataset_name.lower() in normalized_artifact_name.lower() or
+                    artifact_name.lower() in model_dataset_name.lower() or 
                     model_dataset_name.lower() in artifact_name.lower()):
                     update_artifact(model_id, {"dataset_id": artifact_id})
                     logger.info(f"DEBUG: Linked dataset '{artifact_name}' to model '{model_name}' (id={model_id}) via dataset_name='{model_dataset_name}'")
@@ -759,9 +795,15 @@ def _link_dataset_code_to_models(artifact_id: str, artifact_name: str, artifact_
             model_name = model.get("name", "")
             model_code_name = model.get("code_name", "")
             
+            # Normalize names for matching (replace "/" with "-")
+            normalized_artifact_name = artifact_name.replace("/", "-")
+            normalized_model_code_name = model_code_name.replace("/", "-") if model_code_name else ""
+            
             if model_code_name:
-                # Match stored code_name with artifact name
-                if (artifact_name.lower() in model_code_name.lower() or 
+                # Match stored code_name with artifact name (using normalized names)
+                if (normalized_artifact_name.lower() in normalized_model_code_name.lower() or 
+                    normalized_model_code_name.lower() in normalized_artifact_name.lower() or
+                    artifact_name.lower() in model_code_name.lower() or 
                     model_code_name.lower() in artifact_name.lower()):
                     update_artifact(model_id, {"code_id": artifact_id})
                     logger.info(f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via code_name='{model_code_name}'")
@@ -1178,14 +1220,111 @@ async def search_artifacts_by_regex(request: Request):
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
 
-        # Validate regex pattern
+        # Validate regex pattern and check for ReDoS (Regular Expression Denial of Service) patterns
+        # Check for dangerous patterns that cause catastrophic backtracking
+        
+        # Pattern 1: Overlapping alternations with quantifiers - (a|aa)*, (a|aaa)*, etc.
+        # This is a classic ReDoS pattern that causes exponential backtracking
+        # Match patterns like (a|aa)*, (a|aaa)+, (x|xx)*, etc.
+        alternation_with_quantifier = re.search(r'\(([^|()]+)\|([^|()]+)\)([*+?])', regex_pattern)
+        if alternation_with_quantifier:
+            alt1, alt2, quantifier = alternation_with_quantifier.groups()
+            alt1 = alt1.strip()
+            alt2 = alt2.strip()
+            # Check if one alternative is a prefix of another (e.g., "a" is prefix of "aa")
+            # This causes exponential backtracking when combined with quantifiers
+            if (alt1 in alt2 or alt2 in alt1) and len(alt1) > 0 and len(alt2) > 0 and alt1 != alt2:
+                logger.warning(f"ReDoS risk detected: overlapping alternation with quantifier found: '{regex_pattern[:100]}' (alt1='{alt1}', alt2='{alt2}', quantifier='{quantifier}')")
+                raise HTTPException(
+                    status_code=400,
+                    detail="The regex pattern contains potentially dangerous constructs (overlapping alternations with quantifiers) that may cause performance issues. Please use a simpler pattern.",
+                )
+        
+        # Also check for more complex alternations with multiple alternatives
+        # Pattern like (a|aa|aaa)*
+        complex_alternation = re.search(r'\([^)]+\|[^)]+\|[^)]+\)[*+?]', regex_pattern)
+        if complex_alternation:
+            logger.warning(f"ReDoS risk detected: complex alternation with quantifier found: '{regex_pattern[:100]}'")
+            raise HTTPException(
+                status_code=400,
+                detail="The regex pattern contains potentially dangerous constructs (complex alternations with quantifiers) that may cause performance issues. Please use a simpler pattern.",
+            )
+        
+        # Pattern 2: Nested quantifiers - (a+)+, (a*)*, (a{1,99999}){1,99999}, etc.
+        # Check for nested quantifiers with ranges
+        nested_range_quantifier = re.search(r'\([^)]*\{[^}]+\}[^)]*\)\s*\{[^}]+\}', regex_pattern)
+        if nested_range_quantifier:
+            logger.warning(f"ReDoS risk detected: nested range quantifiers found: '{regex_pattern[:100]}'")
+            raise HTTPException(
+                status_code=400,
+                detail="The regex pattern contains potentially dangerous constructs (nested range quantifiers) that may cause performance issues. Please use a simpler pattern.",
+            )
+        
+        # Check for large quantifier ranges that could cause performance issues
+        large_range_match = re.findall(r'\{(\d+),(\d+)\}', regex_pattern)
+        for min_val, max_val in large_range_match:
+            try:
+                min_int = int(min_val)
+                max_int = int(max_val)
+                # If range is very large (e.g., {1,99999}), it can cause performance issues
+                if max_int > 1000 or (max_int - min_int) > 1000:
+                    logger.warning(f"ReDoS risk detected: large quantifier range found: {{{min_val},{max_val}}} in '{regex_pattern[:100]}'")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"The regex pattern contains a large quantifier range ({{{min_val},{max_val}}}) that may cause performance issues. Maximum range is 1000.",
+                    )
+            except ValueError:
+                pass  # Skip if conversion fails
+        
+        # Check for nested quantifiers with +, *, ?
+        dangerous_patterns = [
+            r'\([^)]+\+\)\s*\+',  # Nested quantifiers like (a+)+
+            r'\([^)]+\*\)\s*\*',  # Nested quantifiers like (a*)*
+            r'\([^)]+\+\s*\)\s*\+',  # Multiple nested quantifiers
+            r'\([^)]+\+\s*\)\s*\*',  # Mixed nested quantifiers
+            r'\([^)]+\*\)\s*\+',  # Mixed nested quantifiers
+            r'\([^)]+\+\)\s*\?',  # Nested with ?
+            r'\([^)]+\*\)\s*\?',  # Nested with ?
+        ]
+        
+        # Check for specific ReDoS patterns
+        for dangerous_pattern in dangerous_patterns:
+            if re.search(dangerous_pattern, regex_pattern):
+                logger.warning(f"ReDoS risk detected: dangerous pattern found in '{regex_pattern[:100]}'")
+                raise HTTPException(
+                    status_code=400,
+                    detail="The regex pattern contains potentially dangerous constructs that may cause performance issues. Please use a simpler pattern.",
+                )
+        
+        # Pattern 3: Multiple consecutive quantifier groups - (a+)(a+)(a+)(a+)
+        # Pattern like (a+)(a+)(a+)(a+)(a+)(a+)$ is a classic ReDoS attack
+        nested_quantifier_count = regex_pattern.count('(a+') + regex_pattern.count('(a*')
+        # Count sequences of quantifier groups
+        consecutive_quantifier_groups = len(re.findall(r'\([^)]*[+*]\s*\)\s*\([^)]*[+*]\s*\)', regex_pattern))
+        # Check for specific ReDoS pattern: multiple (a+) groups in sequence
+        if re.search(r'\(a\+\)\s*\(a\+\)\s*\(a\+\)\s*\(a\+\)', regex_pattern) or nested_quantifier_count > 3 or consecutive_quantifier_groups > 2:
+            logger.warning(f"ReDoS risk detected: pattern has {nested_quantifier_count} nested quantifiers or {consecutive_quantifier_groups} consecutive quantifier groups: '{regex_pattern[:100]}'")
+            raise HTTPException(
+                status_code=400,
+                detail="The regex pattern is too complex and may cause performance issues. Please use a simpler pattern.",
+            )
+        
+        # Validate regex pattern syntax
         try:
-            re.compile(regex_pattern)
+            compiled_pattern = re.compile(regex_pattern)
         except re.error as regex_error:
             logger.error(f"Invalid regex pattern '{regex_pattern}': {str(regex_error)}")
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
+            )
+        
+        # Additional safety: limit regex pattern length
+        if len(regex_pattern) > 500:
+            logger.warning(f"Regex pattern too long: {len(regex_pattern)} characters")
+            raise HTTPException(
+                status_code=400,
+                detail="The regex pattern is too long. Maximum length is 500 characters.",
             )
 
         # Search for artifacts matching regex in S3 (all types: model, dataset, code)
@@ -1193,10 +1332,11 @@ async def search_artifacts_by_regex(request: Request):
         artifacts = []
         seen_artifact_ids = set()
         
-        # Search models from S3
+        # Search models from S3 (with reduced limit to prevent ReDoS)
         logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}'")
         try:
-            result = list_models(name_regex=regex_pattern, limit=1000)
+            # Limit results to prevent excessive processing and ReDoS attacks
+            result = list_models(name_regex=regex_pattern, limit=100)
             models_found = result.get("models", [])
             logger.info(f"DEBUG: Found {len(models_found)} models in S3 matching regex")
             for model in models_found:
@@ -1236,7 +1376,8 @@ async def search_artifacts_by_regex(request: Request):
         # Search datasets from S3
         logger.info(f"DEBUG: Searching datasets in S3 with regex: '{regex_pattern}'")
         try:
-            result = list_artifacts_from_s3(artifact_type="dataset", name_regex=regex_pattern, limit=1000)
+            # Limit results to prevent ReDoS attacks
+            result = list_artifacts_from_s3(artifact_type="dataset", name_regex=regex_pattern, limit=100)
             datasets_found = result.get("artifacts", [])
             logger.info(f"DEBUG: Found {len(datasets_found)} datasets in S3 matching regex")
             for dataset in datasets_found:
@@ -1293,7 +1434,8 @@ async def search_artifacts_by_regex(request: Request):
         # Search code artifacts from S3
         logger.info(f"DEBUG: Searching code artifacts in S3 with regex: '{regex_pattern}'")
         try:
-            result = list_artifacts_from_s3(artifact_type="code", name_regex=regex_pattern, limit=1000)
+            # Limit results to prevent ReDoS attacks
+            result = list_artifacts_from_s3(artifact_type="code", name_regex=regex_pattern, limit=100)
             code_artifacts_found = result.get("artifacts", [])
             logger.info(f"DEBUG: Found {len(code_artifacts_found)} code artifacts in S3 matching regex")
             for code_artifact in code_artifacts_found:
@@ -1357,7 +1499,10 @@ async def search_artifacts_by_regex(request: Request):
             artifact_name = artifact.get("name", artifact_id)
             artifact_type = artifact.get("type", "model")
             try:
-                if re.search(regex_pattern, artifact_name) and artifact_id not in seen_artifact_ids:
+                # Use compiled pattern and limit input length to prevent ReDoS
+                if len(artifact_name) > 1000:
+                    continue  # Skip very long names to prevent ReDoS
+                if compiled_pattern.search(artifact_name) and artifact_id not in seen_artifact_ids:
                     logger.info(f"DEBUG: Found potential match in storage: id='{artifact_id}', name='{artifact_name}', type='{artifact_type}'")
                     # Verify artifact exists in S3 before including it
                     artifact_exists = False
@@ -2062,6 +2207,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         version = body.get("version", "main")
         
         # Extract name from URL if needed
+        # For GitHub URLs and other URLs with paths, replace "/" with "-" in the name
         name = None
         if artifact_type == "model" and "huggingface.co" in url:
             clean_url = url.replace("https://huggingface.co/", "").replace(
@@ -2072,8 +2218,35 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             elif "/resolve/" in clean_url:
                 clean_url = clean_url.split("/resolve/")[0]
             name = clean_url.strip("/")
+        elif "github.com" in url:
+            # Extract GitHub repo path and replace "/" with "-"
+            # Example: https://github.com/google-research/bert -> google-research-bert
+            github_match = re.search(r'github\.com/([^/]+/[^/?#]+)', url)
+            if github_match:
+                repo_path = github_match.group(1)
+                # Remove trailing .git if present
+                repo_path = repo_path.rstrip('.git')
+                # Replace "/" with "-"
+                name = repo_path.replace("/", "-")
+            else:
+                # Fallback: use last part of URL
+                name = url.split("/")[-1].rstrip('.git') if url else f"{artifact_type}-new"
         else:
-            name = url.split("/")[-1] if url else f"{artifact_type}-new"
+            # For other URLs, extract the path and replace "/" with "-"
+            # Example: https://example.com/org/repo -> org-repo
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                path_parts = [p for p in parsed.path.split("/") if p]
+                if path_parts:
+                    # Join path parts with "-"
+                    name = "-".join(path_parts)
+                else:
+                    # Fallback: use last part of URL
+                    name = url.split("/")[-1] if url else f"{artifact_type}-new"
+            except Exception:
+                # Fallback: use last part of URL
+                name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
             # Determine model_id from name or URL
             model_id = None
@@ -2247,7 +2420,8 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
-            artifact_name = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
+            # Use the name extracted from URL (which already has "/" replaced with "-")
+            artifact_name = name if name else f"{artifact_type}-new"
             
             # Check if artifact already exists (check both _artifact_storage and database)
             for existing_id, existing_data in _artifact_storage.items():
