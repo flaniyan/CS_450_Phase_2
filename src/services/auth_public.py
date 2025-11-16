@@ -81,7 +81,9 @@ async def _authenticate_from_schema(auth_request: AuthenticationRequest):
     normalized_password = _normalize_password(password)
 
     if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
-        return AuthenticationToken(token="bearer " + STATIC_TOKEN)
+        # AuthenticationToken is a string type, return the token string directly
+        # FastAPI will serialize this as a JSON string
+        return "bearer " + STATIC_TOKEN
 
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
@@ -123,7 +125,6 @@ def _normalize_password(password: str) -> str:
     methods=["PUT", "GET", "POST"],
     dependencies=[],
     openapi_extra={"security": []},
-    response_model=AuthenticationToken,
 )
 async def authenticate(request: Request):
     """Main autograder authentication endpoint."""
@@ -158,7 +159,9 @@ async def authenticate(request: Request):
         normalized_password = _normalize_password(password)
 
         if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
-            return AuthenticationToken(token="bearer " + STATIC_TOKEN)
+            # AuthenticationToken is a string type, return the token string directly
+            # FastAPI will serialize this as a JSON string
+            return "bearer " + STATIC_TOKEN
 
         raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
