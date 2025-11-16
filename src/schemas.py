@@ -64,11 +64,14 @@ ArtifactID = Annotated[
 ArtifactName = str
 
 
-# AuthenticationToken - use str type alias for Pydantic v2 compatibility
-AuthenticationToken = str
+class AuthenticationToken(str):
+    """Authentication token (e.g., JWT)."""
+    pass
 
-# EnumerateOffset - use str type alias for Pydantic v2 compatibility
-EnumerateOffset = str
+
+class EnumerateOffset(str):
+    """Offset in pagination."""
+    pass
 
 
 # ============================================================================
