@@ -71,9 +71,9 @@ module "api_gateway" {
 
 # Extract ALB DNS name from the validator service URL (e.g., "http://validator-lb-xxx.elb.amazonaws.com" -> "validator-lb-xxx.elb.amazonaws.com")
 module "cloudfront" {
-  source      = "../../modules/cloudfront"
+  source       = "../../modules/cloudfront"
   alb_dns_name = replace(replace(module.ecs.validator_service_url, "http://", ""), "https://", "")
-  aws_region  = var.aws_region
+  aws_region   = var.aws_region
 }
 
 output "artifacts_bucket" { value = local.artifacts_bucket }
