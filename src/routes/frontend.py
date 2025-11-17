@@ -1,10 +1,15 @@
 from __future__ import annotations
+
 import re
 import os
+from pathlib import Path
+
 import uvicorn
-from fastapi import Request, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
 from ..services.s3_service import (
     list_models,
     upload_model,
@@ -16,23 +21,47 @@ from ..services.s3_service import (
 from ..services.rating import run_scorer, alias
 
 templates: Jinja2Templates | None = None
+routes_registered = False
 
 
-def set_templates(templates_instance: Jinja2Templates):
+def set_templates(templates_instance: Jinja2Templates | None):
     global templates
     templates = templates_instance
 
 
-def setup_app():
-    from ..index import app, templates
+def setup_app(
+    app: FastAPI | None = None,
+    templates_instance: Jinja2Templates | None = None,
+) -> FastAPI:
+    """
+    Attach frontend routes to the provided FastAPI app. If no app is provided,
+    a standalone FastAPI instance is created for local/frontend-only testing.
+    """
 
-    if templates:
-        set_templates(templates)
+    if app is None:
+        app = FastAPI(title="ACME Frontend")
+        frontend_root = Path(__file__).resolve().parents[2] / "frontend"
+        templates_path = frontend_root / "templates"
+        static_path = frontend_root / "static"
+        if templates_path.exists():
+            templates_instance = Jinja2Templates(directory=str(templates_path))
+        if static_path.exists():
+            app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
+    if templates_instance:
+        set_templates(templates_instance)
+
     register_routes(app)
     return app
 
 
-def register_routes(app):
+def register_routes(app: FastAPI):
+    global routes_registered
+
+    # Prevent duplicate registration when setup_app is called multiple times
+    if routes_registered:
+        return
+
     @app.get("/")
     def home(request: Request):
         if not templates:
@@ -375,12 +404,12 @@ def register_routes(app):
         except Exception as e:
             return {"error": f"Reset failed: {str(e)}"}
 
-
-app = setup_app()
+    routes_registered = True
 
 
 def main():
     port = int(os.getenv("PORT", "8000"))
+    app = setup_app()
     uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
 
 
