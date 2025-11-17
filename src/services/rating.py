@@ -44,56 +44,150 @@ def analyze_model_content(
         from ..services.s3_service import (
             extract_config_from_model,
             download_from_huggingface,
+            download_model,
+            list_models,
         )
         from fastapi import HTTPException
+        import re
 
         model_content = None
         clean_model_id = target
+        found_version = None
 
-        # Check if this looks like a valid HuggingFace model ID (not a file path)
-        is_valid_hf_id = (
-            target.startswith("http://") or target.startswith("https://")
-        ) or (
-            not target.startswith("/")
-            and not target.startswith("\\")
-            and (":" not in target or target.startswith("http"))
-            and (
-                "/" in target
-                or "-" in target
-                or target.replace("-", "").replace("_", "").isalnum()
+        # First, try to find the model in S3 (for uploaded models)
+        # Models are stored in S3 with sanitized names (e.g., WinKawaks_vit-tiny-patch16-224)
+        # So we need to search using both the original name and sanitized name
+        try:
+            # Clean the target name first
+            clean_target = target.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+            
+            # Try multiple search strategies:
+            # 1. Exact match with original name
+            # 2. Exact match with sanitized name
+            # 3. Partial match (contains) with sanitized name
+            # 4. Try direct S3 key lookup with common versions
+            
+            search_patterns = [
+                f"^{re.escape(clean_target)}$",  # Exact match original
+            ]
+            
+            # Add sanitized version
+            sanitized_target = (
+                clean_target.replace("/", "_")
+                .replace(":", "_")
+                .replace("\\", "_")
+                .replace("?", "_")
+                .replace("*", "_")
+                .replace('"', "_")
+                .replace("<", "_")
+                .replace(">", "_")
+                .replace("|", "_")
             )
-        )
+            if sanitized_target != clean_target:
+                search_patterns.append(f"^{re.escape(sanitized_target)}$")  # Exact match sanitized
+                search_patterns.append(re.escape(sanitized_target))  # Partial match sanitized
+            
+            result = None
+            for pattern in search_patterns:
+                try:
+                    result = list_models(name_regex=pattern, limit=1000)  # Increase limit to find more models
+                    if result.get("models"):
+                        break
+                except Exception as pattern_error:
+                    print(f"[RATE] Pattern search failed for '{pattern}': {pattern_error}")
+                    continue
+            
+            # If still not found, try direct S3 key lookup with common versions
+            if not result or not result.get("models"):
+                from botocore.exceptions import ClientError
+                common_versions = ["1.0.0", "main", "latest", "v1.0.0"]
+                for version in common_versions:
+                    for model_name_variant in [sanitized_target, clean_target]:
+                        try:
+                            s3_key = f"models/{model_name_variant}/{version}/model.zip"
+                            # Try to check if the file exists
+                            from ..services.s3_service import s3, ap_arn
+                            s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            # File exists, create a result structure
+                            result = {"models": [{"name": model_name_variant, "version": version}]}
+                            print(f"[RATE] Found model via direct S3 lookup: {s3_key}")
+                            break
+                        except ClientError:
+                            continue
+                        except Exception as direct_error:
+                            print(f"[RATE] Direct S3 lookup error: {direct_error}")
+                            continue
+                    if result and result.get("models"):
+                        break
+            
+            if result and result.get("models"):
+                found_model = result["models"][0]
+                found_version = found_model["version"]
+                # Use the sanitized model name from S3 (this is how it's actually stored)
+                found_model_name = found_model["name"]
+                try:
+                    model_content = download_model(found_model_name, found_version, "full")
+                    if model_content:
+                        clean_model_id = target  # Keep original target for display
+                        print(f"[RATE] Successfully downloaded model from S3: {found_model_name} v{found_version}")
+                except Exception as s3_error:
+                    # If download fails, continue to try HuggingFace
+                    print(f"[RATE] S3 download failed for {found_model_name}: {s3_error}")
+                    pass
+        except Exception as s3_check_error:
+            # If S3 check fails, continue to try HuggingFace
+            print(f"[RATE] S3 check failed: {s3_check_error}")
+            import traceback
+            print(f"[RATE] S3 check traceback: {traceback.format_exc()}")
+            pass
 
-        if is_valid_hf_id:
-            try:
-                if target.startswith("https://huggingface.co/"):
-                    clean_model_id = target.replace("https://huggingface.co/", "")
-                elif target.startswith("http://huggingface.co/"):
-                    clean_model_id = target.replace("http://huggingface.co/", "")
-                if clean_model_id != target:
-                    model_content = download_from_huggingface(clean_model_id, "main")
-                elif not target.startswith("http"):
-                    # Try to download if it looks like a HuggingFace model ID
-                    model_content = download_from_huggingface(clean_model_id, "main")
-            except (HTTPException, ValueError) as hf_error:
+        # If not found in S3, try HuggingFace
+        if not model_content:
+            # Check if this looks like a valid HuggingFace model ID (not a file path)
+            is_valid_hf_id = (
+                target.startswith("http://") or target.startswith("https://")
+            ) or (
+                not target.startswith("/")
+                and not target.startswith("\\")
+                and (":" not in target or target.startswith("http"))
+                and (
+                    "/" in target
+                    or "-" in target
+                    or target.replace("-", "").replace("_", "").isalnum()
+                )
+            )
+
+            if is_valid_hf_id:
+                try:
+                    if target.startswith("https://huggingface.co/"):
+                        clean_model_id = target.replace("https://huggingface.co/", "")
+                    elif target.startswith("http://huggingface.co/"):
+                        clean_model_id = target.replace("http://huggingface.co/", "")
+                    if clean_model_id != target:
+                        model_content = download_from_huggingface(clean_model_id, "main")
+                    elif not target.startswith("http"):
+                        # Try to download if it looks like a HuggingFace model ID
+                        model_content = download_from_huggingface(clean_model_id, "main")
+                except (HTTPException, ValueError) as hf_error:
+                    if suppress_errors:
+                        return None
+                    raise ValueError(
+                        f"No model content found for {target} on HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}"
+                    )
+                except Exception as hf_error:
+                    if suppress_errors:
+                        return None
+                    raise ValueError(
+                        f"No model content found for {target} on HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}"
+                    )
+            else:
+                # Looks like a file path, not a valid model ID
                 if suppress_errors:
                     return None
                 raise ValueError(
-                    f"No model content found for {target} on HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}"
+                    f"Invalid model ID format: {target}. Expected HuggingFace model ID (e.g., 'username/model-name') or HTTP URL, not a file path."
                 )
-            except Exception as hf_error:
-                if suppress_errors:
-                    return None
-                raise ValueError(
-                    f"No model content found for {target} on HuggingFace. Cannot compute metrics without model data. Error: {str(hf_error)}"
-                )
-        else:
-            # Looks like a file path, not a valid model ID
-            if suppress_errors:
-                return None
-            raise ValueError(
-                f"Invalid model ID format: {target}. Expected HuggingFace model ID (e.g., 'username/model-name') or HTTP URL, not a file path."
-            )
+        
         effective_model_id = clean_model_id if clean_model_id != target else target
 
         # Check if we have model content before proceeding
@@ -101,7 +195,7 @@ def analyze_model_content(
             if suppress_errors:
                 return None
             raise ValueError(
-                f"No model content found for {target} on HuggingFace. Cannot compute metrics without model data."
+                f"No model content found for {target} in S3 or HuggingFace. Cannot compute metrics without model data."
             )
 
         # Sanitize model ID for file system (remove path separators, invalid chars)
