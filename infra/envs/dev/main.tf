@@ -69,9 +69,19 @@ module "api_gateway" {
   ddb_tables_arnmap     = local.ddb_tables_arnmap
 }
 
+# Extract ALB DNS name from the validator service URL (e.g., "http://validator-lb-xxx.elb.amazonaws.com" -> "validator-lb-xxx.elb.amazonaws.com")
+module "cloudfront" {
+  source       = "../../modules/cloudfront"
+  alb_dns_name = replace(replace(module.ecs.validator_service_url, "http://", ""), "https://", "")
+  aws_region   = var.aws_region
+}
+
 output "artifacts_bucket" { value = local.artifacts_bucket }
 output "group106_policy_arn" { value = module.iam.group106_policy_arn }
 output "ddb_tables" { value = local.ddb_tables_arnmap }
 output "validator_service_url" { value = module.ecs.validator_service_url }
 output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }
 output "ecr_repository_url" { value = module.ecs.ecr_repository_url }
+output "cloudfront_url" { value = module.cloudfront.cloudfront_url }
+output "cloudfront_domain_name" { value = module.cloudfront.cloudfront_domain_name }
+output "cloudfront_distribution_id" { value = module.cloudfront.cloudfront_distribution_id }
