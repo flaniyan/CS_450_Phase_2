@@ -1384,7 +1384,7 @@ async def search_artifacts_by_regex(request: Request):
                 dataset_name = dataset.get("name", "")
                 dataset_version = dataset.get("version", "main")
                 logger.info(f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset_version}'")
-                # Try to get artifact_id from metadata.json file
+                # Try to get artifact_id and name from metadata.json file
                 artifact_id = None
                 try:
                     sanitized_name = sanitize_model_id_for_s3(dataset_name)
@@ -1395,6 +1395,11 @@ async def search_artifacts_by_regex(request: Request):
                     metadata_json = response["Body"].read().decode("utf-8")
                     metadata = json.loads(metadata_json)
                     artifact_id = metadata.get("artifact_id")
+                    # Extract name from metadata.json response body
+                    metadata_name = metadata.get("name")
+                    if metadata_name:
+                        dataset_name = metadata_name
+                        logger.info(f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset")
                     if artifact_id:
                         logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for dataset '{dataset_name}'")
                 except Exception as e:
@@ -1442,7 +1447,7 @@ async def search_artifacts_by_regex(request: Request):
                 code_name = code_artifact.get("name", "")
                 code_version = code_artifact.get("version", "main")
                 logger.info(f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_version}'")
-                # Try to get artifact_id from metadata.json file
+                # Try to get artifact_id and name from metadata.json file
                 artifact_id = None
                 try:
                     sanitized_name = sanitize_model_id_for_s3(code_name)
@@ -1453,6 +1458,11 @@ async def search_artifacts_by_regex(request: Request):
                     metadata_json = response["Body"].read().decode("utf-8")
                     metadata = json.loads(metadata_json)
                     artifact_id = metadata.get("artifact_id")
+                    # Extract name from metadata.json response body
+                    metadata_name = metadata.get("name")
+                    if metadata_name:
+                        code_name = metadata_name
+                        logger.info(f"DEBUG: Extracted name '{code_name}' from metadata.json for code artifact")
                     if artifact_id:
                         logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for code artifact '{code_name}'")
                 except Exception as e:
@@ -1942,8 +1952,8 @@ def get_artifact(artifact_type: str, id: str, request: Request):
 @app.post("/artifact/ingest")
 async def post_artifact_ingest(request: Request):
     """
-    Ingest an artifact by name and version (form data).
-    This is a convenience endpoint that accepts form data for model ingestion.
+    Ingest an artifact by name and version (JSON body).
+    This endpoint accepts JSON body for artifact ingestion (model, dataset, code).
     """
     
     if not verify_auth_token(request):
@@ -1953,17 +1963,25 @@ async def post_artifact_ingest(request: Request):
         )
     
     try:
-        # Parse form data
-        form = await request.form()
-        name = form.get("name")
-        version = form.get("version", "main")
-        artifact_type = form.get("type", "model")
-        
-        # Validate name parameter
-        if not name or not name.strip():
+        # Parse JSON body
+        try:
+            body = await request.json()
+        except Exception as json_error:
             raise HTTPException(
                 status_code=400,
-                detail="Name parameter is required. Provide 'name' in form data.",
+                detail="Invalid JSON body. Provide 'name' in request body.",
+            )
+        
+        # Extract name from body (required for all artifact types)
+        name = body.get("name")
+        version = body.get("version", "main")
+        artifact_type = body.get("type", "model")
+        
+        # Validate name parameter
+        if not name or not isinstance(name, str) or not name.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Name parameter is required. Provide 'name' in request body.",
             )
         
         name = name.strip()
@@ -2207,6 +2225,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
         version = body.get("version", "main")
         
         # Extract name from body if provided, otherwise extract from URL
+        # Name from body takes precedence over URL extraction for all artifact types
         # For GitHub URLs and other URLs with paths, replace "/" with "-" in the name
         name = body.get("name")  # Check if name is provided in request body first
         if not name:
@@ -2250,11 +2269,12 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     # Fallback: use last part of URL
                     name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
-            # Determine model_id from name or URL
-            model_id = None
+            # Determine model_id from name (from body) or URL
+            # Name from body takes precedence over URL extraction
+            model_id = name  # Use name from body if provided
             
-            # If URL is provided, extract model_id from it (URL takes precedence)
-            if url and "huggingface.co" in url:
+            # If name not provided in body, extract model_id from URL
+            if not model_id and url and "huggingface.co" in url:
                 # URL provided - extract model_id from HuggingFace URL
                 # Extract model_id from HuggingFace URL properly
                 # Examples:
@@ -2270,7 +2290,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     clean_url = clean_url.split("/resolve/")[0]
                 model_id = clean_url.strip("/")
                 if not model_id:
-                    model_id = name if name else "unknown-model"
+                    model_id = "unknown-model"
 
                 # Check if artifact already exists
                 try:
