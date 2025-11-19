@@ -1952,8 +1952,9 @@ def get_artifact(artifact_type: str, id: str, request: Request):
 @app.post("/artifact/ingest")
 async def post_artifact_ingest(request: Request):
     """
-    Ingest an artifact by name and version (JSON body).
-    This endpoint accepts JSON body for artifact ingestion (model, dataset, code).
+    Ingest an artifact by name and version.
+    This endpoint accepts both form data and JSON body for artifact ingestion (model, dataset, code).
+    Supports backward compatibility with form data while preferring JSON body.
     """
     
     if not verify_auth_token(request):
@@ -1963,25 +1964,42 @@ async def post_artifact_ingest(request: Request):
         )
     
     try:
-        # Parse JSON body
-        try:
-            body = await request.json()
-        except Exception as json_error:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid JSON body. Provide 'name' in request body.",
-            )
+        # Try to parse as JSON first, fallback to form data for backward compatibility
+        name = None
+        version = "main"
+        artifact_type = "model"
         
-        # Extract name from body (required for all artifact types)
-        name = body.get("name")
-        version = body.get("version", "main")
-        artifact_type = body.get("type", "model")
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            # Parse JSON body
+            try:
+                body = await request.json()
+                name = body.get("name")
+                version = body.get("version", "main")
+                artifact_type = body.get("type", "model")
+            except Exception as json_error:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid JSON body. Provide 'name' in request body.",
+                )
+        else:
+            # Parse form data (backward compatibility)
+            try:
+                form = await request.form()
+                name = form.get("name")
+                version = form.get("version", "main")
+                artifact_type = form.get("type", "model")
+            except Exception as form_error:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid request format. Provide 'name' in form data or JSON body.",
+                )
         
         # Validate name parameter
         if not name or not isinstance(name, str) or not name.strip():
             raise HTTPException(
                 status_code=400,
-                detail="Name parameter is required. Provide 'name' in request body.",
+                detail="Name parameter is required. Provide 'name' in request body or form data.",
             )
         
         name = name.strip()
