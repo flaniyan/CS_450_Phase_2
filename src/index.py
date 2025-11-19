@@ -2262,12 +2262,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     # Fallback: use last part of URL
                     name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
-            model_id = name  # Use name from body if provided
+            # For models, we need to distinguish between:
+            # 1. hf_model_id: The HuggingFace model ID used for downloading/uploading (from URL)
+            # 2. artifact_name: The name stored in database and used for querying (from body or URL)
             
-            # If name not provided in body, extract model_id from URL
-            if not model_id and url and "huggingface.co" in url:
-                # URL provided - extract model_id from HuggingFace URL
-                # Extract model_id from HuggingFace URL properly
+            # Extract HuggingFace model ID from URL (required for model_ingestion)
+            hf_model_id = None
+            if url and "huggingface.co" in url:
+                # Extract model_id from HuggingFace URL
                 # Examples:
                 # https://huggingface.co/google-bert/bert-base-uncased -> google-bert/bert-base-uncased
                 # https://huggingface.co/google-bert/bert-base-uncased/tree/main -> google-bert/bert-base-uncased
@@ -2279,116 +2281,124 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     clean_url = clean_url.split("/tree/")[0]
                 elif "/resolve/" in clean_url:
                     clean_url = clean_url.split("/resolve/")[0]
-                model_id = clean_url.strip("/")
-                if not model_id:
-                    model_id = name if name else "unknown-model"
+                hf_model_id = clean_url.strip("/")
+            
+            # Determine artifact_name: use name from body if provided, otherwise use hf_model_id
+            artifact_name = name if name else (hf_model_id if hf_model_id else "unknown-model")
+            
+            # Use hf_model_id for ingestion (must be valid HuggingFace model ID)
+            # If no hf_model_id from URL, use artifact_name (assumes it's a valid HuggingFace ID)
+            model_id = hf_model_id if hf_model_id else artifact_name
 
-                # Check if artifact already exists
-                try:
-                    existing = list_models(
-                        name_regex=f"^{re.escape(model_id)}$", limit=1
+            # Check if artifact already exists
+            try:
+                existing = list_models(
+                    name_regex=f"^{re.escape(model_id)}$", limit=1
+                )
+                if existing.get("models"):
+                    raise HTTPException(
+                        status_code=409, detail="Artifact exists already."
                     )
-                    if existing.get("models"):
-                        raise HTTPException(
-                            status_code=409, detail="Artifact exists already."
-                        )
-                except HTTPException:
-                    raise
-                except:
-                    pass
+            except HTTPException:
+                raise
+            except:
+                pass
 
-                # Ingest the model (synchronous - must complete)
-                # Note: model_ingestion fetches GitHub metadata
-                # (github_url, github.prs, github.direct_commits, readme_text, repo_files, etc.)
-                # which is required for metrics like Reviewedness, CodeQuality, and Reproducibility
+            # Ingest the model (synchronous - must complete)
+            # Note: model_ingestion fetches GitHub metadata
+            # (github_url, github.prs, github.direct_commits, readme_text, repo_files, etc.)
+            # which is required for metrics like Reviewedness, CodeQuality, and Reproducibility
+            try:
+                model_ingestion(model_id, version)
+                
+                # Generate artifact ID immediately (before rating)
+                artifact_id = str(random.randint(1000000000, 9999999999))
+                
+                # Initialize rating status and lock
+                _rating_status[artifact_id] = "pending"
+                _rating_locks[artifact_id] = threading.Event()
+                
+                # Extract README and extract dataset/code names
+                readme_text = None
+                dataset_name = None
+                code_name = None
                 try:
-                    model_ingestion(model_id, version)
-                    
-                    # Generate artifact ID immediately (before rating)
-                    artifact_id = str(random.randint(1000000000, 9999999999))
-                    
-                    # Initialize rating status and lock
-                    _rating_status[artifact_id] = "pending"
-                    _rating_locks[artifact_id] = threading.Event()
-                    
-                    # Extract README and extract dataset/code names
-                    readme_text = None
-                    dataset_name = None
-                    code_name = None
-                    try:
-                        from .services.s3_service import download_model
-                        zip_content = download_model(model_id, version, "full")
-                        if zip_content:
-                            import zipfile
-                            import io
-                            with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
-                                for file_info in zip_file.filelist:
-                                    if "readme" in file_info.filename.lower():
-                                        readme_text = zip_file.read(file_info).decode("utf-8", errors="ignore")
-                                        break
-                            if readme_text:
-                                # Extract dataset and code names from README
-                                extracted = _extract_dataset_code_names_from_readme(readme_text)
-                                dataset_name = extracted.get("dataset_name")
-                                code_name = extracted.get("code_name")
-                    except Exception as e:
-                        logger.debug(f"Could not extract README for linking: {str(e)}")
-                    
-                    # Store artifact metadata immediately (before rating completes)
-                    # Include dataset_name and code_name if extracted from README
-                    artifact_data = {
-                        "name": model_id,
-                        "type": artifact_type,
-                        "version": version,
-                        "id": artifact_id,
-                        "url": url,
-                    }
-                    # Store extracted dataset/code names (even if not linked yet)
-                    if dataset_name:
-                        artifact_data["dataset_name"] = dataset_name
-                    if code_name:
-                        artifact_data["code_name"] = code_name
-                    save_artifact(artifact_id, artifact_data)
-                    
-                    # Link to existing datasets/code if found
-                    if readme_text:
-                        _link_model_to_datasets_code(artifact_id, model_id, readme_text)
-                    
-                    # Start async rating in background thread
-                    logger.info(f"DEBUG: Starting async rating for artifact_id='{artifact_id}'")
-                    rating_thread = threading.Thread(
-                        target=_run_async_rating,
-                        args=(artifact_id, model_id, version),
-                        daemon=True
-                    )
-                    rating_thread.start()
-                    
-                    # Store artifact metadata in S3 (model file already stored via model_ingestion)
-                    try:
-                        store_artifact_metadata(artifact_id, model_id, artifact_type, version, url)
-                    except Exception as s3_error:
-                        logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
-                        # Don't fail ingestion if S3 metadata storage fails
-                    
-                    # Per spec: Return 202 when rating is deferred (async)
-                    # "Artifact ingest accepted but the rating pipeline deferred the evaluation"
-                    return Response(
-                        content=json.dumps(
-                            {
-                                "metadata": {
-                                    "name": model_id,
-                                    "id": artifact_id,
-                                    "type": artifact_type,
-                                },
-                                "data": {"url": url},
-                            }
-                        ),
-                        media_type="application/json",
-                        status_code=202,
-                    )
-                except HTTPException:
-                    raise
+                    from .services.s3_service import download_model
+                    zip_content = download_model(model_id, version, "full")
+                    if zip_content:
+                        import zipfile
+                        import io
+                        with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
+                            for file_info in zip_file.filelist:
+                                if "readme" in file_info.filename.lower():
+                                    readme_text = zip_file.read(file_info).decode("utf-8", errors="ignore")
+                                    break
+                        if readme_text:
+                            # Extract dataset and code names from README
+                            extracted = _extract_dataset_code_names_from_readme(readme_text)
+                            dataset_name = extracted.get("dataset_name")
+                            code_name = extracted.get("code_name")
                 except Exception as e:
+                    logger.debug(f"Could not extract README for linking: {str(e)}")
+                
+                # Store artifact metadata immediately (before rating completes)
+                # Include dataset_name and code_name if extracted from README
+                # Use artifact_name (from body or URL) for storage, not model_id (which is hf_model_id)
+                artifact_data = {
+                    "name": artifact_name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                }
+                # Store extracted dataset/code names (even if not linked yet)
+                if dataset_name:
+                    artifact_data["dataset_name"] = dataset_name
+                if code_name:
+                    artifact_data["code_name"] = code_name
+                save_artifact(artifact_id, artifact_data)
+                
+                # Link to existing datasets/code if found
+                if readme_text:
+                    _link_model_to_datasets_code(artifact_id, artifact_name, readme_text)
+                
+                # Start async rating in background thread
+                # Use model_id (hf_model_id) for rating since it needs the actual HuggingFace model
+                logger.info(f"DEBUG: Starting async rating for artifact_id='{artifact_id}'")
+                rating_thread = threading.Thread(
+                    target=_run_async_rating,
+                    args=(artifact_id, model_id, version),
+                    daemon=True
+                )
+                rating_thread.start()
+                
+                # Store artifact metadata in S3 (model file already stored via model_ingestion)
+                # Use artifact_name for metadata storage (this is what queries will look for)
+                try:
+                    store_artifact_metadata(artifact_id, artifact_name, artifact_type, version, url)
+                except Exception as s3_error:
+                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                    # Don't fail ingestion if S3 metadata storage fails
+                
+                # Per spec: Return 202 when rating is deferred (async)
+                # "Artifact ingest accepted but the rating pipeline deferred the evaluation"
+                return Response(
+                    content=json.dumps(
+                        {
+                            "metadata": {
+                                "name": artifact_name,
+                                "id": artifact_id,
+                                "type": artifact_type,
+                            },
+                            "data": {"url": url},
+                        }
+                    ),
+                    media_type="application/json",
+                    status_code=202,
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
                     # If ingestion fails, raise error instead of returning success
                     logger.error(
                         f"Model ingestion failed for {model_id}: {str(e)}",
