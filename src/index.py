@@ -2262,11 +2262,10 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     # Fallback: use last part of URL
                     name = url.split("/")[-1] if url else f"{artifact_type}-new"
         if artifact_type == "model":
-            # Determine model_id from name or URL
-            model_id = None
+            model_id = name  # Use name from body if provided
             
-            # If URL is provided, extract model_id from it (URL takes precedence)
-            if url and "huggingface.co" in url:
+            # If name not provided in body, extract model_id from URL
+            if not model_id and url and "huggingface.co" in url:
                 # URL provided - extract model_id from HuggingFace URL
                 # Extract model_id from HuggingFace URL properly
                 # Examples:
