@@ -40,12 +40,12 @@ jobs:
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
       - name: Ensure Terraform plugin cache dir exists
-        run: mkdir -p ~/.terraform.d/plugin-cache
+        run: mkdir -p $HOME/.terraform.d/plugin-cache
 
       - name: Cache Terraform plugins
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: ~/.terraform.d/plugin-cache
+          path: $HOME/.terraform.d/plugin-cache
           key: ${{ runner.os }}-tf-${{ hashFiles('**/*.tf') }}
           restore-keys: |
             ${{ runner.os }}-tf-
@@ -100,14 +100,101 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Ensure Terraform backend bucket exists
+        shell: bash
+        continue-on-error: true
+        run: |
+          BACKEND_BUCKET="pkg-artifacts"
+          if ! aws s3api head-bucket --bucket "${BACKEND_BUCKET}" 2>/dev/null; then
+            echo "Backend bucket ${BACKEND_BUCKET} does not exist. Creating it..."
+            # us-east-1 doesn't use LocationConstraint
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket \
+                --bucket "${BACKEND_BUCKET}" \
+                --region "${{ env.AWS_REGION }}" || echo "Bucket may already exist or creation failed"
+            else
+              aws s3api create-bucket \
+                --bucket "${BACKEND_BUCKET}" \
+                --region "${{ env.AWS_REGION }}" \
+                --create-bucket-configuration LocationConstraint="${{ env.AWS_REGION }}" || echo "Bucket may already exist or creation failed"
+            fi
+            
+            # Enable versioning for the backend bucket
+            aws s3api put-bucket-versioning \
+              --bucket "${BACKEND_BUCKET}" \
+              --versioning-configuration Status=Enabled || echo "Failed to enable versioning"
+            
+            # Enable encryption
+            aws s3api put-bucket-encryption \
+              --bucket "${BACKEND_BUCKET}" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' || echo "Failed to enable encryption"
+          else
+            echo "Backend bucket ${BACKEND_BUCKET} already exists"
+          fi
+
+      - name: Ensure S3 access point exists
+        shell: bash
+        continue-on-error: true
+        run: |
+          ACCESS_POINT_NAME="cs450-s3"
+          BUCKET_NAME="pkg-artifacts"
+          ACCOUNT_ID="838693051036"
+          
+          # Check if access point exists
+          if ! aws s3control get-access-point \
+            --account-id "${ACCOUNT_ID}" \
+            --name "${ACCESS_POINT_NAME}" \
+            --region "${{ env.AWS_REGION }}" >/dev/null 2>&1; then
+            echo "S3 access point ${ACCESS_POINT_NAME} does not exist. Creating it..."
+            
+            # Create access point
+            aws s3control create-access-point \
+              --account-id "${ACCOUNT_ID}" \
+              --name "${ACCESS_POINT_NAME}" \
+              --bucket "${BUCKET_NAME}" \
+              --region "${{ env.AWS_REGION }}" \
+              --public-access-block-configuration \
+              "BlockPublicAcls=true,BlockPublicPolicy=true,IgnorePublicAcls=true,RestrictPublicBuckets=true" || \
+            echo "Failed to create access point (may already exist or bucket doesn't exist)"
+          else
+            echo "S3 access point ${ACCESS_POINT_NAME} already exists"
+          fi
+
       - name: Terraform init
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         env:
-          TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+          TF_PLUGIN_CACHE_DIR: $HOME/.terraform.d/plugin-cache
         run: |
-          mkdir -p ~/.terraform.d/plugin-cache
-          terraform init -input=false -lock-timeout=5m
+          mkdir -p $HOME/.terraform.d/plugin-cache
+          
+          # Try normal init first
+          if terraform init -input=false -lock-timeout=5m 2>&1 | tee /tmp/init-output.log; then
+            echo "Terraform init succeeded"
+          else
+            # Check if it's a checksum mismatch error
+            if grep -q "checksum" /tmp/init-output.log; then
+              echo "Checksum mismatch detected. Attempting to fix..."
+              
+              # Wait for S3 eventual consistency
+              echo "Waiting 20 seconds for S3 eventual consistency..."
+              sleep 20
+              
+              # Try with -reconfigure to force re-initialization
+              echo "Retrying with -reconfigure flag..."
+              terraform init -reconfigure -input=false -lock-timeout=5m || {
+                echo "Init still failed. You may need to manually fix the state checksum."
+                echo "To fix manually, run:"
+                echo "  aws dynamodb scan --table-name terraform-state-lock --region us-east-1"
+                echo "  # Then delete any stale lock entries"
+                exit 1
+              }
+            else
+              echo "Terraform init failed with a different error"
+              cat /tmp/init-output.log
+              exit 1
+            fi
+          fi
 
       - name: Select or create workspace
         shell: bash
@@ -137,7 +224,7 @@ jobs:
           import_table() {
             local resource_address=$1
             local table_name=$2
-            if terraform state list | grep -q "^${resource_address}$"; then
+            if terraform state show "${resource_address}" >/dev/null 2>&1; then
               echo "Table ${table_name} already in state, skipping import"
             else
               echo "Importing ${table_name}..."
@@ -151,6 +238,46 @@ jobs:
           import_table 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens
           import_table 'module.ddb.aws_dynamodb_table.this["packages"]' packages
           import_table 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads
+
+      - name: Cleanup orphaned Terraform state resources
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        run: |
+          echo "Cleaning up orphaned resources from Terraform state..."
+          
+          # Function to safely remove from state
+          remove_from_state() {
+            local resource=$1
+            if terraform state list | grep -q "^${resource}$"; then
+              echo "Removing ${resource} from state..."
+              terraform state rm "${resource}" || echo "Failed to remove ${resource} (may not exist)"
+            else
+              echo "${resource} not in state, skipping"
+            fi
+          }
+          
+          # Remove Config resources
+          echo "Removing Config resources..."
+          remove_from_state "module.config.aws_config_configuration_recorder.config_recorder"
+          remove_from_state "module.config.aws_config_configuration_recorder_status.config_recorder"
+          remove_from_state "module.config.aws_config_delivery_channel.config_delivery"
+          remove_from_state "module.config.aws_iam_role.config_role"
+          remove_from_state "module.config.aws_s3_bucket.config_snapshots"
+          
+          # Remove CloudTrail resources
+          echo "Removing CloudTrail resources..."
+          remove_from_state "module.monitoring.aws_cloudtrail.audit_trail"
+          remove_from_state "module.monitoring.aws_s3_bucket.cloudtrail_logs"
+          remove_from_state "module.monitoring.aws_s3_bucket_policy.cloudtrail_logs"
+          
+          # Remove S3 bucket from state (it's used as Terraform backend, so shouldn't be managed by Terraform)
+          echo "Removing S3 backend bucket from state (bucket is used as Terraform backend)..."
+          remove_from_state "module.s3.aws_s3_bucket.artifacts"
+          remove_from_state "module.s3.aws_s3_bucket_server_side_encryption_configuration.this"
+          remove_from_state "module.s3.aws_s3_bucket_versioning.this"
+          
+          echo "Cleanup complete"
 
       - name: Terraform plan
         shell: bash

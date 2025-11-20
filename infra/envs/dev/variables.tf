@@ -10,3 +10,8 @@ variable "aws_account_id" {
   description = "AWS account ID"
   default     = "838693051036"
 }
+variable "kms_key_arn" {
+  type        = string
+  description = "KMS key ARN for encryption (optional, will look up via alias if not provided)"
+  default     = ""
+}
