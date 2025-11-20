@@ -490,20 +490,19 @@ async def list_artifacts(request: Request, offset: str = None):
                         seen_ids.add(artifact_id)
             else:
                 # Exact name match - need to return only a single package per spec requirement
-                escaped_name = re.escape(name)
-                name_pattern = f"^{escaped_name}$"
+                # Check all sources but return only the first exact match found
                 seen_ids = set()
-                seen_names = set()  # Track names to ensure exact match
                 
-                # For exact name matching, prioritize database first (most authoritative)
-                # Then check S3 and in-memory storage
+                # Priority order: Database -> S3 -> In-memory storage
+                # Check database first (most authoritative)
                 all_artifacts = list_all_artifacts()
                 for artifact in all_artifacts:
                     artifact_id = artifact.get("id", "")
                     artifact_name = artifact.get("name", "")
                     artifact_type_stored = artifact.get("type", "")
-                    # Exact name match (case-sensitive)
-                    if (artifact_name == name and 
+                    # Exact name match (case-sensitive, no regex)
+                    # Ensure artifact_name is not None or empty
+                    if (artifact_name and artifact_name == name and 
                         (not types_filter or artifact_type_stored in types_filter) and
                         artifact_id not in seen_ids):
                         results.append(
@@ -514,13 +513,13 @@ async def list_artifacts(request: Request, offset: str = None):
                             }
                         )
                         seen_ids.add(artifact_id)
-                        seen_names.add(artifact_name)
-                        # For exact name match, return only the first match found
-                        # This ensures we return a single package as required by the spec
+                        # Return only the first match - single package requirement
                         break
                 
                 # If not found in database, search S3 for models
                 if not results and (not types_filter or "model" in types_filter):
+                    escaped_name = re.escape(name)
+                    name_pattern = f"^{escaped_name}$"
                     result = list_models(name_regex=name_pattern, limit=1000)
                     if result is None:
                         result = {"models": []}
@@ -528,7 +527,7 @@ async def list_artifacts(request: Request, offset: str = None):
                     for model in models:
                         if isinstance(model, dict):
                             model_name = model.get("name", "")
-                            # Exact name match
+                            # Exact name match (not regex, direct comparison)
                             if model_name == name:
                                 model_id = model.get("id", model.get("name", ""))
                                 if model_id not in seen_ids:
@@ -548,7 +547,7 @@ async def list_artifacts(request: Request, offset: str = None):
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_name = artifact_data.get("name", "")
                         artifact_type_stored = artifact_data.get("type", "")
-                        # Exact name match
+                        # Exact name match (case-sensitive)
                         if (artifact_name == name and 
                             (not types_filter or artifact_type_stored in types_filter) and
                             artifact_id not in seen_ids):
