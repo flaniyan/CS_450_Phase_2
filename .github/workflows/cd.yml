@@ -40,12 +40,12 @@ jobs:
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
       - name: Ensure Terraform plugin cache dir exists
-        run: mkdir -p ~/.terraform.d/plugin-cache
+        run: mkdir -p $HOME/.terraform.d/plugin-cache
 
       - name: Cache Terraform plugins
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: ~/.terraform.d/plugin-cache
+          path: $HOME/.terraform.d/plugin-cache
           key: ${{ runner.os }}-tf-${{ hashFiles('**/*.tf') }}
           restore-keys: |
             ${{ runner.os }}-tf-
@@ -164,10 +164,37 @@ jobs:
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         env:
-          TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+          TF_PLUGIN_CACHE_DIR: $HOME/.terraform.d/plugin-cache
         run: |
-          mkdir -p ~/.terraform.d/plugin-cache
-          terraform init -input=false -lock-timeout=5m
+          mkdir -p $HOME/.terraform.d/plugin-cache
+          
+          # Try normal init first
+          if terraform init -input=false -lock-timeout=5m 2>&1 | tee /tmp/init-output.log; then
+            echo "Terraform init succeeded"
+          else
+            # Check if it's a checksum mismatch error
+            if grep -q "checksum" /tmp/init-output.log; then
+              echo "Checksum mismatch detected. Attempting to fix..."
+              
+              # Wait for S3 eventual consistency
+              echo "Waiting 20 seconds for S3 eventual consistency..."
+              sleep 20
+              
+              # Try with -reconfigure to force re-initialization
+              echo "Retrying with -reconfigure flag..."
+              terraform init -reconfigure -input=false -lock-timeout=5m || {
+                echo "Init still failed. You may need to manually fix the state checksum."
+                echo "To fix manually, run:"
+                echo "  aws dynamodb scan --table-name terraform-state-lock --region us-east-1"
+                echo "  # Then delete any stale lock entries"
+                exit 1
+              }
+            else
+              echo "Terraform init failed with a different error"
+              cat /tmp/init-output.log
+              exit 1
+            fi
+          fi
 
       - name: Select or create workspace
         shell: bash
