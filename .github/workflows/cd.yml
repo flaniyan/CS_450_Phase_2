@@ -287,22 +287,40 @@ jobs:
       - name: Get KMS key ARN
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        continue-on-error: false
+        continue-on-error: true
         id: get-kms-key
         run: |
           echo "Getting KMS key ARN from alias..."
-          KMS_KEY_ARN=$(aws kms describe-key --key-id alias/acme-main-key --region us-east-1 --query 'KeyMetadata.Arn' --output text 2>/dev/null)
-          if [ -z "$KMS_KEY_ARN" ] || [ "$KMS_KEY_ARN" == "None" ]; then
-            echo "ERROR: KMS alias 'alias/acme-main-key' does not exist or cannot be accessed"
-            exit 1
+          set +e  # Don't exit on error immediately
+          KMS_KEY_ARN=$(aws kms describe-key --key-id alias/acme-main-key --region us-east-1 --query 'KeyMetadata.Arn' --output text 2>&1)
+          EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          if [ $EXIT_CODE -eq 0 ] && [ -n "$KMS_KEY_ARN" ] && [ "$KMS_KEY_ARN" != "None" ] && [[ ! "$KMS_KEY_ARN" =~ "error" ]]; then
+            echo "✓ Successfully retrieved KMS key ARN: $KMS_KEY_ARN"
+            echo "kms_key_arn=$KMS_KEY_ARN" >> $GITHUB_OUTPUT
+          else
+            echo "⚠ Warning: Failed to get KMS key ARN via AWS CLI"
+            echo "AWS CLI output: $KMS_KEY_ARN"
+            echo "Exit code: $EXIT_CODE"
+            echo ""
+            echo "Terraform will attempt to look up the key via data source instead."
+            echo "This may take longer but should work if the alias exists and permissions are correct."
+            echo "kms_key_arn=" >> $GITHUB_OUTPUT  # Empty value will trigger data source fallback
           fi
-          echo "KMS key ARN: $KMS_KEY_ARN"
-          echo "kms_key_arn=$KMS_KEY_ARN" >> $GITHUB_OUTPUT
 
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}" -var="kms_key_arn=${{ steps.get-kms-key.outputs.kms_key_arn }}"
+        run: |
+          PLAN_ARGS="-out=tfplan -input=false -lock-timeout=5m -var=\"aws_region=us-east-1\" -var=\"artifacts_bucket=pkg-artifacts\" -var=\"image_tag=${{ steps.build-image.outputs.image_tag }}\""
+          if [ -n "${{ steps.get-kms-key.outputs.kms_key_arn }}" ]; then
+            PLAN_ARGS="$PLAN_ARGS -var=\"kms_key_arn=${{ steps.get-kms-key.outputs.kms_key_arn }}\""
+            echo "Using KMS key ARN from AWS CLI: ${{ steps.get-kms-key.outputs.kms_key_arn }}"
+          else
+            echo "KMS key ARN not provided, Terraform will use data source lookup"
+          fi
+          terraform plan $PLAN_ARGS
 
       - name: Terraform apply
         shell: bash
