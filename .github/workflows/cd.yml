@@ -100,6 +100,66 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Ensure Terraform backend bucket exists
+        shell: bash
+        continue-on-error: true
+        run: |
+          BACKEND_BUCKET="pkg-artifacts"
+          if ! aws s3api head-bucket --bucket "${BACKEND_BUCKET}" 2>/dev/null; then
+            echo "Backend bucket ${BACKEND_BUCKET} does not exist. Creating it..."
+            # us-east-1 doesn't use LocationConstraint
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket \
+                --bucket "${BACKEND_BUCKET}" \
+                --region "${{ env.AWS_REGION }}" || echo "Bucket may already exist or creation failed"
+            else
+              aws s3api create-bucket \
+                --bucket "${BACKEND_BUCKET}" \
+                --region "${{ env.AWS_REGION }}" \
+                --create-bucket-configuration LocationConstraint="${{ env.AWS_REGION }}" || echo "Bucket may already exist or creation failed"
+            fi
+            
+            # Enable versioning for the backend bucket
+            aws s3api put-bucket-versioning \
+              --bucket "${BACKEND_BUCKET}" \
+              --versioning-configuration Status=Enabled || echo "Failed to enable versioning"
+            
+            # Enable encryption
+            aws s3api put-bucket-encryption \
+              --bucket "${BACKEND_BUCKET}" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' || echo "Failed to enable encryption"
+          else
+            echo "Backend bucket ${BACKEND_BUCKET} already exists"
+          fi
+
+      - name: Ensure S3 access point exists
+        shell: bash
+        continue-on-error: true
+        run: |
+          ACCESS_POINT_NAME="cs450-s3"
+          BUCKET_NAME="pkg-artifacts"
+          ACCOUNT_ID="838693051036"
+          
+          # Check if access point exists
+          if ! aws s3control get-access-point \
+            --account-id "${ACCOUNT_ID}" \
+            --name "${ACCESS_POINT_NAME}" \
+            --region "${{ env.AWS_REGION }}" >/dev/null 2>&1; then
+            echo "S3 access point ${ACCESS_POINT_NAME} does not exist. Creating it..."
+            
+            # Create access point
+            aws s3control create-access-point \
+              --account-id "${ACCOUNT_ID}" \
+              --name "${ACCESS_POINT_NAME}" \
+              --bucket "${BUCKET_NAME}" \
+              --region "${{ env.AWS_REGION }}" \
+              --public-access-block-configuration \
+              "BlockPublicAcls=true,BlockPublicPolicy=true,IgnorePublicAcls=true,RestrictPublicBuckets=true" || \
+            echo "Failed to create access point (may already exist or bucket doesn't exist)"
+          else
+            echo "S3 access point ${ACCESS_POINT_NAME} already exists"
+          fi
+
       - name: Terraform init
         shell: bash
         working-directory: ${{ env.TF_DIR }}
@@ -184,26 +244,11 @@ jobs:
           remove_from_state "module.monitoring.aws_s3_bucket.cloudtrail_logs"
           remove_from_state "module.monitoring.aws_s3_bucket_policy.cloudtrail_logs"
           
-          # Handle S3 access point (delete it first if it exists)
-          echo "Checking for S3 access point..."
-          ACCESS_POINT_NAME="cs450-s3"
-          ACCOUNT_ID="838693051036"
-          
-          if aws s3control get-access-point --account-id "${ACCOUNT_ID}" --name "${ACCESS_POINT_NAME}" --region "${{ env.AWS_REGION }}" >/dev/null 2>&1; then
-            echo "S3 access point ${ACCESS_POINT_NAME} exists. Attempting to delete..."
-            # Try to delete access point (may fail if bucket is being deleted, that's ok)
-            aws s3control delete-access-point \
-              --account-id "${ACCOUNT_ID}" \
-              --name "${ACCESS_POINT_NAME}" \
-              --region "${{ env.AWS_REGION }}" \
-              || echo "Could not delete access point (may be in use or already deleted)"
-          else
-            echo "S3 access point ${ACCESS_POINT_NAME} does not exist"
-          fi
-          
-          # Remove S3 bucket from state if it exists (only if you want Terraform to manage it)
-          # Uncomment the line below if you want to remove the bucket from state
-          # remove_from_state "module.s3.aws_s3_bucket.artifacts"
+          # Remove S3 bucket from state (it's used as Terraform backend, so shouldn't be managed by Terraform)
+          echo "Removing S3 backend bucket from state (bucket is used as Terraform backend)..."
+          remove_from_state "module.s3.aws_s3_bucket.artifacts"
+          remove_from_state "module.s3.aws_s3_bucket_server_side_encryption_configuration.this"
+          remove_from_state "module.s3.aws_s3_bucket_versioning.this"
           
           echo "Cleanup complete"
 
