@@ -224,7 +224,7 @@ jobs:
           import_table() {
             local resource_address=$1
             local table_name=$2
-            if terraform state list | grep -q "^${resource_address}$"; then
+            if terraform state show "${resource_address}" >/dev/null 2>&1; then
               echo "Table ${table_name} already in state, skipping import"
             else
               echo "Importing ${table_name}..."
