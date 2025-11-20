@@ -180,7 +180,7 @@ output "kms_key_arn" {
 }
 
 output "kms_key_alias" {
-  value = aws_kms_alias.main_key_alias.name
+  value = data.aws_kms_alias.main_key_alias.name
 }
 
 output "jwt_secret_arn" {
