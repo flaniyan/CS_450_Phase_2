@@ -152,11 +152,6 @@ jobs:
           import_table 'module.ddb.aws_dynamodb_table.this["packages"]' packages
           import_table 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads
 
-      - name: Terraform plan
-        shell: bash
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}"
-
       - name: Cleanup orphaned Terraform state resources
         shell: bash
         working-directory: ${{ env.TF_DIR }}
@@ -211,6 +206,11 @@ jobs:
           # remove_from_state "module.s3.aws_s3_bucket.artifacts"
           
           echo "Cleanup complete"
+
+      - name: Terraform plan
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}"
 
       - name: Terraform apply
         shell: bash
