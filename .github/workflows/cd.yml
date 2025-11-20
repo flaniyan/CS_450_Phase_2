@@ -277,11 +277,6 @@ jobs:
           remove_from_state "module.s3.aws_s3_bucket_server_side_encryption_configuration.this"
           remove_from_state "module.s3.aws_s3_bucket_versioning.this"
           
-          # Remove KMS resources from state (now using data sources to reference existing keys)
-          echo "Removing KMS resources from state (now using data sources)..."
-          remove_from_state "module.monitoring.aws_kms_key.main_key"
-          remove_from_state "module.monitoring.aws_kms_alias.main_key_alias"
-          
           echo "Cleanup complete"
 
       - name: Terraform plan
@@ -293,8 +288,6 @@ jobs:
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve -lock-timeout=5m tfplan
-        env:
-          TF_VAR_kms_key_arn: ${{ steps.get-kms-key.outputs.kms_key_arn }}
 
       - name: Force ECS service update
         shell: bash
