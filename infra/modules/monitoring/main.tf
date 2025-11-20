@@ -30,6 +30,10 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
+
+  lifecycle {
+    ignore_changes = [kms_key_id]
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
