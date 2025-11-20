@@ -284,15 +284,32 @@ jobs:
           
           echo "Cleanup complete"
 
+      - name: Get KMS key ARN
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: false
+        id: get-kms-key
+        run: |
+          echo "Getting KMS key ARN from alias..."
+          KMS_KEY_ARN=$(aws kms describe-key --key-id alias/acme-main-key --region us-east-1 --query 'KeyMetadata.Arn' --output text 2>/dev/null)
+          if [ -z "$KMS_KEY_ARN" ] || [ "$KMS_KEY_ARN" == "None" ]; then
+            echo "ERROR: KMS alias 'alias/acme-main-key' does not exist or cannot be accessed"
+            exit 1
+          fi
+          echo "KMS key ARN: $KMS_KEY_ARN"
+          echo "kms_key_arn=$KMS_KEY_ARN" >> $GITHUB_OUTPUT
+
       - name: Terraform plan
         shell: bash
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}"
+        run: terraform plan -out=tfplan -input=false -lock-timeout=5m -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" -var="image_tag=${{ steps.build-image.outputs.image_tag }}" -var="kms_key_arn=${{ steps.get-kms-key.outputs.kms_key_arn }}"
 
       - name: Terraform apply
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve -lock-timeout=5m tfplan
+        env:
+          TF_VAR_kms_key_arn: ${{ steps.get-kms-key.outputs.kms_key_arn }}
 
       - name: Force ECS service update
         shell: bash

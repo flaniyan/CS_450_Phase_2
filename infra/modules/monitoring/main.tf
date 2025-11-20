@@ -1,21 +1,32 @@
 variable "artifacts_bucket" { type = string }
 variable "ddb_tables_arnmap" { type = map(string) }
 variable "validator_service_url" { type = string }
+variable "kms_key_arn" {
+  type        = string
+  default     = ""
+  description = "Optional KMS key ARN. If not provided, will look up via alias."
+}
 
-# KMS Key for encryption - reference existing key via alias
+# KMS Key for encryption - reference existing key via alias or use provided ARN
 data "aws_kms_alias" "main_key_alias" {
-  name = "alias/acme-main-key"
+  count = var.kms_key_arn == "" ? 1 : 0
+  name  = "alias/acme-main-key"
 }
 
 data "aws_kms_key" "main_key" {
-  key_id = data.aws_kms_alias.main_key_alias.target_key_id
+  count  = var.kms_key_arn == "" ? 1 : 0
+  key_id = data.aws_kms_alias.main_key_alias[0].target_key_id
+}
+
+locals {
+  kms_key_arn = var.kms_key_arn != "" ? var.kms_key_arn : data.aws_kms_key.main_key[0].arn
 }
 
 # Secrets Manager for JWT secret
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name = "acme-jwt-secret"
 
-  kms_key_id = data.aws_kms_key.main_key.arn
+  kms_key_id = local.kms_key_arn
 
   tags = {
     Name        = "acme-jwt-secret"
@@ -176,11 +187,11 @@ resource "aws_cloudwatch_dashboard" "main_dashboard" {
 }
 
 output "kms_key_arn" {
-  value = data.aws_kms_key.main_key.arn
+  value = local.kms_key_arn
 }
 
 output "kms_key_alias" {
-  value = data.aws_kms_alias.main_key_alias.name
+  value = var.kms_key_arn == "" ? data.aws_kms_alias.main_key_alias[0].name : "alias/acme-main-key"
 }
 
 output "jwt_secret_arn" {

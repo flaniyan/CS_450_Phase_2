@@ -46,6 +46,7 @@ module "monitoring" {
   artifacts_bucket      = local.artifacts_bucket
   validator_service_url = "http://placeholder"
   ddb_tables_arnmap     = local.ddb_tables_arnmap
+  kms_key_arn           = var.kms_key_arn
 }
 
 module "iam" {
