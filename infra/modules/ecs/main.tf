@@ -383,9 +383,29 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem"
         ]
         Resource = values(var.ddb_tables_arnmap)
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [var.kms_key_arn]
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+          }
+        }
       },
       {
         Effect = "Allow"

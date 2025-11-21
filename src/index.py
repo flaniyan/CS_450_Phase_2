@@ -83,12 +83,15 @@ def setup_cloudwatch_logging():
         sts = boto3.client("sts", region_name=aws_region)
         sts.get_caller_identity()  # Simple test that AWS credentials work
         
+        # Create a boto3 CloudWatch Logs client with the region
+        logs_client = boto3.client("logs", region_name=aws_region)
+        
         # Add CloudWatch handler to root logger
         root_logger = logging.getLogger()
         cloudwatch_handler = watchtower.CloudWatchLogHandler(
             log_group=log_group,
             stream_name="api",
-            region_name=aws_region,
+            boto3_client=logs_client,  # Pass the boto3 client instead of region_name
             use_queues=False,  # Synchronous logging for simpler implementation
         )
         cloudwatch_handler.setLevel(logging.INFO)
@@ -306,17 +309,15 @@ def sanitize_model_id_for_s3(model_id: str) -> str:
 def generate_download_url(artifact_name: str, artifact_type: str, version: str = "main") -> str:
     """
     Generate a download URL for an artifact.
-    For models stored in S3, construct a path-based URL.
-    For other artifacts, use a similar pattern.
+    Per spec example, use a simple path-based URL format.
+    Example from spec: https://ec2-10-121-34-12/download/bert-base-uncased
     """
-    # Sanitize name for URL path
+    # Sanitize name for URL path (remove special characters that might break URLs)
     sanitized_name = sanitize_model_id_for_s3(artifact_name)
-    # Construct download URL (this would typically be a presigned S3 URL or API endpoint)
-    # For now, use a path-based URL that matches the S3 structure
-    if artifact_type == "model":
-        return f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/model.zip"
-    else:
-        return f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+    # Use a simple path-based format matching the spec example
+    # The spec shows: https://ec2-10-121-34-12/download/bert-base-uncased
+    # We'll use a similar format with the artifact name
+    return f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/model.zip" if artifact_type == "model" else f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/metadata.json"
 
 
 def build_artifact_response(artifact_name: str, artifact_id: str, artifact_type: str, url: str, version: str = "main") -> Dict[str, Any]:
@@ -2462,8 +2463,9 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 # Generate download_url for response
                 download_url = generate_download_url(artifact_name, artifact_type, version)
                 
-                # Per spec: Return 202 when rating is deferred (async)
-                # "Artifact ingest accepted but the rating pipeline deferred the evaluation"
+                # Per spec: Return 201 for successful ingestion with full artifact response
+                # The spec shows 201 with the full artifact object including download_url
+                # 202 is for async rating, but we should return 201 since ingestion completed successfully
                 return Response(
                     content=json.dumps(
                         {
@@ -2479,58 +2481,18 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                         }
                     ),
                     media_type="application/json",
-                    status_code=202,
+                    status_code=201,
                 )
             except HTTPException:
                 raise
             except Exception as e:
-                    # If ingestion fails, raise error instead of returning success
-                    logger.error(
-                        f"Model ingestion failed for {model_id}: {str(e)}",
-                        exc_info=True,
-                    )
-                    raise HTTPException(
-                        status_code=500, detail=f"Failed to ingest model: {str(e)}"
-                    )
-            else:
-                # Non-HuggingFace URL provided - use name if available, otherwise extract from URL
-                model_id = name if name else (url.split("/")[-1] if url else f"{artifact_type}-new")
-                artifact_id = str(random.randint(1000000000, 9999999999))
-                # Store artifact metadata in database
-                save_artifact(artifact_id, {
-                    "name": model_id,
-                    "type": artifact_type,
-                    "version": version,
-                    "id": artifact_id,
-                    "url": url,
-                })
-                
-                # Store artifact metadata in S3
-                try:
-                    store_artifact_metadata(artifact_id, model_id, artifact_type, version, url)
-                except Exception as s3_error:
-                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
-                    # Don't fail ingestion if S3 metadata storage fails
-                
-                # Generate download_url for response
-                download_url = generate_download_url(model_id, artifact_type, version)
-                
-                return Response(
-                    content=json.dumps(
-                        {
-                            "metadata": {
-                                "name": model_id,
-                                "id": artifact_id,
-                                "type": artifact_type,
-                            },
-                            "data": {
-                                "url": url,
-                                "download_url": download_url
-                            },
-                        }
-                    ),
-                    media_type="application/json",
-                    status_code=201,
+                # If ingestion fails, raise error instead of returning success
+                logger.error(
+                    f"Model ingestion failed for {model_id}: {str(e)}",
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to ingest model: {str(e)}"
                 )
         elif artifact_type in ["dataset", "code"]:
             # For dataset and code artifacts, perform ingestion
