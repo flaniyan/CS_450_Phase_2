@@ -12,6 +12,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
+import watchtower
 
 # from fastapi.security import HTTPBearer  # Not used - removed to prevent accidental security enforcement
 from fastapi.staticfiles import StaticFiles
@@ -67,8 +68,44 @@ from .services.license_compatibility import (
 )
 
 # bearer = HTTPBearer(auto_error=True)  # Unused - removed to prevent any accidental security enforcement
+
+# Configure CloudWatch logging
+def setup_cloudwatch_logging():
+    """Configure CloudWatch Logs handler using watchtower"""
+    if watchtower is None:
+        logging.warning("watchtower not available. CloudWatch logging disabled. Using standard logging.")
+        return
+        
+    aws_region = os.getenv("AWS_REGION", "us-east-1")
+    log_group = os.getenv("CLOUDWATCH_LOG_GROUP", "/acme-api/application-logs")
+    
+    # Only add CloudWatch handler if AWS is available (in production)
+    try:
+        # Test if AWS credentials are available
+        import boto3
+        boto3.client("logs", region_name=aws_region).describe_log_groups(maxResults=1)
+        
+        # Add CloudWatch handler to root logger
+        root_logger = logging.getLogger()
+        cloudwatch_handler = watchtower.CloudWatchLogHandler(
+            log_group=log_group,
+            stream_name="api",
+            region_name=aws_region,
+            use_queues=False,  # Synchronous logging for simpler implementation
+        )
+        cloudwatch_handler.setLevel(logging.INFO)
+        root_logger.addHandler(cloudwatch_handler)
+        logging.info(f"CloudWatch logging configured: log_group={log_group}, region={aws_region}")
+    except Exception as e:
+        # AWS not available - fallback to standard logging
+        logging.warning(f"CloudWatch logging not available: {e}. Using standard logging.")
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configure CloudWatch logging (only if AWS is available)
+setup_cloudwatch_logging()
 
 
 class User(BaseModel):
@@ -131,23 +168,66 @@ app.add_middleware(
 # Register custom middleware as BaseHTTPMiddleware to ensure it ALWAYS runs
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Log ALL requests first, before any processing
-        # Use print() as fallback in case logger isn't working
-        print(
-            f"=== MIDDLEWARE START: {request.method} {request.url.path} ===", flush=True
+        # Capture request start time for duration calculation
+        start_time = time.time()
+        
+        # Extract client IP (check various headers for proxy/load balancer scenarios)
+        client_ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.headers.get("X-Real-IP", "")
+            or request.client.host if request.client else "unknown"
         )
-        logger.info(f"=== MIDDLEWARE START: {request.method} {request.url.path} ===")
-        logger.info(f"=== MIDDLEWARE: Headers: {dict(request.headers)} ===")
-
-        # Log and pass through all requests
+        
+        # Extract user agent
+        user_agent = request.headers.get("User-Agent", "unknown")
+        
+        # Prepare structured log data
+        log_data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "method": request.method,
+            "path": request.url.path,
+            "query_params": str(request.query_params) if request.query_params else None,
+            "client_ip": client_ip,
+            "user_agent": user_agent,
+            "status_code": None,  # Will be set after response
+            "duration_ms": None,  # Will be calculated after response
+        }
+        
+        # Log request start
+        logger.info(f"API Request: {json.dumps({**log_data, 'event': 'request_start'})}")
+        
         try:
-            logger.info(f"=== MIDDLEWARE: Calling call_next ===")
+            # Process request
             response = await call_next(request)
-            logger.info(f"=== MIDDLEWARE: Response status {response.status_code} ===")
+            
+            # Calculate duration
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            
+            # Update log data with response info
+            log_data.update({
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "event": "request_complete"
+            })
+            
+            # Log structured API metrics as JSON
+            logger.info(f"API Metrics: {json.dumps(log_data)}")
+            
             return response
         except Exception as e:
-            print(f"=== MIDDLEWARE ERROR: {str(e)} ===", flush=True)
-            logger.error(f"=== MIDDLEWARE ERROR: {str(e)} ===", exc_info=True)
+            # Calculate duration even on error
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            
+            # Update log data with error info
+            log_data.update({
+                "status_code": 500,
+                "duration_ms": duration_ms,
+                "error": str(e),
+                "event": "request_error"
+            })
+            
+            # Log error with structured data
+            logger.error(f"API Error: {json.dumps(log_data)}", exc_info=True)
             raise
 
 
