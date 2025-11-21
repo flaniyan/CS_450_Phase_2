@@ -3387,17 +3387,65 @@ resource "aws_api_gateway_deployment" "main_deployment" {
   }
 }
 
+# CloudWatch Log Group for API Gateway
+resource "aws_cloudwatch_log_group" "api_gateway_logs" {
+  name              = "/aws/apigateway/acme-api"
+  retention_in_days = 7
+
+  tags = {
+    Name        = "acme-api-gateway-logs"
+    Environment = "dev"
+    Project     = "CS_450_Phase_2"
+  }
+}
+
 # API Gateway Stage
 resource "aws_api_gateway_stage" "main_stage" {
   deployment_id = aws_api_gateway_deployment.main_deployment.id
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
   stage_name    = "prod"
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
+  xray_tracing_enabled = true
+
+  # Ensure account-level CloudWatch settings are applied before creating stage
+  depends_on = [aws_api_gateway_account.api_gateway_account]
+
   tags = {
     Name        = "acme-api-prod"
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
+}
+
+# Enable execution logging for all methods
+resource "aws_api_gateway_method_settings" "main_stage_all_methods" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  stage_name  = aws_api_gateway_stage.main_stage.stage_name
+  method_path = "*/*"
+
+  settings {
+    metrics_enabled    = true
+    logging_level      = "INFO"
+    data_trace_enabled = true
+  }
+
+  depends_on = [aws_api_gateway_stage.main_stage]
 }
 
 # ===== LAMBDA IAM ROLE AND POLICIES =====
@@ -3565,6 +3613,40 @@ resource "aws_iam_role_policy_attachment" "lambda_ddb_attachment" {
 resource "aws_iam_role_policy_attachment" "lambda_kms_attachment" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
+}
+
+# ===== API GATEWAY CLOUDWATCH LOGGING =====
+
+# IAM Role for API Gateway CloudWatch Logs
+resource "aws_iam_role" "api_gateway_cloudwatch_role" {
+  name = "api-gateway-cloudwatch-logs-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "apigateway.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = {
+    Name        = "api-gateway-cloudwatch-logs-role"
+    Environment = "dev"
+    Project     = "CS_450_Phase_2"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch_logs" {
+  role       = aws_iam_role.api_gateway_cloudwatch_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+}
+
+# Grant API Gateway permission to write logs
+resource "aws_api_gateway_account" "api_gateway_account" {
+  cloudwatch_role_arn = aws_iam_role.api_gateway_cloudwatch_role.arn
 }
 
 # ===== OUTPUTS =====
