@@ -3423,6 +3423,9 @@ resource "aws_api_gateway_stage" "main_stage" {
 
   xray_tracing_enabled = true
 
+  # Ensure account-level CloudWatch settings are applied before creating stage
+  depends_on = [aws_api_gateway_account.api_gateway_account]
+
   tags = {
     Name        = "acme-api-prod"
     Environment = "dev"
