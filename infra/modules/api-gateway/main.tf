@@ -3421,15 +3421,6 @@ resource "aws_api_gateway_stage" "main_stage" {
     })
   }
 
-  # Enable execution logging for all methods
-  method_settings {
-    resource_path     = "/*/*"
-    http_method       = "*"
-    metrics_enabled   = true
-    logging_level     = "INFO"
-    data_trace_enabled = true
-  }
-
   xray_tracing_enabled = true
 
   tags = {
@@ -3437,6 +3428,21 @@ resource "aws_api_gateway_stage" "main_stage" {
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
+}
+
+# Enable execution logging for all methods
+resource "aws_api_gateway_method_settings" "main_stage_all_methods" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  stage_name  = aws_api_gateway_stage.main_stage.stage_name
+  method_path = "*/*"
+
+  settings {
+    metrics_enabled    = true
+    logging_level      = "INFO"
+    data_trace_enabled = true
+  }
+
+  depends_on = [aws_api_gateway_stage.main_stage]
 }
 
 # ===== LAMBDA IAM ROLE AND POLICIES =====
