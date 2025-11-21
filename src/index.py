@@ -72,18 +72,15 @@ from .services.license_compatibility import (
 # Configure CloudWatch logging
 def setup_cloudwatch_logging():
     """Configure CloudWatch Logs handler using watchtower"""
-    if watchtower is None:
-        logging.warning("watchtower not available. CloudWatch logging disabled. Using standard logging.")
-        return
-        
     aws_region = os.getenv("AWS_REGION", "us-east-1")
     log_group = os.getenv("CLOUDWATCH_LOG_GROUP", "/acme-api/application-logs")
     
     # Only add CloudWatch handler if AWS is available (in production)
     try:
-        # Test if AWS credentials are available
+        # Test if AWS credentials are available by checking STS (simpler than logs API)
         import boto3
-        boto3.client("logs", region_name=aws_region).describe_log_groups(maxResults=1)
+        sts = boto3.client("sts", region_name=aws_region)
+        sts.get_caller_identity()  # Simple test that AWS credentials work
         
         # Add CloudWatch handler to root logger
         root_logger = logging.getLogger()
