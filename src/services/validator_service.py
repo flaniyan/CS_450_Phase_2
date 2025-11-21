@@ -10,6 +10,13 @@ from datetime import datetime, timezone
 from multiprocessing import get_context
 from multiprocessing.queues import Queue
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
 s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
@@ -318,5 +325,10 @@ async def get_user_history(user_id: str, limit: int = 50):
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", "3001"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.getenv("PORT", "3000"))
+    logger.info(f"Starting validator service on port {port}")
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    except Exception as e:
+        logger.error(f"Failed to start validator service: {e}", exc_info=True)
+        raise
