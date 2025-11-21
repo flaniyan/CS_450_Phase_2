@@ -3421,6 +3421,15 @@ resource "aws_api_gateway_stage" "main_stage" {
     })
   }
 
+  # Enable execution logging for all methods
+  method_settings {
+    resource_path     = "/*/*"
+    http_method       = "*"
+    metrics_enabled   = true
+    logging_level     = "INFO"
+    data_trace_enabled = true
+  }
+
   xray_tracing_enabled = true
 
   tags = {
