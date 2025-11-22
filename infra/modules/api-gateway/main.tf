@@ -3389,14 +3389,36 @@ resource "aws_api_gateway_deployment" "main_deployment" {
 
 # CloudWatch Log Group for API Gateway
 resource "aws_cloudwatch_log_group" "api_gateway_logs" {
-  name              = "/aws/apigateway/acme-api"
-  retention_in_days = 7
+  name              = "/aws/apigateway/${aws_api_gateway_rest_api.main_api.id}/prod"
+  retention_in_days = 14
 
   tags = {
     Name        = "acme-api-gateway-logs"
     Environment = "dev"
     Project     = "CS_450_Phase_2"
   }
+}
+
+# CloudWatch Log Resource Policy - REQUIRED for API Gateway to write logs
+resource "aws_cloudwatch_log_resource_policy" "apigw_to_logs" {
+  policy_name = "APIGatewayLogsPolicy"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "apigateway.amazonaws.com"
+        }
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # API Gateway Stage
@@ -3639,9 +3661,27 @@ resource "aws_iam_role" "api_gateway_cloudwatch_role" {
   }
 }
 
-resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch_logs" {
-  role       = aws_iam_role.api_gateway_cloudwatch_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+resource "aws_iam_role_policy" "api_gateway_cloudwatch_logs_policy" {
+  role = aws_iam_role.api_gateway_cloudwatch_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:PutLogEvents",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # Grant API Gateway permission to write logs
