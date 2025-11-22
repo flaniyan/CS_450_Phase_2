@@ -1775,6 +1775,262 @@ resource "aws_api_gateway_integration" "artifact_type_id_get" {
   }
 }
 
+# PUT /artifact/{artifact_type}/{id} (singular - also supported by backend)
+resource "aws_api_gateway_method" "artifact_type_id_put" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_resource.artifact_type_id.id
+  http_method   = "PUT"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.artifact_type"     = true
+    "method.request.path.id"                = true
+    "method.request.header.X-Authorization" = true
+  }
+}
+
+resource "aws_api_gateway_integration" "artifact_type_id_put" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_put.http_method
+
+  integration_http_method = "PUT"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/artifact/{artifact_type}/{id}"
+
+  request_parameters = {
+    "integration.request.path.artifact_type"     = "method.request.path.artifact_type"
+    "integration.request.path.id"                = "method.request.path.id"
+    "integration.request.header.X-Authorization" = "method.request.header.X-Authorization"
+  }
+}
+
+# Method responses for PUT /artifact/{artifact_type}/{id}
+resource "aws_api_gateway_method_response" "artifact_type_id_put_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_put_400" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code = "400"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_put_403" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code = "403"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_put_404" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code = "404"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# Integration responses for PUT /artifact/{artifact_type}/{id}
+resource "aws_api_gateway_integration_response" "artifact_type_id_put_200" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_put_200.status_code
+  selection_pattern = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_put,
+    aws_api_gateway_method_response.artifact_type_id_put_200,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_put_400" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_put_400.status_code
+  selection_pattern = "400"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_put,
+    aws_api_gateway_method_response.artifact_type_id_put_400,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_put_403" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_put_403.status_code
+  selection_pattern = "403"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_put,
+    aws_api_gateway_method_response.artifact_type_id_put_403,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_put_404" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_put.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_put_404.status_code
+  selection_pattern = "404"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_put,
+    aws_api_gateway_method_response.artifact_type_id_put_404,
+  ]
+}
+
+# DELETE /artifact/{artifact_type}/{id} (singular - also supported by backend)
+resource "aws_api_gateway_method" "artifact_type_id_delete" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_resource.artifact_type_id.id
+  http_method   = "DELETE"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.artifact_type"     = true
+    "method.request.path.id"                = true
+    "method.request.header.X-Authorization" = true
+  }
+}
+
+resource "aws_api_gateway_integration" "artifact_type_id_delete" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_delete.http_method
+
+  integration_http_method = "DELETE"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/artifact/{artifact_type}/{id}"
+
+  request_parameters = {
+    "integration.request.path.artifact_type"     = "method.request.path.artifact_type"
+    "integration.request.path.id"                = "method.request.path.id"
+    "integration.request.header.X-Authorization" = "method.request.header.X-Authorization"
+  }
+}
+
+# Method responses for DELETE /artifact/{artifact_type}/{id}
+resource "aws_api_gateway_method_response" "artifact_type_id_delete_200" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_delete_400" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code = "400"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_delete_403" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code = "403"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "artifact_type_id_delete_404" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type_id.id
+  http_method = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code = "404"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# Integration responses for DELETE /artifact/{artifact_type}/{id}
+resource "aws_api_gateway_integration_response" "artifact_type_id_delete_200" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_delete_200.status_code
+  selection_pattern = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_delete,
+    aws_api_gateway_method_response.artifact_type_id_delete_200,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_delete_400" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_delete_400.status_code
+  selection_pattern = "400"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_delete,
+    aws_api_gateway_method_response.artifact_type_id_delete_400,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_delete_403" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_delete_403.status_code
+  selection_pattern = "403"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_delete,
+    aws_api_gateway_method_response.artifact_type_id_delete_403,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_id_delete_404" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type_id.id
+  http_method       = aws_api_gateway_method.artifact_type_id_delete.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_id_delete_404.status_code
+  selection_pattern = "404"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_id_delete,
+    aws_api_gateway_method_response.artifact_type_id_delete_404,
+  ]
+}
+
 # GET /artifact/{artifact_type}/{id}/cost
 resource "aws_api_gateway_method" "artifact_type_id_cost_get" {
   rest_api_id   = aws_api_gateway_rest_api.main_api.id
@@ -3326,6 +3582,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_method.artifacts_type_id_put.id,
       aws_api_gateway_method.artifacts_type_id_delete.id,
       aws_api_gateway_method.artifact_type_id_get.id,
+      aws_api_gateway_method.artifact_type_id_put.id,
+      aws_api_gateway_method.artifact_type_id_delete.id,
       aws_api_gateway_method.artifact_type_id_cost_get.id,
       aws_api_gateway_method.artifact_type_id_audit_get.id,
       aws_api_gateway_method.artifact_model_id_rate_get.id,
