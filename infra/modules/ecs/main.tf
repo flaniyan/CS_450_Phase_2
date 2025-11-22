@@ -383,18 +383,63 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem"
         ]
         Resource = values(var.ddb_tables_arnmap)
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [var.kms_key_arn]
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = [
+          "arn:aws:logs:*:*:log-group:/acme-api/*",
+          "arn:aws:logs:*:*:log-group:/ecs/validator-service"
+        ]
       }
     ]
   })
 }
 
-# CloudWatch Log Group
+# CloudWatch Log Group for ECS container logs
 resource "aws_cloudwatch_log_group" "validator_logs" {
   name              = "/ecs/validator-service"
   retention_in_days = 7
+}
+
+# CloudWatch Log Group for application API logs
+resource "aws_cloudwatch_log_group" "application_api_logs" {
+  name              = "/acme-api/application-logs"
+  retention_in_days = 7
+
+  tags = {
+    Name        = "acme-api-application-logs"
+    Environment = "dev"
+    Project     = "CS_450_Phase_2"
+  }
 }
 
 # Outputs
