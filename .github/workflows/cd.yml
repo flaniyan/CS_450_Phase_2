@@ -271,13 +271,31 @@ jobs:
           remove_from_state "module.monitoring.aws_s3_bucket.cloudtrail_logs"
           remove_from_state "module.monitoring.aws_s3_bucket_policy.cloudtrail_logs"
           
-          # Remove S3 bucket from state (it's used as Terraform backend, so shouldn't be managed by Terraform)
-          echo "Removing S3 backend bucket from state (bucket is used as Terraform backend)..."
-          remove_from_state "module.s3.aws_s3_bucket.artifacts"
-          remove_from_state "module.s3.aws_s3_bucket_server_side_encryption_configuration.this"
-          remove_from_state "module.s3.aws_s3_bucket_versioning.this"
-          
           echo "Cleanup complete"
+
+      - name: Import S3 bucket if not in state
+        shell: bash
+        working-directory: ${{ env.TF_DIR }}
+        continue-on-error: true
+        env:
+          TF_VAR_aws_region: us-east-1
+          TF_VAR_artifacts_bucket: pkg-artifacts
+        run: |
+          # Import S3 bucket if it exists but is not in state
+          if ! terraform state show module.s3.aws_s3_bucket.artifacts >/dev/null 2>&1; then
+            echo "S3 bucket not in state, importing..."
+            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_bucket.artifacts pkg-artifacts || echo "Failed to import bucket (may not exist)"
+          else
+            echo "S3 bucket already in state, skipping import"
+          fi
+          
+          # Import encryption configuration if not in state
+          if ! terraform state show module.s3.aws_s3_bucket_server_side_encryption_configuration.this >/dev/null 2>&1; then
+            echo "S3 encryption configuration not in state, importing..."
+            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_bucket_server_side_encryption_configuration.this pkg-artifacts || echo "Failed to import encryption config"
+          else
+            echo "S3 encryption configuration already in state, skipping import"
+          fi
 
       - name: Terraform plan
         shell: bash
