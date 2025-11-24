@@ -15,6 +15,17 @@ locals {
         }
       }
     }
+    performance_metrics = {
+      hash_key = "run_id"
+      range_key = "metric_id"
+      gsi = {
+        "run-timestamp-index" = {
+          hash_key        = "run_id"
+          range_key       = "timestamp"
+          projection_type = "ALL"
+        }
+      }
+    }
   }
 }
 
@@ -23,6 +34,7 @@ resource "aws_dynamodb_table" "this" {
   name         = each.key
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
+  range_key    = try(each.value.range_key, null)
 
   # Prevent accidental deletion of existing tables
   lifecycle {
@@ -36,8 +48,17 @@ resource "aws_dynamodb_table" "this" {
     name = each.value.hash_key
     type = "S"
   }
+  
+  # Add range key attribute if it exists
+  dynamic "attribute" {
+    for_each = try(each.value.range_key != null, false) ? [1] : []
+    content {
+      name = try(each.value.range_key, null)
+      type = "S"
+    }
+  }
 
-  # Add GSI attributes if they exist
+  # Add GSI attributes if they exist (avoid duplicates)
   dynamic "attribute" {
     for_each = try(each.value.gsi, {})
     content {

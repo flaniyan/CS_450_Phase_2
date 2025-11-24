@@ -15,18 +15,39 @@ resource "aws_s3_access_point" "main" {
   name   = "cs450-s3"
   bucket = aws_s3_bucket.artifacts.id
 
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          AWS = aws_iam_role.ecs_task_role.arn
+        },
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+          "s3:AbortMultipartUpload",
+          "s3:CreateMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:CompleteMultipartUpload"
+        ],
+        Resource = [
+          "${aws_s3_access_point.main.arn}",
+          "${aws_s3_access_point.main.arn}/*"
+        ]
+      }
+    ]
+  })
+
   public_access_block_configuration {
     block_public_acls       = true
     block_public_policy     = true
     ignore_public_acls      = true
-    restrict_public_buckets  = true
-  }
-
-  lifecycle {
-    # Prevent destruction of access point if bucket is being destroyed
-    prevent_destroy = false
+    restrict_public_buckets = true
   }
 }
+
 
 output "artifacts_bucket" { value = aws_s3_bucket.artifacts.id }
 output "access_point_arn" { 

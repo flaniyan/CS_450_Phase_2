@@ -444,6 +444,18 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "arn:aws:logs:*:*:log-group:/acme-api/*",
           "arn:aws:logs:*:*:log-group:/ecs/validator-service"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "ACME/Performance"
+          }
+        }
       }
     ]
   })

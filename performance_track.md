@@ -310,6 +310,10 @@ This document outlines the plan for implementing performance measurement capabil
 
 ### Phase 6: Testing Requirements
 
+##
+THERE NEEDS TO BE A NUKING OF ALL DATA CREATED DURING RESET ENDPOINT
+##
+
 #### 6.1 Phase 1: Workload Setup Testing
 
 **Test Suite**: `tests/integration/test_performance_workload_setup.py`

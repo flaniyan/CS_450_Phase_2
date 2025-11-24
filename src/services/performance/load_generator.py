@@ -221,6 +221,22 @@ class LoadGenerator:
             f"duration={total_duration:.2f}s, "
             f"total_requests={len(self.metrics)}"
         )
+        
+        # Store metrics in DynamoDB and publish to CloudWatch
+        try:
+            from .metrics_storage import store_and_publish_metrics
+            metrics_dict = self.get_metrics()
+            storage_result = store_and_publish_metrics(
+                run_id=self.run_id,
+                metrics=metrics_dict,
+                total_duration_seconds=total_duration
+            )
+            logger.info(
+                f"Metrics storage completed: DynamoDB={storage_result['dynamodb_stored']}, "
+                f"CloudWatch={storage_result['cloudwatch_published']}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to store/publish metrics: {str(e)}", exc_info=True)
     
     def get_metrics(self) -> List[Dict[str, Any]]:
         """
@@ -231,9 +247,34 @@ class LoadGenerator:
         """
         return [metric.to_dict() for metric in self.metrics]
     
+    def _calculate_percentile(self, sorted_values: List[float], percentile: float) -> float:
+        """
+        Calculate percentile from sorted list of values.
+        
+        Args:
+            sorted_values: Sorted list of numeric values
+            percentile: Percentile to calculate (0-100)
+            
+        Returns:
+            Percentile value
+        """
+        if not sorted_values:
+            return 0.0
+        
+        k = (len(sorted_values) - 1) * (percentile / 100.0)
+        floor = int(k)
+        ceil = floor + 1
+        
+        if ceil >= len(sorted_values):
+            return sorted_values[-1]
+        
+        weight = k - floor
+        return sorted_values[floor] * (1 - weight) + sorted_values[ceil] * weight
+    
     def get_summary(self) -> Dict[str, Any]:
         """
         Get summary statistics from collected metrics.
+        Calculates mean, median, and 99th percentile latency, plus throughput.
         
         Returns:
             Dictionary with summary statistics
@@ -244,14 +285,30 @@ class LoadGenerator:
                 "total_duration_seconds": 0,
                 "successful_requests": 0,
                 "failed_requests": 0,
+                "mean_latency_ms": 0,
+                "median_latency_ms": 0,
+                "p99_latency_ms": 0,
+                "throughput_bps": 0,
             }
         
         successful = [m for m in self.metrics if m.status_code == 200]
         failed = [m for m in self.metrics if m.status_code != 200]
         
         latencies = [m.request_latency_ms for m in self.metrics]
-        total_bytes = sum(m.bytes_transferred for m in self.metrics)
+        successful_latencies = [m.request_latency_ms for m in successful]
+        total_bytes = sum(m.bytes_transferred for m in successful)
         total_duration = (self.end_time - self.start_time) if self.end_time and self.start_time else 0
+        
+        # Calculate percentiles
+        sorted_latencies = sorted(latencies) if latencies else []
+        sorted_successful_latencies = sorted(successful_latencies) if successful_latencies else []
+        
+        mean_latency = sum(latencies) / len(latencies) if latencies else 0
+        median_latency = self._calculate_percentile(sorted_latencies, 50.0)
+        p99_latency = self._calculate_percentile(sorted_latencies, 99.0)
+        
+        # Calculate throughput (bytes per second)
+        throughput_bps = total_bytes / total_duration if total_duration > 0 else 0
         
         return {
             "total_requests": len(self.metrics),
@@ -259,9 +316,12 @@ class LoadGenerator:
             "successful_requests": len(successful),
             "failed_requests": len(failed),
             "total_bytes_transferred": total_bytes,
-            "average_latency_ms": sum(latencies) / len(latencies) if latencies else 0,
+            "mean_latency_ms": mean_latency,
+            "median_latency_ms": median_latency,
+            "p99_latency_ms": p99_latency,
             "min_latency_ms": min(latencies) if latencies else 0,
             "max_latency_ms": max(latencies) if latencies else 0,
+            "throughput_bps": throughput_bps,
         }
 
 
