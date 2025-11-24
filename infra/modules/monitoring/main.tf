@@ -191,6 +191,11 @@ output "kms_key_arn" {
   value = aws_kms_key.main_key.arn
 }
 
+output "kms_key_id" {
+  value = aws_kms_key.main_key.key_id
+  description = "The globally unique identifier for the KMS key"
+}
+
 output "kms_key_alias" {
   value = aws_kms_alias.main_key_alias.name
 }

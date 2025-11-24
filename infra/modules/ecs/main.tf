@@ -413,6 +413,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         Resource = values(var.ddb_tables_arnmap)
       },
       {
+        Sid    = "KMSViaS3Service"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -421,12 +422,30 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey"
         ]
-        Resource = [var.kms_key_arn]
+        Resource = [
+          var.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
         Condition = {
           StringEquals = {
             "kms:ViaService" = "s3.us-east-1.amazonaws.com"
           }
         }
+      },
+      {
+        Sid    = "KMSDirectAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [
+          var.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
       },
       {
         Effect = "Allow"

@@ -110,22 +110,43 @@ resource "aws_iam_policy" "api_kms_s3_managed" {
   name = "api-kms-s3-dev"
   policy = jsonencode({
     Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Action = [
-        "kms:Encrypt",
-        "kms:Decrypt",
-        "kms:ReEncrypt*",
-        "kms:GenerateDataKey*",
-        "kms:DescribeKey"
-      ],
-      Resource = module.monitoring.kms_key_arn,
-      Condition = {
-        StringEquals = {
-          "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+    Statement = [
+      {
+        Sid    = "KMSViaS3Service"
+        Effect = "Allow",
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = [
+          module.monitoring.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ],
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+          }
         }
+      },
+      {
+        Sid    = "KMSDirectAccess"
+        Effect = "Allow",
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = [
+          module.monitoring.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
       }
-    }]
+    ]
   })
 }
 
