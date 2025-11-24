@@ -36,14 +36,13 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     resources = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
   }
 
-  # List bucket through access point
+  # List bucket (must use bucket ARN, not access point ARN)
   statement {
     sid     = "ListAccessPoint"
     effect  = "Allow"
     actions = ["s3:ListBucket"]
     resources = [
-      "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
-      "arn:aws:s3:::pkg-artifacts"
+      "arn:aws:s3:::pkg-artifacts-team"
     ]
   }
 
@@ -52,7 +51,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     sid       = "ListPackagesPrefix"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::pkg-artifacts"]
+    resources = ["arn:aws:s3:::pkg-artifacts-team"]
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
@@ -78,8 +77,8 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     ]
     resources = [
       "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*",
-      "arn:aws:s3:::pkg-artifacts/models/*",
-      "arn:aws:s3:::pkg-artifacts/packages/*"
+      "arn:aws:s3:::pkg-artifacts-team/models/*",
+      "arn:aws:s3:::pkg-artifacts-team/packages/*"
     ]
   }
 
@@ -92,7 +91,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
       "s3:PutObject", "s3:PutObjectTagging",
       "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:DeleteObject"
     ]
-    resources = ["arn:aws:s3:::pkg-artifacts/packages/*"]
+    resources = ["arn:aws:s3:::pkg-artifacts-team/packages/*"]
     condition {
       test     = "StringEquals"
       variable = "s3:x-amz-server-side-encryption"
