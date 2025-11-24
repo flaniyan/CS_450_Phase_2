@@ -3739,6 +3739,14 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration_response.artifact_type_options_200,
     aws_api_gateway_integration_response.authenticate_options_200,
     aws_api_gateway_integration_response.artifact_byregex_options_200,
+    aws_api_gateway_integration.health_performance_workload_post,
+    aws_api_gateway_integration.health_performance_results_run_id_get,
+    aws_api_gateway_integration_response.health_performance_workload_post_202,
+    aws_api_gateway_integration_response.health_performance_workload_post_400,
+    aws_api_gateway_integration_response.health_performance_workload_post_500,
+    aws_api_gateway_integration_response.health_performance_results_run_id_get_200,
+    aws_api_gateway_integration_response.health_performance_results_run_id_get_404,
+    aws_api_gateway_integration_response.health_performance_results_run_id_get_500,
   ]
 
   triggers = {
@@ -3747,6 +3755,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       # Resources
       aws_api_gateway_resource.health.id,
       aws_api_gateway_resource.health_components.id,
+      aws_api_gateway_resource.health_performance.id,
+      aws_api_gateway_resource.health_performance_workload.id,
+      aws_api_gateway_resource.health_performance_results.id,
+      aws_api_gateway_resource.health_performance_results_run_id.id,
       aws_api_gateway_resource.artifacts.id,
       aws_api_gateway_resource.artifacts_type.id,
       aws_api_gateway_resource.artifacts_type_id.id,
@@ -3779,6 +3791,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       # Methods
       aws_api_gateway_method.health_get.id,
       aws_api_gateway_method.health_components_get.id,
+      aws_api_gateway_method.health_performance_workload_post.id,
+      aws_api_gateway_method.health_performance_results_run_id_get.id,
       aws_api_gateway_method.artifact_get.id,
       aws_api_gateway_method.artifacts_post.id,
       aws_api_gateway_method.reset_delete.id,
@@ -3853,6 +3867,8 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_integration.artifact_directory_get.id,
       aws_api_gateway_integration.artifact_byname_name_get.id,
       aws_api_gateway_integration.artifact_byregex_post.id,
+      aws_api_gateway_integration.health_performance_workload_post.id,
+      aws_api_gateway_integration.health_performance_results_run_id_get.id,
     ]))
   }
 
