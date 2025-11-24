@@ -23,7 +23,7 @@ resource "aws_s3_access_point" "main" {
 
   public_access_block_configuration {
     block_public_acls       = true
-    block_public_policy     = false   # MUST be false so policy can attach
+    block_public_policy     = false # MUST be false so policy can attach
     ignore_public_acls      = true
     restrict_public_buckets = true
   }

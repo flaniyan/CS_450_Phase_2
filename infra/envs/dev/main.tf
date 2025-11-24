@@ -33,10 +33,10 @@ locals {
   }
 }
 
- module "s3" {
-   source         = "../../modules/s3"
-   artifacts_name = var.artifacts_bucket
- }
+module "s3" {
+  source         = "../../modules/s3"
+  artifacts_name = var.artifacts_bucket
+}
 
 module "ddb" {
   source = "../../modules/dynamodb"

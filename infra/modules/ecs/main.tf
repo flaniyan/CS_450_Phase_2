@@ -375,7 +375,6 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:ListBucket",
           "s3:PutObject",
           "s3:DeleteObject",
           "s3:GetObjectTagging",
@@ -387,9 +386,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "s3:UploadPart"
         ]
         Resource = [
-          "arn:aws:s3:::${var.artifacts_bucket}",
           "arn:aws:s3:::${var.artifacts_bucket}/*",
-          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
           "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*"
         ]
       },
