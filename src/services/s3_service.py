@@ -478,12 +478,20 @@ def reset_registry() -> Dict[str, str]:
             detail="AWS services not available. Please check your AWS configuration.",
         )
     try:
-        response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
-        if "Contents" in response:
-            deleted_count = 0
-            for item in response["Contents"]:
-                s3.delete_object(Bucket=ap_arn, Key=item["Key"])
-                deleted_count += 1
+        deleted_count = 0
+        
+        # Use paginator to handle all objects, not just first 1000
+        # This ensures we delete ALL model files regardless of count
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=ap_arn, Prefix="models/")
+        
+        for page in pages:
+            if "Contents" in page:
+                for item in page["Contents"]:
+                    s3.delete_object(Bucket=ap_arn, Key=item["Key"])
+                    deleted_count += 1
+        
+        if deleted_count > 0:
             print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
         else:
             print("AWS S3 reset successful: No objects found to delete")
