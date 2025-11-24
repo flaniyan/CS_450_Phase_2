@@ -11,6 +11,7 @@ import logging
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, status
 import watchtower
@@ -174,9 +175,39 @@ app.add_middleware(
 )
 
 
+# Thread-safe counter for concurrent requests
+import threading
+_concurrent_requests = 0
+_concurrent_requests_lock = threading.Lock()
+
+
 # Register custom middleware as BaseHTTPMiddleware to ensure it ALWAYS runs
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Generate or extract correlation ID for request tracing
+        correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+        
+        # Add correlation ID to request state for use in handlers
+        request.state.correlation_id = correlation_id
+        
+        # Track concurrent requests
+        global _concurrent_requests
+        with _concurrent_requests_lock:
+            _concurrent_requests += 1
+            current_concurrent = _concurrent_requests
+        
+        # Publish concurrent requests gauge metric
+        try:
+            from .services.performance.instrumentation import publish_metric
+            publish_metric(
+                "ConcurrentRequests",
+                value=float(current_concurrent),
+                unit="Count",
+                dimensions={"Component": "ECS"}
+            )
+        except Exception as e:
+            logger.debug(f"Failed to publish concurrent requests metric: {str(e)}")
+        
         # Capture request start time for duration calculation
         start_time = time.time()
         
@@ -193,6 +224,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         # Prepare structured log data
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "correlation_id": correlation_id,
             "method": request.method,
             "path": request.url.path,
             "query_params": str(request.query_params) if request.query_params else None,
@@ -200,6 +232,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             "user_agent": user_agent,
             "status_code": None,  # Will be set after response
             "duration_ms": None,  # Will be calculated after response
+            "concurrent_requests": current_concurrent,
         }
         
         # Log request start
@@ -211,6 +244,21 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             
             # Calculate duration
             duration_ms = round((time.time() - start_time) * 1000, 2)
+            
+            # Publish request processing time metric to CloudWatch
+            try:
+                from .services.performance.instrumentation import publish_metric
+                publish_metric(
+                    "RequestProcessingTime",
+                    value=duration_ms,
+                    unit="Milliseconds",
+                    dimensions={"Component": "ECS", "Path": request.url.path}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to publish request processing time metric: {str(e)}")
+            
+            # Add correlation ID to response headers
+            response.headers["X-Correlation-ID"] = correlation_id
             
             # Update log data with response info
             log_data.update({
@@ -227,6 +275,18 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             # Calculate duration even on error
             duration_ms = round((time.time() - start_time) * 1000, 2)
             
+            # Publish request processing time metric even on error
+            try:
+                from .services.performance.instrumentation import publish_metric
+                publish_metric(
+                    "RequestProcessingTime",
+                    value=duration_ms,
+                    unit="Milliseconds",
+                    dimensions={"Component": "ECS", "Path": request.url.path, "Error": "true"}
+                )
+            except Exception:
+                pass
+            
             # Update log data with error info
             log_data.update({
                 "status_code": 500,
@@ -238,6 +298,10 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             # Log error with structured data
             logger.error(f"API Error: {json.dumps(log_data)}", exc_info=True)
             raise
+        finally:
+            # Decrement concurrent requests counter
+            with _concurrent_requests_lock:
+                _concurrent_requests -= 1
 
 
 # Register middleware using BaseHTTPMiddleware to ensure it always runs
@@ -480,6 +544,104 @@ def verify_auth_token(request: Request) -> bool:
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/health/performance/workload")
+async def trigger_performance_workload(request: Request):
+    """
+    Trigger a performance workload run.
+    Accepts parameters to configure the workload and returns a run_id for tracking.
+    """
+    try:
+        body = await request.json()
+        
+        # Extract parameters with defaults
+        num_clients = body.get("num_clients", 100)
+        model_id = body.get("model_id", "arnir0/Tiny-LLM")
+        artifact_id = body.get("artifact_id")
+        duration_seconds = body.get("duration_seconds", 300)
+        
+        # Validate parameters
+        if not isinstance(num_clients, int) or num_clients < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="num_clients must be a positive integer"
+            )
+        if not isinstance(model_id, str) or not model_id:
+            raise HTTPException(
+                status_code=400,
+                detail="model_id must be a non-empty string"
+            )
+        if duration_seconds is not None and (not isinstance(duration_seconds, int) or duration_seconds < 1):
+            raise HTTPException(
+                status_code=400,
+                detail="duration_seconds must be a positive integer"
+            )
+        
+        # Import and trigger workload
+        from .services.performance.workload_trigger import trigger_workload
+        
+        # Use API Gateway URL as the base URL for load generation
+        # This is where clients will actually make requests
+        # Can be overridden via environment variable
+        base_url = os.getenv("API_BASE_URL", "https://pc1plkgnbd.execute-api.us-east-1.amazonaws.com/prod")
+        
+        result = trigger_workload(
+            num_clients=num_clients,
+            model_id=model_id,
+            artifact_id=artifact_id,
+            duration_seconds=duration_seconds,
+            base_url=base_url
+        )
+        
+        return JSONResponse(
+            status_code=202,  # Accepted
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering performance workload: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger performance workload: {str(e)}"
+        )
+
+
+@app.get("/health/performance/results/{run_id}")
+def get_performance_results(run_id: str):
+    """
+    Get aggregated performance results for a workload run.
+    Queries DynamoDB for raw metrics and calculates statistics.
+    """
+    try:
+        from .services.performance.results_retrieval import get_performance_results
+        from .services.performance.workload_trigger import get_workload_status
+        
+        # Get workload status from in-memory store
+        workload_status = get_workload_status(run_id)
+        
+        # Get aggregated results
+        result = get_performance_results(run_id, workload_status)
+        
+        # If run not found and no metrics in DynamoDB, return 404
+        if result.get("status") == "not_found" and result["metrics"]["total_requests"] == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Performance run with run_id {run_id} not found"
+            )
+        
+        return JSONResponse(status_code=200, content=result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving performance results for run_id={run_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve performance results: {str(e)}"
+        )
 
 
 @app.get("/health/components")

@@ -23,19 +23,20 @@ provider "aws" {
 locals {
   artifacts_bucket = "pkg-artifacts"
   ddb_tables_arnmap = {
-    users     = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/users"
-    tokens    = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/tokens"
-    packages  = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/packages"
-    uploads   = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/uploads"
-    downloads = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/downloads"
-    artifacts = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/artifacts"
+    users               = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/users"
+    tokens              = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/tokens"
+    packages            = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/packages"
+    uploads             = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/uploads"
+    downloads           = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/downloads"
+    artifacts           = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/artifacts"
+    performance_metrics = "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/performance_metrics"
   }
 }
 
-# module "s3" {
-#   source         = "../../modules/s3"
-#   artifacts_name = var.artifacts_bucket
-# }
+module "s3" {
+  source         = "../../modules/s3"
+  artifacts_name = var.artifacts_bucket
+}
 
 module "ddb" {
   source = "../../modules/dynamodb"

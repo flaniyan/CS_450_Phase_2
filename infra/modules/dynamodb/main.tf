@@ -1,15 +1,26 @@
 locals {
   tables = {
-    users    = { hash_key = "user_id" }
-    tokens   = { hash_key = "token_id", ttl_attr = "exp_ts" }
-    packages = { hash_key = "pkg_key" }
-    uploads  = { hash_key = "upload_id" }
+    users     = { hash_key = "user_id" }
+    tokens    = { hash_key = "token_id", ttl_attr = "exp_ts" }
+    packages  = { hash_key = "pkg_key" }
+    uploads   = { hash_key = "upload_id" }
     artifacts = { hash_key = "artifact_id" }
     downloads = {
       hash_key = "event_id"
       gsi = {
         "user-timestamp-index" = {
           hash_key        = "user_id"
+          range_key       = "timestamp"
+          projection_type = "ALL"
+        }
+      }
+    }
+    performance_metrics = {
+      hash_key  = "run_id"
+      range_key = "metric_id"
+      gsi = {
+        "run-timestamp-index" = {
+          hash_key        = "run_id"
           range_key       = "timestamp"
           projection_type = "ALL"
         }
@@ -23,6 +34,7 @@ resource "aws_dynamodb_table" "this" {
   name         = each.key
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = each.value.hash_key
+  range_key    = try(each.value.range_key, null)
 
   # Prevent accidental deletion of existing tables
   lifecycle {
@@ -37,7 +49,16 @@ resource "aws_dynamodb_table" "this" {
     type = "S"
   }
 
-  # Add GSI attributes if they exist
+  # Add range key attribute if it exists
+  dynamic "attribute" {
+    for_each = try(each.value.range_key != null, false) ? [1] : []
+    content {
+      name = try(each.value.range_key, null)
+      type = "S"
+    }
+  }
+
+  # Add GSI attributes if they exist (avoid duplicates)
   dynamic "attribute" {
     for_each = try(each.value.gsi, {})
     content {

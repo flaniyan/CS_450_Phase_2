@@ -297,10 +297,27 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             status_code=503,
             detail="AWS services not available. Please check your AWS configuration.",
         )
+    
+    # Import instrumentation here to avoid circular imports
+    from .performance.instrumentation import measure_operation, publish_metric
+    
     try:
         s3_key = f"models/{model_id}/{version}/model.zip"
-        response = s3.get_object(Bucket=ap_arn, Key=s3_key)
-        zip_content = response["Body"].read()
+        
+        # Measure S3 download latency
+        with measure_operation("S3DownloadLatency", {"Component": "S3"}):
+            response = s3.get_object(Bucket=ap_arn, Key=s3_key)
+            zip_content = response["Body"].read()
+        
+        # Publish bytes transferred metric
+        bytes_transferred = len(zip_content)
+        publish_metric(
+            "S3DownloadBytes",
+            value=float(bytes_transferred),
+            unit="Bytes",
+            dimensions={"Component": "S3"}
+        )
+        
         if component != "full":
             try:
                 result = extract_model_component(zip_content, component)
@@ -461,12 +478,20 @@ def reset_registry() -> Dict[str, str]:
             detail="AWS services not available. Please check your AWS configuration.",
         )
     try:
-        response = s3.list_objects_v2(Bucket=ap_arn, Prefix="models/")
-        if "Contents" in response:
-            deleted_count = 0
-            for item in response["Contents"]:
-                s3.delete_object(Bucket=ap_arn, Key=item["Key"])
-                deleted_count += 1
+        deleted_count = 0
+        
+        # Use paginator to handle all objects, not just first 1000
+        # This ensures we delete ALL model files regardless of count
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=ap_arn, Prefix="models/")
+        
+        for page in pages:
+            if "Contents" in page:
+                for item in page["Contents"]:
+                    s3.delete_object(Bucket=ap_arn, Key=item["Key"])
+                    deleted_count += 1
+        
+        if deleted_count > 0:
             print(f"AWS S3 reset successful: Deleted {deleted_count} objects")
         else:
             print("AWS S3 reset successful: No objects found to delete")

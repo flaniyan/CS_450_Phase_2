@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, performance_track]
   workflow_dispatch:
 
 permissions:

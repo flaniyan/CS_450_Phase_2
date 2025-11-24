@@ -1,0 +1,115 @@
+{
+  "timestamp": "2025-11-24T13:45:56.144204",
+  "phases": {
+    "Phase 1: Workload Setup": {
+      "phase": "Phase 1: Workload Setup",
+      "test_files": [
+        "tests/unit/test_performance_load_generator.py",
+        "tests/integration/test_performance_workload_setup.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.38194,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    },
+    "Phase 2: Measurement Infrastructure": {
+      "phase": "Phase 2: Measurement Infrastructure",
+      "test_files": [
+        "tests/unit/test_performance_statistics.py",
+        "tests/integration/test_performance_metrics.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.352021,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    },
+    "Phase 3: Bottleneck Identification": {
+      "phase": "Phase 3: Bottleneck Identification",
+      "test_files": [
+        "tests/integration/test_performance_bottlenecks.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.349081,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    },
+    "Phase 4: Optimizations": {
+      "phase": "Phase 4: Optimizations",
+      "test_files": [
+        "tests/integration/test_performance_optimizations.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.342283,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    },
+    "Phase 5: Component Comparison": {
+      "phase": "Phase 5: Component Comparison",
+      "test_files": [
+        "tests/integration/test_performance_component_comparison.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.382185,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    },
+    "End-to-End Tests": {
+      "phase": "End-to-End Tests",
+      "test_files": [
+        "tests/integration/test_performance_end_to_end.py"
+      ],
+      "total_tests": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "duration": 0.362243,
+      "success_rate": 0.0,
+      "returncode": 4,
+      "status": "no_tests",
+      "message": "No tests were collected"
+    }
+  },
+  "overall": {
+    "total_tests": 0,
+    "total_passed": 0,
+    "total_failed": 0,
+    "total_skipped": 0,
+    "success_rate": 0,
+    "total_duration": 2.169753,
+    "phases_completed": 6,
+    "phases_successful": 0,
+    "phases_partial": 0,
+    "phases_failed": 6
+  }
+}

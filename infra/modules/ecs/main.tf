@@ -37,7 +37,7 @@ resource "aws_ecs_task_definition" "validator_task" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = 1024
-  memory                   = 4096  # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
+  memory                   = 4096 # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
 
@@ -45,15 +45,15 @@ resource "aws_ecs_task_definition" "validator_task" {
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
 
-    memoryReservation = 3072  # Increased from 1536
-    memory             = 4096  # Increased from 2048 to handle memory-intensive operations
-    
+    memoryReservation = 3072 # Increased from 1536
+    memory            = 4096 # Increased from 2048 to handle memory-intensive operations
+
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
-    
+
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30
@@ -363,18 +363,39 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "S3AccessPointPermissions"
+        Effect = "Allow"
+        Action = [
+          "s3:GetAccessPoint",
+          "s3:ListAccessPoint"
+        ]
+        Resource = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
+      },
+      {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:ListBucket",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:GetObjectTagging",
+          "s3:PutObjectTagging",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:CreateMultipartUpload",
+          "s3:CompleteMultipartUpload",
+          "s3:UploadPart"
         ]
         Resource = [
-          "arn:aws:s3:::${var.artifacts_bucket}",
           "arn:aws:s3:::${var.artifacts_bucket}/*",
-          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
           "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*"
+        ]
+      },
+      {
+        Sid    = "S3ListBucketViaAccessPoint"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:::${var.artifacts_bucket}"
         ]
       },
       {
@@ -419,6 +440,18 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "arn:aws:logs:*:*:log-group:/acme-api/*",
           "arn:aws:logs:*:*:log-group:/ecs/validator-service"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "ACME/Performance"
+          }
+        }
       }
     ]
   })
