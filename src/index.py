@@ -482,6 +482,63 @@ def health():
     return {"ok": True}
 
 
+@app.post("/health/performance/workload")
+async def trigger_performance_workload(request: Request):
+    """
+    Trigger a performance workload run.
+    Accepts parameters to configure the workload and returns a run_id for tracking.
+    """
+    try:
+        body = await request.json()
+        
+        # Extract parameters with defaults
+        num_clients = body.get("num_clients", 100)
+        model_id = body.get("model_id", "arnir0/Tiny-LLM")
+        artifact_id = body.get("artifact_id")
+        duration_seconds = body.get("duration_seconds", 300)
+        
+        # Validate parameters
+        if not isinstance(num_clients, int) or num_clients < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="num_clients must be a positive integer"
+            )
+        if not isinstance(model_id, str) or not model_id:
+            raise HTTPException(
+                status_code=400,
+                detail="model_id must be a non-empty string"
+            )
+        if duration_seconds is not None and (not isinstance(duration_seconds, int) or duration_seconds < 1):
+            raise HTTPException(
+                status_code=400,
+                detail="duration_seconds must be a positive integer"
+            )
+        
+        # Import and trigger workload
+        from .services.performance.workload_trigger import trigger_workload
+        
+        result = trigger_workload(
+            num_clients=num_clients,
+            model_id=model_id,
+            artifact_id=artifact_id,
+            duration_seconds=duration_seconds
+        )
+        
+        return JSONResponse(
+            status_code=202,  # Accepted
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering performance workload: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger performance workload: {str(e)}"
+        )
+
+
 @app.get("/health/components")
 def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
     # Validate windowMinutes parameter

@@ -124,6 +124,18 @@ resource "aws_api_gateway_resource" "health_components" {
   path_part   = "components"
 }
 
+resource "aws_api_gateway_resource" "health_performance" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.health.id
+  path_part   = "performance"
+}
+
+resource "aws_api_gateway_resource" "health_performance_workload" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  parent_id   = aws_api_gateway_resource.health_performance.id
+  path_part   = "workload"
+}
+
 resource "aws_api_gateway_resource" "artifacts" {
   rest_api_id = aws_api_gateway_rest_api.main_api.id
   parent_id   = aws_api_gateway_rest_api.main_api.root_resource_id
@@ -430,6 +442,98 @@ resource "aws_api_gateway_integration_response" "health_components_get_200" {
   depends_on = [
     aws_api_gateway_integration.health_components_get,
     aws_api_gateway_method_response.health_components_get_200,
+  ]
+}
+
+# POST /health/performance/workload
+resource "aws_api_gateway_method" "health_performance_workload_post" {
+  rest_api_id   = aws_api_gateway_rest_api.main_api.id
+  resource_id   = aws_api_gateway_resource.health_performance_workload.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "health_performance_workload_post" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.health_performance_workload.id
+  http_method = aws_api_gateway_method.health_performance_workload_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "HTTP_PROXY"
+  uri                     = "${var.validator_service_url}/health/performance/workload"
+}
+
+# Method responses for POST /health/performance/workload
+resource "aws_api_gateway_method_response" "health_performance_workload_post_202" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.health_performance_workload.id
+  http_method = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code = "202"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "health_performance_workload_post_400" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.health_performance_workload.id
+  http_method = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code = "400"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "health_performance_workload_post_500" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.health_performance_workload.id
+  http_method = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code = "500"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# Integration responses for POST /health/performance/workload
+resource "aws_api_gateway_integration_response" "health_performance_workload_post_202" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.health_performance_workload.id
+  http_method       = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code       = aws_api_gateway_method_response.health_performance_workload_post_202.status_code
+  selection_pattern = "202"
+
+  depends_on = [
+    aws_api_gateway_integration.health_performance_workload_post,
+    aws_api_gateway_method_response.health_performance_workload_post_202,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "health_performance_workload_post_400" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.health_performance_workload.id
+  http_method       = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code       = aws_api_gateway_method_response.health_performance_workload_post_400.status_code
+  selection_pattern = "400"
+
+  depends_on = [
+    aws_api_gateway_integration.health_performance_workload_post,
+    aws_api_gateway_method_response.health_performance_workload_post_400,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "health_performance_workload_post_500" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.health_performance_workload.id
+  http_method       = aws_api_gateway_method.health_performance_workload_post.http_method
+  status_code       = aws_api_gateway_method_response.health_performance_workload_post_500.status_code
+  selection_pattern = "500"
+
+  depends_on = [
+    aws_api_gateway_integration.health_performance_workload_post,
+    aws_api_gateway_method_response.health_performance_workload_post_500,
   ]
 }
 

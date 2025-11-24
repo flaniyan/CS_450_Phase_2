@@ -38,15 +38,15 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
 
   # List bucket through access point
   statement {
-    sid       = "ListAccessPoint"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
+    sid     = "ListAccessPoint"
+    effect  = "Allow"
+    actions = ["s3:ListBucket"]
     resources = [
       "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
       "arn:aws:s3:::pkg-artifacts"
     ]
   }
-  
+
   # List bucket with prefix conditions for direct bucket access
   statement {
     sid       = "ListPackagesPrefix"
