@@ -3226,6 +3226,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.admin_options,
     aws_api_gateway_integration.directory_options,
     aws_api_gateway_integration.upload_options,
+    aws_api_gateway_integration.artifact_type_get,
     aws_api_gateway_integration.artifact_type_post,
     aws_api_gateway_integration.artifacts_type_id_get,
     aws_api_gateway_integration.artifacts_type_id_put,
@@ -3248,6 +3249,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration_response.artifact_byname_name_get_403,
     aws_api_gateway_integration_response.artifact_byname_name_get_404,
     aws_api_gateway_integration.artifact_byregex_post,
+    aws_api_gateway_integration.artifacts_options,
+    aws_api_gateway_integration.artifact_type_options,
+    aws_api_gateway_integration.authenticate_options,
+    aws_api_gateway_integration.artifact_byregex_options,
     aws_api_gateway_integration_response.package_id_get_200,
     aws_api_gateway_integration_response.package_id_get_400,
     aws_api_gateway_integration_response.package_id_get_403,
@@ -3379,6 +3384,10 @@ resource "aws_api_gateway_deployment" "main_deployment" {
       aws_api_gateway_integration.artifact_directory_get.id,
       aws_api_gateway_integration.artifact_byname_name_get.id,
       aws_api_gateway_integration.artifact_byregex_post.id,
+      aws_api_gateway_integration.artifacts_options.id,
+      aws_api_gateway_integration.artifact_type_options.id,
+      aws_api_gateway_integration.authenticate_options.id,
+      aws_api_gateway_integration.artifact_byregex_options.id,
     ]))
   }
 

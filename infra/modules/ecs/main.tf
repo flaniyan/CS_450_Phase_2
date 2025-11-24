@@ -402,8 +402,8 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         ]
         Resource = [var.kms_key_arn]
         Condition = {
-          StringEquals = {
-            "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+          StringLike = {
+            "kms:ViaService" = "s3*.us-east-1.amazonaws.com"
           }
         }
       },
