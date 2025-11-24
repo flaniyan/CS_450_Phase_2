@@ -363,18 +363,43 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "S3AccessPointPermissions"
+        Effect = "Allow"
+        Action = [
+          "s3:GetAccessPoint",
+          "s3:ListAccessPoint"
+        ]
+        Resource = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
+      },
+      {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:ListBucket",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:GetObjectTagging",
+          "s3:PutObjectTagging",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:CreateMultipartUpload",
+          "s3:CompleteMultipartUpload",
+          "s3:UploadPart"
         ]
         Resource = [
           "arn:aws:s3:::${var.artifacts_bucket}",
           "arn:aws:s3:::${var.artifacts_bucket}/*",
           "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
           "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*"
+        ]
+      },
+      {
+        Sid    = "S3ListBucketViaAccessPoint"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
+          "arn:aws:s3:::${var.artifacts_bucket}"
         ]
       },
       {

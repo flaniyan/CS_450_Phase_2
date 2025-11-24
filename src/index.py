@@ -517,11 +517,17 @@ async def trigger_performance_workload(request: Request):
         # Import and trigger workload
         from .services.performance.workload_trigger import trigger_workload
         
+        # Use API Gateway URL as the base URL for load generation
+        # This is where clients will actually make requests
+        # Can be overridden via environment variable
+        base_url = os.getenv("API_BASE_URL", "https://pc1plkgnbd.execute-api.us-east-1.amazonaws.com/prod")
+        
         result = trigger_workload(
             num_clients=num_clients,
             model_id=model_id,
             artifact_id=artifact_id,
-            duration_seconds=duration_seconds
+            duration_seconds=duration_seconds,
+            base_url=base_url
         )
         
         return JSONResponse(
