@@ -37,7 +37,7 @@ resource "aws_ecs_task_definition" "validator_task" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = 1024
-  memory                   = 4096  # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
+  memory                   = 4096 # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
 
@@ -45,15 +45,15 @@ resource "aws_ecs_task_definition" "validator_task" {
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
 
-    memoryReservation = 3072  # Increased from 1536
-    memory             = 4096  # Increased from 2048 to handle memory-intensive operations
-    
+    memoryReservation = 3072 # Increased from 1536
+    memory            = 4096 # Increased from 2048 to handle memory-intensive operations
+
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
-    
+
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30

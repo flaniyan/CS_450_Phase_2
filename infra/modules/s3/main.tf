@@ -50,8 +50,8 @@ resource "aws_s3_access_point" "main" {
 
 
 output "artifacts_bucket" { value = aws_s3_bucket.artifacts.id }
-output "access_point_arn" { 
-  value = aws_s3_access_point.main.arn 
+output "access_point_arn" {
+  value = aws_s3_access_point.main.arn
 }
 
 

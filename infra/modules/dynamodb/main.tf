@@ -1,9 +1,9 @@
 locals {
   tables = {
-    users    = { hash_key = "user_id" }
-    tokens   = { hash_key = "token_id", ttl_attr = "exp_ts" }
-    packages = { hash_key = "pkg_key" }
-    uploads  = { hash_key = "upload_id" }
+    users     = { hash_key = "user_id" }
+    tokens    = { hash_key = "token_id", ttl_attr = "exp_ts" }
+    packages  = { hash_key = "pkg_key" }
+    uploads   = { hash_key = "upload_id" }
     artifacts = { hash_key = "artifact_id" }
     downloads = {
       hash_key = "event_id"
@@ -16,7 +16,7 @@ locals {
       }
     }
     performance_metrics = {
-      hash_key = "run_id"
+      hash_key  = "run_id"
       range_key = "metric_id"
       gsi = {
         "run-timestamp-index" = {
@@ -48,7 +48,7 @@ resource "aws_dynamodb_table" "this" {
     name = each.value.hash_key
     type = "S"
   }
-  
+
   # Add range key attribute if it exists
   dynamic "attribute" {
     for_each = try(each.value.range_key != null, false) ? [1] : []
