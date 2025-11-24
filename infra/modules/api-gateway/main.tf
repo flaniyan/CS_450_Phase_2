@@ -555,6 +555,10 @@ resource "aws_api_gateway_method" "health_performance_results_run_id_get" {
   resource_id   = aws_api_gateway_resource.health_performance_results_run_id.id
   http_method   = "GET"
   authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.run_id" = true
+  }
 }
 
 resource "aws_api_gateway_integration" "health_performance_results_run_id_get" {
