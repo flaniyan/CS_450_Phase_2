@@ -25,7 +25,29 @@ resource "aws_iam_policy" "api_ddb_rw_managed" {
 
 # API Service - S3 Policy
 data "aws_iam_policy_document" "api_s3_packages_rw" {
-  # List only within packages/ prefix
+  # S3 Access Point permissions - required when using access points
+  statement {
+    sid    = "AccessPointPermissions"
+    effect = "Allow"
+    actions = [
+      "s3:GetAccessPoint",
+      "s3:ListAccessPoint"
+    ]
+    resources = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
+  }
+
+  # List bucket through access point
+  statement {
+    sid       = "ListAccessPoint"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [
+      "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
+      "arn:aws:s3:::pkg-artifacts"
+    ]
+  }
+  
+  # List bucket with prefix conditions for direct bucket access
   statement {
     sid       = "ListPackagesPrefix"
     effect    = "Allow"
@@ -34,11 +56,34 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["packages/*"]
+      values   = ["packages/*", "models/*"]
     }
   }
 
-  # Read/Write only under packages/
+  # Read/Write objects through access point (models and packages)
+  statement {
+    sid    = "RWAccessPointObjects"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectTagging",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
+      "s3:DeleteObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts",
+      "s3:CreateMultipartUpload",
+      "s3:CompleteMultipartUpload",
+      "s3:UploadPart"
+    ]
+    resources = [
+      "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*",
+      "arn:aws:s3:::pkg-artifacts/models/*",
+      "arn:aws:s3:::pkg-artifacts/packages/*"
+    ]
+  }
+
+  # Fallback: Read/Write only under packages/ (for backward compatibility)
   statement {
     sid    = "RWPackagesWithKMS"
     effect = "Allow"
