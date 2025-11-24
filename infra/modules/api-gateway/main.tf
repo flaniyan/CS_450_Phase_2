@@ -1282,6 +1282,17 @@ resource "aws_api_gateway_method_response" "artifact_type_post_424" {
   }
 }
 
+resource "aws_api_gateway_method_response" "artifact_type_post_500" {
+  rest_api_id = aws_api_gateway_rest_api.main_api.id
+  resource_id = aws_api_gateway_resource.artifact_type.id
+  http_method = aws_api_gateway_method.artifact_type_post.http_method
+  status_code = "500"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
 # Integration responses for POST /artifact/{artifact_type}
 resource "aws_api_gateway_integration_response" "artifact_type_post_201" {
   rest_api_id       = aws_api_gateway_rest_api.main_api.id
@@ -1358,6 +1369,19 @@ resource "aws_api_gateway_integration_response" "artifact_type_post_424" {
   depends_on = [
     aws_api_gateway_integration.artifact_type_post,
     aws_api_gateway_method_response.artifact_type_post_424,
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "artifact_type_post_500" {
+  rest_api_id       = aws_api_gateway_rest_api.main_api.id
+  resource_id       = aws_api_gateway_resource.artifact_type.id
+  http_method       = aws_api_gateway_method.artifact_type_post.http_method
+  status_code       = aws_api_gateway_method_response.artifact_type_post_500.status_code
+  selection_pattern = "500"
+
+  depends_on = [
+    aws_api_gateway_integration.artifact_type_post,
+    aws_api_gateway_method_response.artifact_type_post_500,
   ]
 }
 
@@ -3228,6 +3252,7 @@ resource "aws_api_gateway_deployment" "main_deployment" {
     aws_api_gateway_integration.upload_options,
     aws_api_gateway_integration.artifact_type_get,
     aws_api_gateway_integration.artifact_type_post,
+    aws_api_gateway_integration_response.artifact_type_post_500,
     aws_api_gateway_integration.artifacts_type_id_get,
     aws_api_gateway_integration.artifacts_type_id_put,
     aws_api_gateway_integration.artifacts_type_id_delete,
