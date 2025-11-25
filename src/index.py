@@ -443,6 +443,56 @@ def _run_async_rating(artifact_id: str, model_name: str, version: str):
             _rating_locks[artifact_id].set()
 
 
+def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
+    """
+    Get artifact size in MB from S3 or download URL.
+    Returns 0.0 if size cannot be determined.
+    """
+    try:
+        if artifact_type == "model":
+            model_name = _get_model_name_for_s3(artifact_id)
+            if not model_name:
+                model_name = sanitize_model_id_for_s3(artifact_id)
+            sizes = get_model_sizes(model_name, "1.0.0")
+            if "error" not in sizes:
+                return sizes.get("full", 0) / (1024 * 1024)
+        elif artifact_type in ["dataset", "code"]:
+            # Try to get size from S3 metadata file
+            artifact = get_generic_artifact_metadata(artifact_type, artifact_id)
+            if not artifact:
+                artifact = get_artifact_from_db(artifact_id)
+            
+            if artifact:
+                artifact_name = artifact.get("name", "")
+                if artifact_name:
+                    sanitized_name = sanitize_model_id_for_s3(artifact_name)
+                    # Try common versions
+                    for version in ["main", "1.0.0", "latest"]:
+                        try:
+                            s3_key = f"{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+                            response = s3.head_object(Bucket=ap_arn, Key=s3_key)
+                            size_bytes = response.get("ContentLength", 0)
+                            if size_bytes > 0:
+                                return size_bytes / (1024 * 1024)
+                        except ClientError:
+                            continue
+                    
+                    # If metadata.json not found, try to get size from download URL
+                    url = artifact.get("url", "")
+                    if url:
+                        try:
+                            import requests
+                            head_response = requests.head(url, timeout=5, allow_redirects=True)
+                            content_length = head_response.headers.get("Content-Length")
+                            if content_length:
+                                return int(content_length) / (1024 * 1024)
+                        except Exception:
+                            pass
+    except Exception as e:
+        logger.debug(f"Error getting artifact size: {str(e)}")
+    return 0.0
+
+
 def _get_model_name_for_s3(artifact_id: str) -> Optional[str]:
     """
     Helper function to get the model name from artifact_id for S3 lookups.
@@ -3029,37 +3079,52 @@ def get_artifact_cost(
                     ),  # Will be updated with total after dependencies
                 }
 
-                # Get model name for S3 lookup (models are stored by name, not ID)
-                model_name_for_lineage = _get_model_name_for_s3(id)
-                if not model_name_for_lineage:
-                    model_name_for_lineage = id
-                
-                # Get lineage and add dependencies
-                lineage_result = get_model_lineage_from_config(model_name_for_lineage, "1.0.0")
-                if "error" not in lineage_result:
-                    lineage_map = lineage_result.get("lineage_map", {})
-                    for dep_id, dep_metadata in lineage_map.items():
-                        if dep_id != id:
-                            try:
-                                dep_sizes = get_model_sizes(dep_id, "1.0.0")
-                                if "error" not in dep_sizes:
-                                    dep_size_mb = dep_sizes.get("full", 0) / (
-                                        1024 * 1024
-                                    )
-                                    total_size_mb += dep_size_mb
-                                    # Add dependency to result
-                                    result[dep_id] = {
-                                        "standalone_cost": round(dep_size_mb, 2),
-                                        "total_cost": round(dep_size_mb, 2),
+                # Get dependencies from model's dataset_id and code_id
+                artifact = get_artifact_from_db(id)
+                if artifact:
+                    dataset_id = artifact.get("dataset_id")
+                    code_id = artifact.get("code_id")
+                    
+                    # Get dataset cost if linked
+                    if dataset_id:
+                        try:
+                            dataset_artifact = get_artifact_from_db(dataset_id)
+                            if dataset_artifact and dataset_artifact.get("type") == "dataset":
+                                dataset_size_mb = _get_artifact_size_mb("dataset", dataset_id)
+                                if dataset_size_mb > 0:
+                                    total_size_mb += dataset_size_mb
+                                    result[dataset_id] = {
+                                        "standalone_cost": round(dataset_size_mb, 2),
+                                        "total_cost": round(dataset_size_mb, 2),
                                     }
-                            except Exception:
-                                pass
+                        except Exception as e:
+                            logger.debug(f"Error getting dataset cost: {str(e)}")
+                    
+                    # Get code cost if linked
+                    if code_id:
+                        try:
+                            code_artifact = get_artifact_from_db(code_id)
+                            if code_artifact and code_artifact.get("type") == "code":
+                                code_size_mb = _get_artifact_size_mb("code", code_id)
+                                if code_size_mb > 0:
+                                    total_size_mb += code_size_mb
+                                    result[code_id] = {
+                                        "standalone_cost": round(code_size_mb, 2),
+                                        "total_cost": round(code_size_mb, 2),
+                                    }
+                        except Exception as e:
+                            logger.debug(f"Error getting code cost: {str(e)}")
 
                 # Update main artifact's total_cost to include all dependencies
                 result[id]["total_cost"] = round(total_size_mb, 2)
             else:
-                # When dependency=false, return only main artifact with total_cost
-                result = {id: {"total_cost": round(standalone_size_mb, 2)}}
+                # When dependency=false, return BOTH standalone_cost and total_cost (where standalone_cost = total_cost)
+                result = {
+                    id: {
+                        "standalone_cost": round(standalone_size_mb, 2),
+                        "total_cost": round(standalone_size_mb, 2)
+                    }
+                }
             return result
         else:
             # For datasets/code, support flexible ID formats (numeric IDs, names with slashes, etc.)
@@ -3095,16 +3160,32 @@ def get_artifact_cost(
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             if artifact.get("type") != artifact_type:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            standalone_cost = 0.0
+            
+            # Calculate actual size from S3 or download URL
+            standalone_size_mb = _get_artifact_size_mb(artifact_type, id)
+            
             if dependency:
-                return {
+                # When dependency=true, return all artifacts (main + dependencies) with standalone_cost and total_cost
+                result = {}
+                total_size_mb = standalone_size_mb
+                
+                # Add main artifact
+                result[id] = {
+                    "standalone_cost": round(standalone_size_mb, 2),
+                    "total_cost": round(standalone_size_mb, 2),  # Will be updated after dependencies
+                }
+                
+                # For datasets/code, there are no dependencies, so total_cost = standalone_cost
+                result[id]["total_cost"] = round(total_size_mb, 2)
+            else:
+                # When dependency=false, return BOTH standalone_cost and total_cost (where standalone_cost = total_cost)
+                result = {
                     id: {
-                        "standalone_cost": standalone_cost,
-                        "total_cost": standalone_cost,
+                        "standalone_cost": round(standalone_size_mb, 2),
+                        "total_cost": round(standalone_size_mb, 2)
                     }
                 }
-            else:
-                return {id: {"total_cost": standalone_cost}}
+            return result
     except HTTPException:
         raise
     except Exception as e:
@@ -3313,6 +3394,60 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
         }
 
 
+def _build_rating_response(id: str, rating: Dict[str, Any]) -> Dict[str, Any]:
+    """Build ModelRating response with all required fields."""
+    return {
+        "name": id,
+        "category": alias(rating, "category") or "unknown",
+        "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
+        "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2),
+        "ramp_up_time": round(float(alias(
+            rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
+        ) or 0.0), 2),
+        "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2),
+        "bus_factor": round(float(alias(
+            rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
+        ) or 0.0), 2),
+        "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2),
+        "performance_claims": round(float(alias(
+            rating,
+            "performance_claims",
+            "PerformanceClaims",
+            "score_performance_claims",
+        ) or 0.0), 2),
+        "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or 0.0), 2),
+        "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
+        "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2),
+        "dataset_and_code_score": round(float(alias(
+            rating,
+            "dataset_code",
+            "DatasetCode",
+            "score_available_dataset_and_code",
+        ) or 0.0), 2),
+        "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or 0.0), 2),
+        "dataset_quality": round(float(alias(
+            rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
+        ) or 0.0), 2),
+        "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0), 2),
+        "code_quality": round(float(alias(
+            rating, "code_quality", "CodeQuality", "score_code_quality"
+        ) or 0.0), 2),
+        "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2),
+        "reproducibility": round(float(alias(
+            rating, "reproducibility", "Reproducibility", "score_reproducibility"
+        ) or 0.0), 2),
+        "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or 0.0), 2),
+        "reviewedness": round(float(alias(
+            rating, "reviewedness", "Reviewedness", "score_reviewedness"
+        ) or 0.0), 2),
+        "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0), 2),
+        "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
+        "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2),
+        "size_score": _extract_size_scores(rating),
+        "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2),
+    }
+
+
 @app.get("/artifact/model/{id}/rate")
 def get_model_rate(id: str, request: Request):
     try:
@@ -3442,6 +3577,7 @@ def get_model_rate(id: str, request: Request):
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
         # Check rating status and block until complete
+        # Thread-safe check: use a lock to prevent race conditions
         if id in _rating_status:
             status = _rating_status[id]
             logger.info(f"DEBUG: Rating status for id='{id}': {status}")
@@ -3450,9 +3586,9 @@ def get_model_rate(id: str, request: Request):
                 # Block until rating completes (with timeout)
                 logger.info(f"DEBUG: Rating pending, waiting for completion...")
                 if id in _rating_locks:
-                    # Wait up to 60 seconds for rating to complete
+                    # Wait up to 120 seconds for rating to complete (increased timeout for concurrent requests)
                     event = _rating_locks[id]
-                    if not event.wait(timeout=60):
+                    if not event.wait(timeout=120):
                         logger.warning(f"DEBUG: Rating timeout for id='{id}'")
                         raise HTTPException(status_code=404, detail="Artifact does not exist.")
                     # Re-check status after wait
@@ -3470,6 +3606,7 @@ def get_model_rate(id: str, request: Request):
                     # Fall through to analyze
                 else:
                     logger.info(f"DEBUG: Using cached rating result for id='{id}'")
+                    return _build_rating_response(id, rating)
         else:
             # No rating status - might be an old artifact or non-model
             # Try to analyze directly
@@ -3504,60 +3641,11 @@ def get_model_rate(id: str, request: Request):
                     detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
                 )
 
-        # Build ModelRating response with all required fields (including all latency fields per YAML spec)
-        logger.info(f"DEBUG: Building rating response for id='{id}'")
-        result = {
-            "name": id,
-            "category": alias(rating, "category") or "unknown",
-            "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
-            "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2),
-            "ramp_up_time": round(float(alias(
-                rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
-            ) or 0.0), 2),
-            "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2),
-            "bus_factor": round(float(alias(
-                rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
-            ) or 0.0), 2),
-            "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2),
-            "performance_claims": round(float(alias(
-                rating,
-                "performance_claims",
-                "PerformanceClaims",
-                "score_performance_claims",
-            ) or 0.0), 2),
-            "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or 0.0), 2),
-            "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
-            "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2),
-            "dataset_and_code_score": round(float(alias(
-                rating,
-                "dataset_code",
-                "DatasetCode",
-                "score_available_dataset_and_code",
-            ) or 0.0), 2),
-            "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or 0.0), 2),
-            "dataset_quality": round(float(alias(
-                rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
-            ) or 0.0), 2),
-            "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0), 2),
-            "code_quality": round(float(alias(
-                rating, "code_quality", "CodeQuality", "score_code_quality"
-            ) or 0.0), 2),
-            "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2),
-            "reproducibility": round(float(alias(
-                rating, "reproducibility", "Reproducibility", "score_reproducibility"
-            ) or 0.0), 2),
-            "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or 0.0), 2),
-            "reviewedness": round(float(alias(
-                rating, "reviewedness", "Reviewedness", "score_reviewedness"
-            ) or 0.0), 2),
-            "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0), 2),
-            "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
-            "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2),
-            "size_score": _extract_size_scores(rating),
-            "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2),
-        }
-        logger.info(f"DEBUG: Returning rating result: {result}")
-        return result
+        # Cache the rating result before returning
+        _rating_results[id] = rating
+        _rating_status[id] = "completed"
+        
+        return _build_rating_response(id, rating)
     except HTTPException:
         raise
     except Exception as e:
