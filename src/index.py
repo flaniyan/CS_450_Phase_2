@@ -342,10 +342,12 @@ async def startup_event():
 
 
 # Rating status tracking for async rating (kept in-memory as it's transient)
-# Status values: "pending", "completed", "disqualified", "failed"
+# Status values: "pending", "completed", "disqualified", "failed", "timeout"
 _rating_status = {}
 _rating_locks = {}  # threading.Event objects for blocking requests
 _rating_results = {}  # Store rating results by artifact_id
+_rating_start_times = {}  # Track when ratings started to detect stuck ratings
+_rating_lock = threading.Lock()  # Lock for thread-safe access to rating data structures
 
 # In-memory storage for dataset and code artifacts (for immediate consistency in queries)
 # Key: artifact_id, Value: dict with name, type, version, id, url
@@ -402,34 +404,78 @@ def build_artifact_response(artifact_name: str, artifact_id: str, artifact_type:
     }
 
 
+def _cleanup_stuck_ratings():
+    """
+    Clean up ratings that have been stuck in 'pending' state for too long (>10 minutes).
+    This prevents ratings from being stuck indefinitely.
+    """
+    global _rating_status, _rating_start_times, _rating_lock
+    
+    current_time = time.time()
+    stuck_threshold = 600  # 10 minutes
+    
+    with _rating_lock:
+        stuck_ids = []
+        for artifact_id, start_time in list(_rating_start_times.items()):
+            if artifact_id in _rating_status and _rating_status[artifact_id] == "pending":
+                elapsed = current_time - start_time
+                if elapsed > stuck_threshold:
+                    stuck_ids.append(artifact_id)
+                    logger.warning(f"DEBUG: Detected stuck rating for id='{artifact_id}' (stuck for {elapsed:.1f}s), marking as failed")
+                    _rating_status[artifact_id] = "failed"
+                    _rating_results[artifact_id] = None
+                    if artifact_id in _rating_locks:
+                        _rating_locks[artifact_id].set()
+                    del _rating_start_times[artifact_id]
+        
+        if stuck_ids:
+            logger.warning(f"DEBUG: Cleaned up {len(stuck_ids)} stuck rating(s): {stuck_ids}")
+
+
 def _run_async_rating(artifact_id: str, model_name: str, version: str):
     """
     Run rating asynchronously in background thread.
     Updates _rating_status and _rating_results when complete.
     """
-    global _rating_status, _rating_locks, _rating_results
+    global _rating_status, _rating_locks, _rating_results, _rating_start_times, _rating_lock
     
     try:
-        logger.info(f"DEBUG: [ASYNC RATING] Starting rating for artifact_id='{artifact_id}', model_name='{model_name}'")
-        _rating_status[artifact_id] = "pending"
+        with _rating_lock:
+            logger.info(f"DEBUG: [ASYNC RATING] Starting rating for artifact_id='{artifact_id}', model_name='{model_name}'")
+            # Start time should already be set when rating was initialized, but update it if not
+            if artifact_id not in _rating_start_times:
+                _rating_start_times[artifact_id] = time.time()
+            # Ensure status is pending (it should already be, but make sure)
+            _rating_status[artifact_id] = "pending"
         
-        # Perform rating
+        # Perform rating with timeout protection
+        # Note: signal-based timeout doesn't work well in threads, so we'll rely on the calling code's timeout
+        # But we can add progress logging to help debug slow ratings
+        logger.info(f"DEBUG: [ASYNC RATING] Calling analyze_model_content for '{model_name}'...")
+        start_time = time.time()
         rating = analyze_model_content(model_name)
+        elapsed_time = time.time() - start_time
+        logger.info(f"DEBUG: [ASYNC RATING] analyze_model_content completed in {elapsed_time:.2f}s for '{model_name}'")
         
-        if not rating:
-            logger.warning(f"DEBUG: [ASYNC RATING] Rating returned None/empty for '{model_name}'")
-            _rating_status[artifact_id] = "failed"
-            _rating_results[artifact_id] = None
-        else:
-            net_score = alias(rating, "net_score", "NetScore", "netScore") or 0.0
-            if net_score < 0.5:
-                logger.warning(f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < 0.5")
-                _rating_status[artifact_id] = "disqualified"
+        with _rating_lock:
+            if not rating:
+                logger.warning(f"DEBUG: [ASYNC RATING] Rating returned None/empty for '{model_name}'")
+                _rating_status[artifact_id] = "failed"
                 _rating_results[artifact_id] = None
             else:
-                logger.info(f"DEBUG: [ASYNC RATING] Rating completed successfully: net_score={net_score}")
-                _rating_status[artifact_id] = "completed"
-                _rating_results[artifact_id] = rating
+                net_score = alias(rating, "net_score", "NetScore", "netScore") or 0.0
+                if net_score < 0.5:
+                    logger.warning(f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < 0.5")
+                    _rating_status[artifact_id] = "disqualified"
+                    _rating_results[artifact_id] = None
+                else:
+                    logger.info(f"DEBUG: [ASYNC RATING] Rating completed successfully: net_score={net_score}")
+                    _rating_status[artifact_id] = "completed"
+                    _rating_results[artifact_id] = rating
+            
+            # Clean up tracking data
+            if artifact_id in _rating_start_times:
+                del _rating_start_times[artifact_id]
         
         # Signal that rating is complete
         if artifact_id in _rating_locks:
@@ -437,8 +483,11 @@ def _run_async_rating(artifact_id: str, model_name: str, version: str):
             logger.info(f"DEBUG: [ASYNC RATING] Signaled completion for artifact_id='{artifact_id}'")
     except Exception as e:
         logger.error(f"DEBUG: [ASYNC RATING] Error during rating for '{artifact_id}': {str(e)}", exc_info=True)
-        _rating_status[artifact_id] = "failed"
-        _rating_results[artifact_id] = None
+        with _rating_lock:
+            _rating_status[artifact_id] = "failed"
+            _rating_results[artifact_id] = None
+            if artifact_id in _rating_start_times:
+                del _rating_start_times[artifact_id]
         if artifact_id in _rating_locks:
             _rating_locks[artifact_id].set()
 
@@ -1984,11 +2033,12 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             # Block until rating completes (with timeout)
                             logger.info(f"DEBUG: Rating pending, waiting for completion...")
                             if id in _rating_locks:
-                                # Wait up to 60 seconds for rating to complete
+                                # Wait up to 300 seconds (5 minutes) for rating to complete
                                 event = _rating_locks[id]
-                                if not event.wait(timeout=60):
-                                    logger.warning(f"DEBUG: Rating timeout for id='{id}'")
-                                    raise HTTPException(status_code=404, detail="Artifact does not exist.")
+                                if not event.wait(timeout=300):
+                                    logger.warning(f"DEBUG: Rating timeout for id='{id}' after 300s, will continue without blocking")
+                                    # Don't raise error - just continue and let the request proceed
+                                    # The rating endpoint will handle it with synchronous fallback
                                 # Re-check status after wait
                                 status = _rating_status.get(id, "unknown")
                         
@@ -2299,8 +2349,10 @@ async def post_artifact_ingest(request: Request):
                 logger.info(f"DEBUG: Generated artifact_id: '{artifact_id}' for model '{name}'")
                 
                 # Initialize rating status and lock
-                _rating_status[artifact_id] = "pending"
-                _rating_locks[artifact_id] = threading.Event()
+                with _rating_lock:
+                    _rating_status[artifact_id] = "pending"
+                    _rating_locks[artifact_id] = threading.Event()
+                    _rating_start_times[artifact_id] = time.time()
                 
                 # Extract README and extract dataset/code names
                 readme_text = None
@@ -2607,8 +2659,10 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 
                 # Initialize rating status and lock
-                _rating_status[artifact_id] = "pending"
-                _rating_locks[artifact_id] = threading.Event()
+                with _rating_lock:
+                    _rating_status[artifact_id] = "pending"
+                    _rating_locks[artifact_id] = threading.Event()
+                    _rating_start_times[artifact_id] = time.time()
                 
                 # Extract README and extract dataset/code names
                 readme_text = None
@@ -3576,6 +3630,9 @@ def get_model_rate(id: str, request: Request):
             logger.error(f"DEBUG: Model not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
+        # Clean up any stuck ratings before checking status
+        _cleanup_stuck_ratings()
+        
         # Check rating status and block until complete
         # Thread-safe check: use a lock to prevent race conditions
         if id in _rating_status:
@@ -3586,13 +3643,20 @@ def get_model_rate(id: str, request: Request):
                 # Block until rating completes (with timeout)
                 logger.info(f"DEBUG: Rating pending, waiting for completion...")
                 if id in _rating_locks:
-                    # Wait up to 120 seconds for rating to complete (increased timeout for concurrent requests)
+                    # Wait up to 300 seconds (5 minutes) for rating to complete
                     event = _rating_locks[id]
-                    if not event.wait(timeout=120):
-                        logger.warning(f"DEBUG: Rating timeout for id='{id}'")
-                        raise HTTPException(status_code=404, detail="Artifact does not exist.")
-                    # Re-check status after wait
-                    status = _rating_status.get(id, "unknown")
+                    if not event.wait(timeout=300):
+                        logger.warning(f"DEBUG: Rating timeout for id='{id}' after 300s, falling back to synchronous rating")
+                        # Timeout occurred - async rating is taking too long
+                        # Fall back to synchronous rating instead of failing
+                        status = "timeout"
+                    else:
+                        # Re-check status after wait
+                        status = _rating_status.get(id, "unknown")
+                else:
+                    # No lock found - rating might have failed to start
+                    logger.warning(f"DEBUG: No rating lock found for id='{id}', falling back to synchronous rating")
+                    status = "timeout"
             
             if status == "disqualified" or status == "failed":
                 logger.warning(f"DEBUG: Rating {status} for id='{id}'")
@@ -3607,12 +3671,17 @@ def get_model_rate(id: str, request: Request):
                 else:
                     logger.info(f"DEBUG: Using cached rating result for id='{id}'")
                     return _build_rating_response(id, rating)
+            
+            if status == "timeout":
+                # Async rating timed out - fall through to synchronous rating
+                logger.info(f"DEBUG: Async rating timed out for id='{id}', performing synchronous rating")
+                rating = None
         else:
             # No rating status - might be an old artifact or non-model
             # Try to analyze directly
             rating = None
         
-        # Analyze model content if not cached
+        # Analyze model content if not cached (synchronous fallback)
         if not rating:
             logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
             try:
@@ -3641,9 +3710,13 @@ def get_model_rate(id: str, request: Request):
                     detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
                 )
 
-        # Cache the rating result before returning
-        _rating_results[id] = rating
-        _rating_status[id] = "completed"
+        # Cache the rating result before returning (thread-safe)
+        with _rating_lock:
+            _rating_results[id] = rating
+            _rating_status[id] = "completed"
+            # Clean up start time if it exists
+            if id in _rating_start_times:
+                del _rating_start_times[id]
         
         return _build_rating_response(id, rating)
     except HTTPException:
