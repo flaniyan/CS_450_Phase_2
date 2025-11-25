@@ -7,8 +7,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.artifacts.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+      sse_algorithm     = var.kms_key_arn != "" ? "aws:kms" : "AES256"
+      kms_master_key_id = var.kms_key_arn != "" ? var.kms_key_arn : null
     }
     bucket_key_enabled = false
   }

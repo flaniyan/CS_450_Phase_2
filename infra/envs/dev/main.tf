@@ -36,6 +36,7 @@ locals {
 module "s3" {
   source         = "../../modules/s3"
   artifacts_name = var.artifacts_bucket
+  kms_key_arn    = module.monitoring.kms_key_arn
 }
 
 module "ddb" {
