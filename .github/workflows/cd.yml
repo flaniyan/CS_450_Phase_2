@@ -296,6 +296,14 @@ jobs:
           else
             echo "S3 encryption configuration already in state, skipping import"
           fi
+          
+          # Import access point if not in state
+          if ! terraform state show module.s3.aws_s3_access_point.main >/dev/null 2>&1; then
+            echo "S3 access point not in state, importing..."
+            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_access_point.main 838693051036:cs450-s3 || echo "Failed to import access point"
+          else
+            echo "S3 access point already in state, skipping import"
+          fi
 
       - name: Terraform plan
         shell: bash

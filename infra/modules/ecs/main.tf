@@ -395,7 +395,8 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         Effect = "Allow"
         Action = ["s3:ListBucket"]
         Resource = [
-          "arn:aws:s3:::${var.artifacts_bucket}"
+          "arn:aws:s3:::${var.artifacts_bucket}",
+          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"
         ]
       },
       {

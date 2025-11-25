@@ -12,7 +12,20 @@ resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowEcsTaskRoleAccess"
+        Sid    = "AllowEcsTaskRoleListBucket"
+        Effect = "Allow"
+        Principal = {
+          AWS = data.aws_iam_role.ecs_task_role.arn
+        }
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = [
+          module.s3.access_point_arn
+        ]
+      },
+      {
+        Sid    = "AllowEcsTaskRoleObjectAccess"
         Effect = "Allow"
         Principal = {
           AWS = data.aws_iam_role.ecs_task_role.arn
