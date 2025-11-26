@@ -502,41 +502,57 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
             model_name = _get_model_name_for_s3(artifact_id)
             if not model_name:
                 model_name = sanitize_model_id_for_s3(artifact_id)
-            sizes = get_model_sizes(model_name, "1.0.0")
-            if "error" not in sizes:
-                return sizes.get("full", 0) / (1024 * 1024)
+            # Try multiple versions
+            for version in ["1.0.0", "main", "latest"]:
+                sizes = get_model_sizes(model_name, version)
+                if "error" not in sizes:
+                    size_bytes = sizes.get("full", 0)
+                    if size_bytes > 0:
+                        return size_bytes / (1024 * 1024)
         elif artifact_type in ["dataset", "code"]:
-            # Try to get size from S3 metadata file
+            # Get artifact metadata
             artifact = get_generic_artifact_metadata(artifact_type, artifact_id)
             if not artifact:
                 artifact = get_artifact_from_db(artifact_id)
             
             if artifact:
+                # First, try to get size from download URL (actual artifact size)
+                url = artifact.get("url", "")
+                if url:
+                    try:
+                        import requests
+                        head_response = requests.head(url, timeout=10, allow_redirects=True)
+                        content_length = head_response.headers.get("Content-Length")
+                        if content_length:
+                            size_mb = int(content_length) / (1024 * 1024)
+                            if size_mb > 0:
+                                return size_mb
+                    except Exception as e:
+                        logger.debug(f"Error getting size from URL {url}: {str(e)}")
+                
+                # Fallback: try to get size from S3 if artifact was uploaded
                 artifact_name = artifact.get("name", "")
                 if artifact_name:
                     sanitized_name = sanitize_model_id_for_s3(artifact_name)
                     # Try common versions
                     for version in ["main", "1.0.0", "latest"]:
                         try:
-                            s3_key = f"{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+                            # For datasets/code, check if there's a zip file or actual artifact file
+                            # (not just metadata.json)
+                            s3_key = f"{artifact_type}s/{sanitized_name}/{version}/artifact.zip"
                             response = s3.head_object(Bucket=ap_arn, Key=s3_key)
                             size_bytes = response.get("ContentLength", 0)
                             if size_bytes > 0:
                                 return size_bytes / (1024 * 1024)
                         except ClientError:
-                            continue
-                    
-                    # If metadata.json not found, try to get size from download URL
-                    url = artifact.get("url", "")
-                    if url:
-                        try:
-                            import requests
-                            head_response = requests.head(url, timeout=5, allow_redirects=True)
-                            content_length = head_response.headers.get("Content-Length")
-                            if content_length:
-                                return int(content_length) / (1024 * 1024)
-                        except Exception:
-                            pass
+                            # Try metadata.json as last resort (but this is just metadata, not actual size)
+                            try:
+                                s3_key = f"{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+                                response = s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                # Don't use metadata.json size - it's too small
+                                # Just continue to return 0.0 if we can't find actual artifact
+                            except ClientError:
+                                continue
     except Exception as e:
         logger.debug(f"Error getting artifact size: {str(e)}")
     return 0.0
@@ -3089,8 +3105,24 @@ def get_artifact_cost(
                 try:
                     result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                     if result.get("models"):
-                        found = True
-                    else:
+                        # Iterate through models and verify they exist in S3
+                        for model in result["models"]:
+                            v = model.get("version", "main")
+                            model_n = model.get("name", id)
+                            # Sanitize model name for S3
+                            sanitized_name = sanitize_model_id_for_s3(model_n)
+                            try:
+                                s3_key = f"models/{sanitized_name}/{v}/model.zip"
+                                s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                found = True
+                                break
+                            except ClientError as e:
+                                error_code = e.response.get("Error", {}).get("Code", "")
+                                if error_code == "NoSuchKey" or error_code == "404":
+                                    continue
+                                else:
+                                    logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+                    if not found:
                         # Try with sanitized name for S3 lookup (handles IDs with slashes)
                         model_name_for_s3 = _get_model_name_for_s3(id)
                         if not model_name_for_s3:
@@ -3116,10 +3148,33 @@ def get_artifact_cost(
                 # Fallback: sanitize ID (in case it's a model name with special characters)
                 model_name = sanitize_model_id_for_s3(id)
             
-            sizes = get_model_sizes(model_name, "1.0.0")
-            if "error" in sizes:
-                raise HTTPException(status_code=404, detail=sizes["error"])
-            standalone_size_mb = sizes.get("full", 0) / (1024 * 1024)
+            # Try multiple versions to get size
+            standalone_size_mb = 0.0
+            for version in ["1.0.0", "main", "latest"]:
+                sizes = get_model_sizes(model_name, version)
+                if "error" not in sizes:
+                    size_bytes = sizes.get("full", 0)
+                    if size_bytes > 0:
+                        standalone_size_mb = size_bytes / (1024 * 1024)
+                        break
+            
+            if standalone_size_mb == 0.0:
+                # Fallback: try to get size from download URL
+                artifact = get_generic_artifact_metadata("model", id) or get_artifact_from_db(id)
+                if artifact:
+                    url = artifact.get("url", "")
+                    if url:
+                        try:
+                            import requests
+                            head_response = requests.head(url, timeout=10, allow_redirects=True)
+                            content_length = head_response.headers.get("Content-Length")
+                            if content_length:
+                                standalone_size_mb = int(content_length) / (1024 * 1024)
+                        except Exception as e:
+                            logger.debug(f"Error getting model size from URL: {str(e)}")
+                
+                if standalone_size_mb == 0.0:
+                    raise HTTPException(status_code=404, detail="Model size could not be determined.")
             if dependency:
                 # When dependency=true, return all artifacts (main + dependencies) with standalone_cost and total_cost
                 result = {}
@@ -3134,7 +3189,10 @@ def get_artifact_cost(
                 }
 
                 # Get dependencies from model's dataset_id and code_id
-                artifact = get_artifact_from_db(id)
+                # Try full metadata first to get all fields including dataset_id and code_id
+                artifact = get_generic_artifact_metadata("model", id)
+                if not artifact:
+                    artifact = get_artifact_from_db(id)
                 if artifact:
                     dataset_id = artifact.get("dataset_id")
                     code_id = artifact.get("code_id")
