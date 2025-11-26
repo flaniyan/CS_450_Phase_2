@@ -3568,45 +3568,7 @@ def get_model_rate(id: str, request: Request):
         # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
         if not id or not id.strip() or id == "{id}":
             logger.warning(f"DEBUG: Invalid id format: '{id}' (e.g., literal {{id}}) - returning zero metrics with status 200")
-            # Return zero metrics with status 200 for invalid ID formats (including literal {id})
-            # Response structure matches ModelRating schema exactly (all required fields present)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "name": id,
-                    "category": "unknown",
-                    "net_score": 0.0,
-                    "net_score_latency": 0.0,
-                    "ramp_up_time": 0.0,
-                    "ramp_up_time_latency": 0.0,
-                    "bus_factor": 0.0,
-                    "bus_factor_latency": 0.0,
-                    "performance_claims": 0.0,
-                    "performance_claims_latency": 0.0,
-                    "license": 0.0,
-                    "license_latency": 0.0,
-                    "dataset_and_code_score": 0.0,
-                    "dataset_and_code_score_latency": 0.0,
-                    "dataset_quality": 0.0,
-                    "dataset_quality_latency": 0.0,
-                    "code_quality": 0.0,
-                    "code_quality_latency": 0.0,
-                    "reproducibility": 0.0,
-                    "reproducibility_latency": 0.0,
-                    "reviewedness": 0.0,
-                    "reviewedness_latency": 0.0,
-                    "tree_score": 0.0,
-                    "tree_score_latency": 0.0,
-                    "size_score": {
-                        "raspberry_pi": 0.0,
-                        "jetson_nano": 0.0,
-                        "desktop_pc": 0.0,
-                        "aws_server": 0.0,
-                    },
-                    "size_score_latency": 0.0,
-                }
-            )
-        
+            raise HTTPException(status_code=404, detail="Artifact does not exist.")
         logger.info(f"DEBUG: ===== GET_MODEL_RATE START =====")
         logger.info(f"DEBUG: Querying rate for id='{id}'")
         
