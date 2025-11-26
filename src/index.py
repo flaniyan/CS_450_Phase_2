@@ -3793,57 +3793,209 @@ def get_model_lineage(id: str, request: Request):
         if not model_name:
             # Fallback: use ID directly (in case it was stored by ID)
             model_name = id
-
-        # Get lineage from config
-        result = get_model_lineage_from_config(model_name, "1.0.0")
-        if "error" in result:
-            error_msg = result["error"].lower()
+        
+        # Sanitize model name for S3 (models are stored with sanitized names)
+        sanitized_model_name = sanitize_model_id_for_s3(model_name)
+        
+        # Try to get lineage from config - try multiple versions
+        result = None
+        versions_to_try = ["1.0.0", "main", "latest"]
+        
+        for version in versions_to_try:
+            try:
+                # Try with sanitized name first
+                test_result = get_model_lineage_from_config(sanitized_model_name, version)
+                if "error" not in test_result:
+                    result = test_result
+                    break
+                # If sanitized name fails, try with original name
+                if sanitized_model_name != model_name:
+                    test_result = get_model_lineage_from_config(model_name, version)
+                    if "error" not in test_result:
+                        result = test_result
+                        break
+            except Exception:
+                continue
+        
+        # If all versions failed, return empty lineage instead of error
+        if not result or "error" in result:
+            error_msg = result.get("error", "").lower() if result else ""
             if (
                 "not found" in error_msg
                 or "does not exist" in error_msg
                 or "no such" in error_msg
             ):
-                raise HTTPException(status_code=404, detail="Artifact does not exist.")
+                # Model exists but lineage config not available - return empty lineage
+                return {
+                    "nodes": [],
+                    "edges": []
+                }
             else:
                 raise HTTPException(
                     status_code=400,
                     detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.",
                 )
 
-        # Build lineage graph
-        lineage_map = result.get("lineage_map", {})
+        # Build lineage graph according to spec
+        # Spec: ArtifactLineageGraph with nodes (ArtifactLineageNode[]) and edges (ArtifactLineageEdge[])
         nodes = []
         edges = []
+        
+        # Get lineage metadata
+        lineage_metadata = result.get("lineage_metadata", {})
+        current_model_id = result.get("model_id", id)
+        
+        # Get model name for current model
+        current_model_name = model_name if model_name else current_model_id
+        # Try to get artifact name from database
+        current_artifact = get_generic_artifact_metadata("model", id) or get_artifact_from_db(id)
+        if current_artifact and current_artifact.get("name"):
+            current_model_name = current_artifact.get("name")
+        
+        # Add current model as a node (required by spec)
+        nodes.append({
+            "artifact_id": id,  # Use the artifact ID from the request
+            "name": current_model_name,
+            "source": "config_json"
+        })
+        
+        # Check if there's a base_model (parent model)
+        # IMPORTANT: Only include models that are currently uploaded to the system
+        base_model = lineage_metadata.get("base_model")
+        if base_model:
+            # Try to find the base_model in our system
+            # Base model might be a model name (e.g., "bert-base-uncased") or already an artifact ID
+            base_model_name = base_model.split("/")[-1] if "/" in base_model else base_model
+            base_model_id = None
+            base_model_found = False
+            
+            # First, try to find by artifact ID (if base_model is already an ID)
+            try:
+                artifact = get_generic_artifact_metadata("model", base_model) or get_artifact_from_db(base_model)
+                if artifact and artifact.get("type") == "model":
+                    base_model_id = artifact.get("id", base_model)
+                    base_model_name = artifact.get("name", base_model_name)
+                    base_model_found = True
+            except Exception:
+                pass
+            
+            # If not found by ID, try to find by name
+            if not base_model_found:
+                try:
+                    # Search for models with this name in S3
+                    result = list_models(name_regex=f"^{re.escape(base_model_name)}$", limit=1)
+                    if result.get("models"):
+                        model_info = result["models"][0]
+                        # Try to get artifact_id from database
+                        model_name = model_info.get("name", base_model_name)
+                        artifacts = find_artifacts_by_name(model_name)
+                        if artifacts:
+                            base_model_id = artifacts[0].get("id")
+                            base_model_name = artifacts[0].get("name", model_name)
+                            base_model_found = True
+                        else:
+                            # Model exists in S3 but not in database - check S3 directly
+                            sanitized_name = sanitize_model_id_for_s3(model_name)
+                            for v in ["1.0.0", "main", "latest"]:
+                                try:
+                                    s3_key = f"models/{sanitized_name}/{v}/model.zip"
+                                    s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                    # Model exists in S3 - use name as ID (since no artifact_id)
+                                    base_model_id = model_name
+                                    base_model_found = True
+                                    break
+                                except ClientError:
+                                    continue
+                except Exception:
+                    pass
+            
+            # Only add base_model to graph if it exists in our system
+            if base_model_found and base_model_id:
+                # Add base model as a node
+                nodes.append({
+                    "artifact_id": base_model_id,
+                    "name": base_model_name,
+                    "source": "config_json"
+                })
+                
+                # Add edge from base_model to current model
+                # Relationship type: "base_model" per spec
+                relationship = "base_model"
+                edges.append({
+                    "from_node_artifact_id": base_model_id,
+                    "to_node_artifact_id": id,
+                    "relationship": relationship
+                })
+        
+        # Check lineage_map for additional relationships (if any)
+        # Only include models that are currently uploaded to the system
+        lineage_map = result.get("lineage_map", {})
+        for parent_id, children in lineage_map.items():
+            # Check if parent exists in our system
+            parent_found = False
+            parent_artifact_id = None
+            parent_name = parent_id.split("/")[-1] if "/" in parent_id else parent_id
+            
+            # Check if parent is already in nodes (from base_model above)
+            parent_exists_in_nodes = any(node.get("artifact_id") == parent_id for node in nodes)
+            if parent_exists_in_nodes:
+                parent_found = True
+                parent_artifact_id = parent_id
+            else:
+                # Try to find parent in our system
+                try:
+                    # Try by artifact ID
+                    artifact = get_generic_artifact_metadata("model", parent_id) or get_artifact_from_db(parent_id)
+                    if artifact and artifact.get("type") == "model":
+                        parent_artifact_id = artifact.get("id", parent_id)
+                        parent_name = artifact.get("name", parent_name)
+                        parent_found = True
+                    else:
+                        # Try by name
+                        result_check = list_models(name_regex=f"^{re.escape(parent_name)}$", limit=1)
+                        if result_check.get("models"):
+                            model_info = result_check["models"][0]
+                            model_name = model_info.get("name", parent_name)
+                            artifacts = find_artifacts_by_name(model_name)
+                            if artifacts:
+                                parent_artifact_id = artifacts[0].get("id")
+                                parent_name = artifacts[0].get("name", model_name)
+                                parent_found = True
+                            else:
+                                # Check S3 directly
+                                sanitized_name = sanitize_model_id_for_s3(model_name)
+                                for v in ["1.0.0", "main", "latest"]:
+                                    try:
+                                        s3_key = f"models/{sanitized_name}/{v}/model.zip"
+                                        s3.head_object(Bucket=ap_arn, Key=s3_key)
+                                        parent_artifact_id = model_name
+                                        parent_found = True
+                                        break
+                                    except ClientError:
+                                        continue
+                except Exception:
+                    pass
+            
+            # Only add parent if it exists in our system
+            if parent_found and parent_artifact_id:
+                if not parent_exists_in_nodes:
+                    # Add parent as a node
+                    nodes.append({
+                        "artifact_id": parent_artifact_id,
+                        "name": parent_name,
+                        "source": "config_json"
+                    })
+                
+                # Add edges from parent to each child (only if child is current model)
+                for child_id in children:
+                    if child_id == id:  # Current model
+                        edges.append({
+                            "from_node_artifact_id": parent_artifact_id,
+                            "to_node_artifact_id": id,
+                            "relationship": "base_model"
+                        })
 
-        # Add nodes from lineage map
-        for model_id, metadata in lineage_map.items():
-            nodes.append(
-                {
-                    "artifact_id": model_id,
-                    "name": metadata.get("name", model_id),
-                    "source": metadata.get("source", "config_json"),
-                }
-            )
-
-            # Add edges from dependencies/relationships
-            if "dependencies" in metadata or "relationships" in metadata:
-                deps = metadata.get("dependencies", []) or metadata.get(
-                    "relationships", []
-                )
-                for dep in deps:
-                    if isinstance(dep, dict):
-                        dep_id = dep.get("id") or dep.get("artifact_id")
-                        relationship = dep.get("relationship", "dependency")
-                        if dep_id:
-                            edges.append(
-                                {
-                                    "from_node_artifact_id": dep_id,
-                                    "to_node_artifact_id": model_id,
-                                    "relationship": relationship,
-                                }
-                            )
-
-        # Return lineage graph
+        # Return lineage graph matching spec format
         return {"nodes": nodes, "edges": edges}
     except HTTPException:
         raise
