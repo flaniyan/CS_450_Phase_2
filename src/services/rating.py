@@ -18,6 +18,7 @@ from ..services.s3_service import download_model
 from ..acmecli.metrics import METRIC_FUNCTIONS
 from ..acmecli.types import MetricValue
 from ..acmecli.scoring import compute_net_score
+from .rating_config import INGESTIBILITY_THRESHOLD
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -714,7 +715,7 @@ def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(False)):
     )
     if enforce:
         failures = [
-            (k, v) for k, v in subscores.items() if v is not None and float(v) <= 0.5
+            (k, v) for k, v in subscores.items() if v is not None and float(v) <= INGESTIBILITY_THRESHOLD
         ]
         if failures:
             raise HTTPException(

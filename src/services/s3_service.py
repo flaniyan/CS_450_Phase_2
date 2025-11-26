@@ -1735,25 +1735,28 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
         failures = []
         metric_scores_dict = {}
         for metric_name in REQUIRED_NON_LATENCY_METRICS:
+            from ..services.rating_config import DEFAULT_SCORE
             result = metric_results.get(metric_name)
-            score = 0.0
+            score = DEFAULT_SCORE
             if result is None:
                 print(f"[INGEST] WARNING: {metric_name} not found in metric_results. Available keys: {list(metric_results.keys())}")
                 failures.append(f"{metric_name}=MISSING")
-                metric_scores_dict[metric_name] = 0.0
+                metric_scores_dict[metric_name] = DEFAULT_SCORE
                 continue
             elif hasattr(result, "value"):
-                score = float(result.value) if result.value is not None else 0.0
+                score = float(result.value) if result.value is not None else DEFAULT_SCORE
             elif isinstance(result, (int, float)):
                 score = float(result)
             else:
                 print(f"[INGEST] WARNING: {metric_name} has unexpected type: {type(result)}, value: {result}")
-                score = 0.0
+                score = DEFAULT_SCORE
             metric_scores_dict[metric_name] = score
             print(f"[INGEST] {metric_name} = {score:.2f}")
-            if score < 0.5:
+            from ..services.rating_config import INGESTIBILITY_THRESHOLD
+            if score < INGESTIBILITY_THRESHOLD:
                 failures.append(f"{metric_name}={score:.2f}")
         if failures:
+            from ..services.rating_config import INGESTIBILITY_THRESHOLD
             print(f"[INGEST] Failed: {', '.join(failures)}")
             msg = f"Model failed ingestibility requirements. Failed metrics: {', '.join(failures)}"
             raise HTTPException(
@@ -1762,7 +1765,7 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                     "error": "INGESTIBILITY_FAILURE",
                     "message": msg,
                     "metric_scores": metric_scores_dict,
-                    "required_threshold": 0.5,
+                    "required_threshold": INGESTIBILITY_THRESHOLD,
                 },
             )
 

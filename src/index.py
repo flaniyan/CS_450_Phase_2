@@ -63,6 +63,14 @@ from .services.artifact_storage import (
     clear_all_artifacts,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
+from .services.rating_config import (
+    INGESTIBILITY_THRESHOLD,
+    DEFAULT_SCORE,
+    DEFAULT_CATEGORY,
+    DEFAULT_SIZE_SCORES,
+    DEFAULT_MODEL_VERSIONS,
+    SCORE_PRECISION,
+)
 from .services.license_compatibility import (
     extract_model_license,
     extract_github_license,
@@ -463,9 +471,9 @@ def _run_async_rating(artifact_id: str, model_name: str, version: str):
                 _rating_status[artifact_id] = "failed"
                 _rating_results[artifact_id] = None
             else:
-                net_score = alias(rating, "net_score", "NetScore", "netScore") or 0.0
-                if net_score < 0.5:
-                    logger.warning(f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < 0.5")
+                net_score = alias(rating, "net_score", "NetScore", "netScore") or DEFAULT_SCORE
+                if net_score < INGESTIBILITY_THRESHOLD:
+                    logger.warning(f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < {INGESTIBILITY_THRESHOLD}")
                     _rating_status[artifact_id] = "disqualified"
                     _rating_results[artifact_id] = None
                 else:
@@ -503,7 +511,7 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
             if not model_name:
                 model_name = sanitize_model_id_for_s3(artifact_id)
             # Try multiple versions
-            for version in ["1.0.0", "main", "latest"]:
+            for version in DEFAULT_MODEL_VERSIONS:
                 sizes = get_model_sizes(model_name, version)
                 if "error" not in sizes:
                     size_bytes = sizes.get("full", 0)
@@ -535,7 +543,7 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
                 if artifact_name:
                     sanitized_name = sanitize_model_id_for_s3(artifact_name)
                     # Try common versions
-                    for version in ["main", "1.0.0", "latest"]:
+                    for version in DEFAULT_MODEL_VERSIONS:
                         try:
                             # For datasets/code, check if there's a zip file or actual artifact file
                             # (not just metadata.json)
@@ -2207,8 +2215,8 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             
             # If not found, try common versions with sanitized name
             if not found:
-                logger.info(f"DEBUG: Not found via list_models, trying common versions: ['1.0.0', 'main', 'latest']")
-                common_versions = ["1.0.0", "main", "latest"]
+                logger.info(f"DEBUG: Not found via list_models, trying common versions: {DEFAULT_MODEL_VERSIONS}")
+                common_versions = DEFAULT_MODEL_VERSIONS
                 for v in common_versions:
                     try:
                         # Use sanitized name for S3 lookup
@@ -2964,7 +2972,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                 # Try to get model name from database for S3 lookup
                 model_name = _get_model_name_for_s3(id)
                 if model_name:
-                    common_versions = ["1.0.0", "main", "latest"]
+                    common_versions = DEFAULT_MODEL_VERSIONS
                     for v in common_versions:
                         try:
                             s3_key = f"models/{model_name}/{v}/model.zip"
@@ -2977,7 +2985,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                                 continue
                 # Fallback: try by ID directly (in case it was stored by ID)
                 if not found:
-                    common_versions = ["1.0.0", "main", "latest"]
+                    common_versions = DEFAULT_MODEL_VERSIONS
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
@@ -3063,7 +3071,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
             deleted = True
         if artifact_type == "model":
             deleted_count = 0
-            common_versions = ["1.0.0", "main", "latest"]
+            common_versions = DEFAULT_MODEL_VERSIONS
             for version in common_versions:
                 s3_key = f"models/{id}/{version}/model.zip"
                 try:
@@ -3096,7 +3104,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
                 except Exception:
                     pass
             if deleted_count == 0 and not deleted:
-                for version in ["1.0.0", "main", "latest"]:
+                for version in DEFAULT_MODEL_VERSIONS:
                     s3_key = f"models/{id}/{version}/model.zip"
                     try:
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -3176,7 +3184,7 @@ def get_artifact_cost(
                         model_name_for_s3 = _get_model_name_for_s3(id)
                         if not model_name_for_s3:
                             model_name_for_s3 = sanitize_model_id_for_s3(id)
-                        common_versions = ["1.0.0", "main", "latest"]
+                        common_versions = DEFAULT_MODEL_VERSIONS
                         for v in common_versions:
                             try:
                                 # Use sanitized name for S3 lookup
@@ -3199,7 +3207,7 @@ def get_artifact_cost(
             
             # Try multiple versions to get size
             standalone_size_mb = 0.0
-            for version in ["1.0.0", "main", "latest"]:
+            for version in DEFAULT_MODEL_VERSIONS:
                 sizes = get_model_sizes(model_name, version)
                 if "error" not in sizes:
                     size_bytes = sizes.get("full", 0)
@@ -3419,7 +3427,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 model_name_for_s3 = _get_model_name_for_s3(id)
                 if not model_name_for_s3:
                     model_name_for_s3 = sanitize_model_id_for_s3(id)
-                versions = ["1.0.0", "main", "latest"]
+                versions = DEFAULT_MODEL_VERSIONS
                 for v in versions:
                     try:
                         # Use sanitized name for S3 lookup
@@ -3439,7 +3447,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 model_name_for_s3 = _get_model_name_for_s3(id)
                 if not model_name_for_s3:
                     model_name_for_s3 = sanitize_model_id_for_s3(id)
-                s3_key = f"models/{model_name_for_s3}/{version or '1.0.0'}/model.zip"
+                s3_key = f"models/{model_name_for_s3}/{version or DEFAULT_MODEL_VERSIONS[0]}/model.zip"
                 obj = s3.head_object(Bucket=ap_arn, Key=s3_key)
                 last_modified = obj.get("LastModified")
                 if last_modified:
@@ -3540,72 +3548,67 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
     size_score = alias(rating, "size_score", "SizeScore", "score_size_score")
     if isinstance(size_score, dict):
         return {
-            "raspberry_pi": round(float(size_score.get("raspberry_pi", 0.0)), 2),
-            "jetson_nano": round(float(size_score.get("jetson_nano", 0.0)), 2),
-            "desktop_pc": round(float(size_score.get("desktop_pc", 0.0)), 2),
-            "aws_server": round(float(size_score.get("aws_server", 0.0)), 2),
+            "raspberry_pi": round(float(size_score.get("raspberry_pi", DEFAULT_SIZE_SCORES["raspberry_pi"])), SCORE_PRECISION),
+            "jetson_nano": round(float(size_score.get("jetson_nano", DEFAULT_SIZE_SCORES["jetson_nano"])), SCORE_PRECISION),
+            "desktop_pc": round(float(size_score.get("desktop_pc", DEFAULT_SIZE_SCORES["desktop_pc"])), SCORE_PRECISION),
+            "aws_server": round(float(size_score.get("aws_server", DEFAULT_SIZE_SCORES["aws_server"])), SCORE_PRECISION),
         }
     else:
         # If size_score is not a dict, return default values
-        return {
-            "raspberry_pi": 0.0,
-            "jetson_nano": 0.0,
-            "desktop_pc": 0.0,
-            "aws_server": 0.0,
-        }
+        return DEFAULT_SIZE_SCORES.copy()
 
 
 def _build_rating_response(id: str, rating: Dict[str, Any]) -> Dict[str, Any]:
-    """Build ModelRating response with all required fields."""
+    """Build ModelRating response with all required fields per OpenAPI spec."""
     return {
         "name": id,
-        "category": alias(rating, "category") or "unknown",
-        "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2),
-        "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2),
+        "category": alias(rating, "category") or DEFAULT_CATEGORY,
+        "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or DEFAULT_SCORE), SCORE_PRECISION),
+        "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "ramp_up_time": round(float(alias(
             rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
-        ) or 0.0), 2),
-        "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "bus_factor": round(float(alias(
             rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
-        ) or 0.0), 2),
-        "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "performance_claims": round(float(alias(
             rating,
             "performance_claims",
             "PerformanceClaims",
             "score_performance_claims",
-        ) or 0.0), 2),
-        "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or 0.0), 2),
-        "license": round(float(alias(rating, "license", "License", "score_license") or 0.0), 2),
-        "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or DEFAULT_SCORE), SCORE_PRECISION),
+        "license": round(float(alias(rating, "license", "License", "score_license") or DEFAULT_SCORE), SCORE_PRECISION),
+        "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "dataset_and_code_score": round(float(alias(
             rating,
             "dataset_code",
             "DatasetCode",
             "score_available_dataset_and_code",
-        ) or 0.0), 2),
-        "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "dataset_quality": round(float(alias(
             rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
-        ) or 0.0), 2),
-        "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "code_quality": round(float(alias(
             rating, "code_quality", "CodeQuality", "score_code_quality"
-        ) or 0.0), 2),
-        "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "reproducibility": round(float(alias(
             rating, "reproducibility", "Reproducibility", "score_reproducibility"
-        ) or 0.0), 2),
-        "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "reviewedness": round(float(alias(
             rating, "reviewedness", "Reviewedness", "score_reviewedness"
-        ) or 0.0), 2),
-        "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0), 2),
-        "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2),
-        "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2),
+        ) or DEFAULT_SCORE), SCORE_PRECISION),
+        "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or DEFAULT_SCORE), SCORE_PRECISION),
+        "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or DEFAULT_SCORE), SCORE_PRECISION),
+        "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
         "size_score": _extract_size_scores(rating),
-        "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2),
+        "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
     }
 
 
@@ -3677,7 +3680,7 @@ def get_model_rate(id: str, request: Request):
                     logger.info(f"DEBUG: Model found via list_models")
                 else:
                     logger.info(f"DEBUG: No models found, trying common versions")
-                    common_versions = ["1.0.0", "main", "latest"]
+                    common_versions = DEFAULT_MODEL_VERSIONS
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
@@ -3831,7 +3834,7 @@ def get_model_lineage(id: str, request: Request):
                     # Try to get model name from database for S3 lookup
                     model_name = _get_model_name_for_s3(id)
                     if model_name:
-                        common_versions = ["1.0.0", "main", "latest"]
+                        common_versions = DEFAULT_MODEL_VERSIONS
                         for v in common_versions:
                             try:
                                 s3_key = f"models/{model_name}/{v}/model.zip"
@@ -3842,7 +3845,7 @@ def get_model_lineage(id: str, request: Request):
                                 continue
                     # Fallback: try by ID directly (in case it was stored by ID)
                     if not found:
-                        common_versions = ["1.0.0", "main", "latest"]
+                        common_versions = DEFAULT_MODEL_VERSIONS
                         for v in common_versions:
                             try:
                                 s3_key = f"models/{id}/{v}/model.zip"
@@ -3868,7 +3871,7 @@ def get_model_lineage(id: str, request: Request):
         
         # Try to get lineage from config - try multiple versions
         result = None
-        versions_to_try = ["1.0.0", "main", "latest"]
+        versions_to_try = DEFAULT_MODEL_VERSIONS
         
         for version in versions_to_try:
             try:
@@ -3975,7 +3978,7 @@ def get_model_lineage(id: str, request: Request):
                         else:
                             # Model exists in S3 but not in database - check S3 directly
                             sanitized_name = sanitize_model_id_for_s3(model_name)
-                            for v in ["1.0.0", "main", "latest"]:
+                            for v in DEFAULT_MODEL_VERSIONS:
                                 try:
                                     s3_key = f"models/{sanitized_name}/{v}/model.zip"
                                     s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -4043,7 +4046,7 @@ def get_model_lineage(id: str, request: Request):
                             else:
                                 # Check S3 directly
                                 sanitized_name = sanitize_model_id_for_s3(model_name)
-                                for v in ["1.0.0", "main", "latest"]:
+                                for v in DEFAULT_MODEL_VERSIONS:
                                     try:
                                         s3_key = f"models/{sanitized_name}/{v}/model.zip"
                                         s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -4117,7 +4120,7 @@ async def check_model_license(id: str, request: Request):
                     found = True
                 else:
                     # Try common versions
-                    common_versions = ["1.0.0", "main", "latest"]
+                    common_versions = DEFAULT_MODEL_VERSIONS
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"

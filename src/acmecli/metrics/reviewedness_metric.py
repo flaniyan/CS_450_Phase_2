@@ -10,9 +10,10 @@ class ReviewednessMetric:
         t0 = time.perf_counter()
         github_url = (meta.get("github_url") or "").strip()
         
+        # Per spec: return -1 if there is no linked GitHub repository
         if not github_url:
             latency_ms = int((time.perf_counter() - t0) * 1000)
-            return MetricValue(self.name, 0.5, latency_ms)
+            return MetricValue(self.name, -1.0, latency_ms)
 
         gh = meta.get("github") or {}
         prs = gh.get("prs") or []

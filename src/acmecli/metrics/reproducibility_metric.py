@@ -22,18 +22,12 @@ class ReproducibilityMetric:
 
         has_demo = self._has_demo(readme)
         
+        # Per spec: 0 = no code/doesn't run, 0.5 = runs with debugging, 1.0 = runs with no changes/debugging
         if not has_demo:
-            score = 0.0
-            if self._has_any_code_indicators(readme, files):
-                score = 0.5
-            elif readme:
-                score = 0.4
-            elif files:
-                score = 0.3
-            elif meta.get("github_url") or meta.get("full_name") or meta.get("name"):
-                score = 0.2
-            value = max(0.0, min(0.5, score))
+            # No demonstration code found - model cannot be run using only included code
+            value = 0.0
         else:
+            # Demo code exists - check if it runs without changes/debugging
             simple_install = self._has_simple_install(readme)
             _, referenced_paths = self._extract_run_target(readme)
 
@@ -48,20 +42,12 @@ class ReproducibilityMetric:
             has_secrets = self._mentions_secrets(readme)
             needs_heavy_setup = self._needs_heavy_setup(readme)
 
-            score = 0.5
-            if simple_install:
-                score += 0.2
-            if paths_exist:
-                score += 0.2
-            if not has_secrets:
-                score += 0.05
-            if not needs_heavy_setup:
-                score += 0.05
-            
+            # If all conditions are met, it runs with no changes/debugging (1.0)
+            # Otherwise, it runs but requires debugging (0.5)
             if simple_install and paths_exist and not has_secrets and not needs_heavy_setup:
                 value = 1.0
             else:
-                value = max(0.5, min(1.0, score))
+                value = 0.5
         
         value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)

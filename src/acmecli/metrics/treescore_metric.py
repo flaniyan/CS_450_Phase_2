@@ -42,27 +42,21 @@ class TreescoreMetric:
                 if parent_score is not None and 0.0 <= parent_score <= 1.0:
                     scores.append(parent_score)
 
+        # Per spec: Average of the total model scores (net_score) of all parents
+        # Only includes models currently uploaded to the system
         if len(scores) > 0:
-            avg = sum(scores) / len(scores)
-            avg = max(0.0, min(1.0, avg))
-            value = avg
-            
-            if value < 0.5 and len(parents) > 0:
-                if len(scores) == len(parents):
-                    value = max(0.5, value * 1.2)
-                elif len(scores) > 0:
-                    value = max(0.5, value * 1.5)
-                else:
-                    value = 0.5
+            # Calculate simple average of parent net_scores
+            value = sum(scores) / len(scores)
+            value = max(0.0, min(1.0, value))
         else:
             if len(parents) > 0:
-                # Parents found but no scores available - use neutral default
-                value = 0.5
+                # Parents found in lineage graph but no scores available (parents not uploaded to system)
+                # Return 0.0 as no valid parent scores to average
+                value = 0.0
             else:
-                # No parents found - no lineage information available
-                # Return neutral default score of 0.5 (model is not added as its own parent
-                # to avoid circular dependencies, but conceptually treated as standalone)
-                value = 0.5
+                # No parents found - no lineage information available in config.json
+                # Return 0.0 as there are no parents to average
+                value = 0.0
         
         value = max(0.0, min(1.0, value))
         value = round(float(value), 2)
