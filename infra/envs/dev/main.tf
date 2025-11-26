@@ -48,6 +48,7 @@ module "monitoring" {
   artifacts_bucket      = local.artifacts_bucket
   validator_service_url = "http://placeholder"
   ddb_tables_arnmap     = local.ddb_tables_arnmap
+  github_token          = var.github_token
 }
 
 module "iam" {

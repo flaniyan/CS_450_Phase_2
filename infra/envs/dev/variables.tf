@@ -15,3 +15,9 @@ variable "kms_key_arn" {
   description = "KMS key ARN for encryption (optional, will look up via alias if not provided)"
   default     = ""
 }
+variable "github_token" {
+  type        = string
+  description = "GitHub Personal Access Token for API requests"
+  default     = "ghp_test_token_placeholder"
+  sensitive   = true
+}

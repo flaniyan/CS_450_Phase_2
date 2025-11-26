@@ -9,6 +9,7 @@ import io
 import tempfile
 import glob
 import traceback
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +19,7 @@ from ..acmecli.metrics import METRIC_FUNCTIONS
 from ..acmecli.types import MetricValue
 from ..acmecli.scoring import compute_net_score
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -129,16 +131,21 @@ def analyze_model_content(
                     model_content = download_model(found_model_name, found_version, "full")
                     if model_content:
                         clean_model_id = target  # Keep original target for display
-                        print(f"[RATE] Successfully downloaded model from S3: {found_model_name} v{found_version}")
+                        logger.debug(f"[RATE] Successfully downloaded model from S3: {found_model_name} v{found_version}")
+                except HTTPException as s3_error:
+                    # HTTPException with 404 means model not found - this is expected, will fallback to HuggingFace
+                    # Don't log as error - this is normal behavior
+                    if s3_error.status_code != 404:
+                        # Only log non-404 errors (actual problems)
+                        logger.warning(f"[RATE] S3 download error for {found_model_name}: {s3_error.detail}")
+                    pass
                 except Exception as s3_error:
-                    # If download fails, continue to try HuggingFace
-                    print(f"[RATE] S3 download failed for {found_model_name}: {s3_error}")
+                    # Other unexpected errors should be logged
+                    logger.debug(f"[RATE] S3 download failed for {found_model_name}, will try HuggingFace: {s3_error}")
                     pass
         except Exception as s3_check_error:
-            # If S3 check fails, continue to try HuggingFace
-            print(f"[RATE] S3 check failed: {s3_check_error}")
-            import traceback
-            print(f"[RATE] S3 check traceback: {traceback.format_exc()}")
+            # If S3 check fails, continue to try HuggingFace (this is expected behavior)
+            logger.debug(f"[RATE] S3 check failed, will try HuggingFace: {s3_check_error}")
             pass
 
         # If not found in S3, try HuggingFace

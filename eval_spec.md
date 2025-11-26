@@ -1,16 +1,45 @@
 # Phase 2 Project Todo List
 
-**Current Status**: 52% of autograder portion (35% of total grade) = ~18.2% overall
+**Current Status**: 82.3% of autograder portion (35% of total grade) = ~28.8% overall
+**Latest Test Results**: 261 / 317 points (November 26, 2025)
 
 ---
 
 ## 📋 Overall Priority Todo List (Ranked by Importance)
 
 ### 🔴 Critical Priority (Must Complete for Passing Grade)
-1. **Autograder Baseline Features (35% of grade)** - Currently at 52%
-   - Fix any remaining autograder compliance issues
-   - Ensure all endpoints match OpenAPI spec exactly
-   - Test with autograder requirements
+1. **Autograder Baseline Features (35% of grade)** - Currently at 82.3% (261/317)
+   - **Working Well (100% pass rate)**:
+     - Setup and Reset Test Group: 6/6 ✅
+     - Artifact Read Test Group: 61/61 ✅
+     - Artifact Download URL Test Group: 5/5 ✅
+     - Artifact Cost Test Group: 14/14 ✅
+   
+   - **Needs Fixing**:
+     - **Model Query Tests**: Single Model Query Test failed, All Model Query Test failed (dependency issue)
+       - Issue: Model queries not returning expected results after ingestion
+       - Impact: Blocks All Artifacts Query Test and Regex Tests (0/6)
+     - **Rate Models Concurrently**: 1/14 passing (13 failures)
+       - Issue: Rating endpoint failing for most models during concurrent requests
+       - Impact: Critical for rating functionality
+     - **Model Rating Attributes**: 135/156 (86.5% partial success)
+       - Issue: Some rating attributes missing or incorrect
+       - Most models have 11/12 attributes correct, some have 9/12 or 7/12
+     - **Artifact License Check**: 1/6 passing (5 failures)
+       - Issue: License compatibility checks failing
+     - **Artifact Lineage**: 1/4 passing (3 failures)
+       - Issue: Lineage graph extraction failing for specific models
+     - **Artifact Delete**: 5/10 passing (5 failures)
+       - Issue: Delete operations not working correctly for models
+       - After delete, artifacts still appear in queries
+   
+   - **Action Items**:
+     - Fix model query endpoint to properly return ingested models
+     - Investigate rating endpoint failures during concurrent requests
+     - Verify all rating attributes are included in response
+     - Fix license check endpoint implementation
+     - Fix lineage extraction for models that should have lineage data
+     - Fix delete endpoint to properly remove artifacts and update queries
    - **Note**: Regardless of implementation seeming correct, the autograder score is the true determination
 
 2. **Extended Features - Performance Track (15% of grade)**
@@ -59,7 +88,7 @@
 
 ## Estimated Grade Breakdown
 
-### Current Estimated Grade: **~63.7%**
+### Current Estimated Grade: **~74.3%**
 
 **Breakdown:**
 - **Design & Planning + Milestones (30%)**: ~95% complete = **28.5%**
@@ -67,35 +96,187 @@
   - Weekly milestones: ~89% (Week 9 in progress)
   
 - **Working Delivery (60%)**:
-  - **Autograder Baseline (35%)**: 52% complete = **18.2%**
+  - **Autograder Baseline (35%)**: 82.3% complete (261/317) = **28.8%**
   - **Extended Features (15%)**: ~0% complete = **0%**
   - **Engineering Practices (10%)**: ~70% complete = **7%**
-  - **Subtotal**: **25.2%**
+  - **Subtotal**: **35.8%**
 
 - **Post-mortem (10%)**: Projected 100% = **10%**
 
-**Total Estimated Grade: ~63.7%**
+**Total Estimated Grade: ~74.3%**
 
-**With Post-mortem Projection (100%): ~63.7%** (already included above)
+**Latest Test Results (November 26, 2025):**
+- **Total Score**: 261 / 317 (82.3%)
+- **Test Groups**:
+  - Setup and Reset: 6/6 (100%) ✅
+  - Upload Artifacts: 32/35 (91.4%) ⚠️
+  - Regex Tests: 0/6 (0%) ❌ (blocked by dependency)
+  - Artifact Read: 61/61 (100%) ✅
+  - Artifact Download URL: 5/5 (100%) ✅
+  - Rate models concurrently: 1/14 (7.1%) ❌
+  - Validate Model Rating Attributes: 135/156 (86.5%) ⚠️
+  - Artifact Cost: 14/14 (100%) ✅
+  - Artifact License Check: 1/6 (16.7%) ❌
+  - Artifact Lineage: 1/4 (25%) ❌
+  - Artifact Delete: 5/10 (50%) ⚠️
 
 **Note**: This estimate assumes:
-- Autograder score remains at 52% (needs improvement)
+- Autograder score at 82.3% (improved from 52%)
 - Performance track not yet started
 - Engineering practices mostly complete
 - Post-mortem will be completed at 100%
 
 **To Improve Grade:**
-- Focus on autograder compliance (could add 10-15% if improved to 80-90%)
+- Fix model query issues (could add 3-5% if all query tests pass)
+  - Priority: HIGH - Blocks multiple test groups
+- Fix rating endpoint for concurrent requests (could add 5-7%)
+  - Priority: HIGH - Critical functionality failing
+- Fix license check and lineage endpoints (could add 2-3%)
+  - Priority: MEDIUM - Specific functionality issues
+- Fix delete endpoint (could add 1-2%)
+  - Priority: MEDIUM - Delete works but verification fails
 - Complete Performance Track (adds 15% if done well)
+  - Priority: HIGH - Significant grade impact
 - Complete remaining engineering practices (adds 2-3%)
+  - Priority: MEDIUM - Quality improvements
 
-**Potential Final Grade Range: 75-85%** (if autograder improves and Performance Track completed)
+**Potential Final Grade Range: 85-95%** (if all critical issues fixed and Performance Track completed)
+
+**Critical Path to 90%+ Grade:**
+1. Fix model query endpoint (unblocks 9+ test points)
+2. Fix concurrent rating requests (unblocks 13+ test points)
+3. Fix license check endpoint (unblocks 5+ test points)
+4. Fix lineage extraction (unblocks 3+ test points)
+5. Fix delete verification (unblocks 5+ test points)
+6. Complete Performance Track (adds 15% to grade)
 
 ---
 
-## 35% - Autograder Baseline Features (Currently at 52%)
+## 35% - Autograder Baseline Features (Currently at 82.3% - 261/317 points)
 
 **⚠️ IMPORTANT NOTE**: Regardless of implementation seeming correct, the autograder score is the true determination of completion for all items below.
+
+### Test Results Summary (November 26, 2025)
+
+**✅ Fully Working (100% pass rate):**
+- Setup and Reset functionality (6/6 tests)
+- Artifact Read operations (61/61 tests)
+- Artifact Download URL generation (5/5 tests)
+- Artifact Cost calculation (14/14 tests)
+
+**⚠️ Partially Working:**
+- Upload Artifacts (32/35 tests - 91.4%)
+  - Model ingestion working
+  - Model query tests failing (blocking other tests)
+- Model Rating Attributes (135/156 - 86.5%)
+  - Most models have 11/12 attributes correct
+  - Some missing attributes need investigation
+- Artifact Delete (5/10 tests - 50%)
+  - Delete operations work but verification fails
+
+**❌ Needs Immediate Fix:**
+- Model Query Tests (0/3 passing)
+  - Single Model Query Test failed
+  - All Model Query Test failed (dependency)
+  - Blocks: All Artifacts Query Test, Regex Tests (0/6)
+  - **Root Cause**: Models are being ingested successfully but queries are not finding them
+  - **Action**: Investigate `/artifacts` POST endpoint and model query logic
+- Rate Models Concurrently (1/14 passing - 7.1%)
+  - 13 out of 14 rating requests failing during concurrent load
+  - **Root Cause**: Rating endpoint may have race conditions or timeout issues
+  - **Action**: Review concurrent request handling in rating endpoint
+- Artifact License Check (1/6 passing - 16.7%)
+  - 5 out of 6 license checks failing
+  - **Root Cause**: License compatibility logic may be incorrect
+  - **Action**: Review license check endpoint implementation
+- Artifact Lineage (1/4 passing - 25%)
+  - 3 out of 4 lineage extractions failing
+  - **Root Cause**: Lineage extraction from config.json may be failing for some models
+  - **Action**: Review lineage extraction logic and error handling
+
+### Detailed Test Failure Analysis
+
+#### 1. Model Query Tests (Critical - Blocks 9+ test points)
+**Failed Tests:**
+- Single Model Query Test
+- All Model Query Test (dependency failure)
+- All Artifacts Query Test (dependency failure)
+- Regex Tests (0/6 - all blocked by dependency)
+
+**Symptoms:**
+- Models are successfully ingested (all 13 model ingestions passed)
+- Queries immediately after ingestion fail to find the models
+- This suggests a timing issue or query endpoint not properly searching ingested models
+
+**Investigation Needed:**
+- Check if `/artifacts` POST endpoint properly searches S3 for models
+- Verify model metadata is being stored correctly after ingestion
+- Check if there's a delay between ingestion and query availability
+- Review query logic in `/artifacts` endpoint
+
+#### 2. Rate Models Concurrently (Critical - 13/14 failures)
+**Failed Tests:**
+- 13 out of 14 rating requests failing during concurrent execution
+- Only 1 model successfully rated under concurrent load
+
+**Symptoms:**
+- Rating works for individual requests (based on partial success in attribute validation)
+- Fails when multiple requests are made concurrently
+- Suggests race conditions, timeouts, or resource contention
+
+**Investigation Needed:**
+- Review rating endpoint for thread-safety issues
+- Check for database/S3 locking problems
+- Verify timeout settings are appropriate
+- Review async/concurrent request handling
+
+#### 3. Model Rating Attributes (Partial - 86.5% success)
+**Status:**
+- Most models: 11/12 attributes correct
+- Some models: 9/12 or 7/12 attributes correct
+- Missing attributes need identification
+
+**Investigation Needed:**
+- Compare successful vs failed attribute sets
+- Verify all required fields from ModelRating schema are present
+- Check for optional vs required field handling
+
+#### 4. Artifact License Check (Critical - 5/6 failures)
+**Failed Tests:**
+- 5 out of 6 license compatibility checks failing
+- Only 1 check passing
+
+**Investigation Needed:**
+- Review license compatibility logic
+- Verify GitHub API integration for license fetching
+- Check license parsing and comparison logic
+- Review error handling for missing licenses
+
+#### 5. Artifact Lineage (Critical - 3/4 failures)
+**Failed Tests:**
+- Microsoft ResNet-50 Artifact Lineage Test failed
+- Crangana Trained Gender Artifact Lineage Test failed
+- ONNX Community Trained Gender Artifact Lineage Test failed
+
+**Investigation Needed:**
+- Verify config.json extraction for these specific models
+- Check if models have valid lineage data in config.json
+- Review lineage graph construction logic
+- Verify base_model field extraction
+
+#### 6. Artifact Delete (Partial - 5/10 failures)
+**Status:**
+- Delete operations execute successfully
+- Verification after delete fails (artifacts still appear in queries)
+- Models: Delete fails completely
+- Datasets: Delete works but verification fails
+- Code: Delete works but verification fails
+
+**Investigation Needed:**
+- Verify delete actually removes artifacts from storage
+- Check if queries are properly excluding deleted artifacts
+- Review soft-delete vs hard-delete implementation
+- Verify database/S3 cleanup after delete
 
 ### CR[U]D Operations 
 *Note: Final grade determined by autograder*

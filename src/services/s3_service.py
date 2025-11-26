@@ -1050,6 +1050,10 @@ def get_model_lineage_from_config(model_id: str, version: str) -> Dict[str, Any]
             "lineage_map": lineage_map,
             "config": config,
         }
+    except HTTPException as e:
+        # Extract detail from HTTPException for better error handling
+        error_detail = e.detail if hasattr(e, 'detail') else str(e)
+        return {"model_id": model_id, "error": error_detail}
     except Exception as e:
         print(f"Error getting lineage from config: {e}")
         return {"model_id": model_id, "error": str(e)}

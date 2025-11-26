@@ -12,11 +12,12 @@ class GitHubHandler:
 
     def __init__(self):
         github_token = os.environ.get("GITHUB_TOKEN")
+        self._has_token = bool(github_token and github_token != "ghp_test_token_placeholder")
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",
         }
-        if github_token:
+        if github_token and github_token != "ghp_test_token_placeholder":
             if github_token.startswith("ghp_") or github_token.startswith(
                 "github_pat_"
             ):
@@ -58,10 +59,18 @@ class GitHubHandler:
                         http_err,
                     )
             elif http_err.code == 401:
-                logging.error(
-                    "GitHub API unauthorized (401) for %s. Check GITHUB_TOKEN environment variable.",
-                    url,
-                )
+                # 401 is expected when no token is set - log at debug level
+                # Only log as error if token was set but is invalid
+                if self._has_token:
+                    logging.error(
+                        "GitHub API unauthorized (401) for %s. GITHUB_TOKEN appears to be invalid.",
+                        url,
+                    )
+                else:
+                    logging.debug(
+                        "GitHub API unauthorized (401) for %s. GITHUB_TOKEN not set - this is expected for unauthenticated requests.",
+                        url,
+                    )
             else:
                 logging.error("HTTP error fetching %s: %s", url, http_err)
         except URLError as url_err:

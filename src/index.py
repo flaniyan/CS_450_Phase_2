@@ -915,6 +915,55 @@ async def list_artifacts(request: Request, offset: str = None):
                         # Return only the first match - single package requirement
                         break
                 
+                # If not found by name, check if 'name' is actually an artifact_id
+                if not results:
+                    # Try looking up by artifact_id in database
+                    artifact_by_id = get_artifact_from_db(name)
+                    if artifact_by_id:
+                        artifact_id = artifact_by_id.get("id", "")
+                        artifact_name = artifact_by_id.get("name", "")
+                        artifact_type_stored = artifact_by_id.get("type", "")
+                        if (artifact_id and 
+                            (not types_filter or artifact_type_stored in types_filter) and
+                            artifact_id not in seen_ids):
+                            results.append(
+                                {
+                                    "name": artifact_name or artifact_id,
+                                    "id": artifact_id,
+                                    "type": artifact_type_stored,
+                                }
+                            )
+                            seen_ids.add(artifact_id)
+                            # Return only the first match
+                            break
+                    # Also try generic metadata lookup
+                    if not results:
+                        artifact_by_id = get_generic_artifact_metadata("model", name)
+                        if not artifact_by_id:
+                            # Try other types
+                            for atype in ["dataset", "code"]:
+                                if not types_filter or atype in types_filter:
+                                    artifact_by_id = get_generic_artifact_metadata(atype, name)
+                                    if artifact_by_id:
+                                        break
+                        if artifact_by_id:
+                            artifact_id = artifact_by_id.get("id", name)
+                            artifact_name = artifact_by_id.get("name", artifact_id)
+                            artifact_type_stored = artifact_by_id.get("type", "")
+                            if (artifact_id and 
+                                (not types_filter or artifact_type_stored in types_filter) and
+                                artifact_id not in seen_ids):
+                                results.append(
+                                    {
+                                        "name": artifact_name,
+                                        "id": artifact_id,
+                                        "type": artifact_type_stored,
+                                    }
+                                )
+                                seen_ids.add(artifact_id)
+                                # Return only the first match
+                                break
+                
                 # If not found in database, search S3 for models
                 if not results and (not types_filter or "model" in types_filter):
                     escaped_name = re.escape(name)
@@ -3840,17 +3889,27 @@ def get_model_lineage(id: str, request: Request):
         # If all versions failed, return empty lineage instead of error
         if not result or "error" in result:
             error_msg = result.get("error", "").lower() if result else ""
-            if (
-                "not found" in error_msg
-                or "does not exist" in error_msg
-                or "no such" in error_msg
-            ):
+            # Check for various "not found" patterns (including HTTP status codes)
+            not_found_patterns = [
+                "not found",
+                "does not exist",
+                "no such",
+                "nosuchkey",
+                "aws download failed",
+                "404",
+                "artifact does not exist",
+                "no config.json found in model",  # Config missing is also a "not found" scenario
+            ]
+            if any(pattern in error_msg for pattern in not_found_patterns):
                 # Model exists but lineage config not available - return empty lineage
+                logger.debug(f"Lineage config not available for model {id}: {result.get('error', 'unknown error')}")
                 return {
                     "nodes": [],
                     "edges": []
                 }
             else:
+                # Other errors (malformed metadata, parsing errors, etc.) - return 400
+                logger.error(f"Lineage computation failed for model {id}: {result.get('error', 'unknown error')}")
                 raise HTTPException(
                     status_code=400,
                     detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.",

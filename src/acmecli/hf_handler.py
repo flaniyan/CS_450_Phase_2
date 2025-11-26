@@ -195,7 +195,11 @@ class HFHandler:
             with urlopen(request, timeout=10) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as http_err:
-            logging.error("HTTP error fetching %s: %s", url, http_err)
+            # 401 errors from HuggingFace are often rate limiting or temporary - log at debug level
+            if http_err.code == 401:
+                logging.debug("HTTP error fetching %s: %s (401 Unauthorized - may be rate limiting)", url, http_err)
+            else:
+                logging.error("HTTP error fetching %s: %s", url, http_err)
         except URLError as url_err:
             logging.error("Network error fetching %s: %s", url, url_err)
         except Exception as exc:
