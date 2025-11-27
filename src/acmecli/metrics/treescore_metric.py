@@ -51,12 +51,12 @@ class TreescoreMetric:
         else:
             if len(parents) > 0:
                 # Parents found in lineage graph but no scores available (parents not uploaded to system)
-                # Return 0.0 as no valid parent scores to average
-                value = 0.0
+                # Per spec (4): Cannot calculate average without parent scores, default to 0.5
+                value = 0.5
             else:
                 # No parents found - no lineage information available in config.json
-                # Return 0.0 as there are no parents to average
-                value = 0.0
+                # Per spec (4): Cannot calculate average without parents, default to 0.5
+                value = 0.5
         
         value = max(0.0, min(1.0, value))
         value = round(float(value), 2)

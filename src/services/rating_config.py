@@ -31,3 +31,4 @@ DEFAULT_MODEL_VERSIONS: List[str] = os.getenv(
 SCORE_PRECISION = int(os.getenv("RATING_SCORE_PRECISION", "2"))
 
 
+
