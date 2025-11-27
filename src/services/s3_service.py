@@ -1807,6 +1807,30 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
             if not meta.get("readme_text"):
                 print(f"[INGEST] Warning: No README text found for {model_id}")
 
+            readme_text = meta.get("readme_text", "")
+            if readme_text:
+                from ..index import _parse_dependencies
+                dependency_info = _parse_dependencies(readme_text, model_id)
+                
+                base_models = dependency_info.get("parent_models", [])
+                if base_models:
+                    if not meta.get("parents"):
+                        meta["parents"] = []
+                    for base_model in base_models:
+                        clean_base = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
+                        if clean_base and clean_base != clean_model_id:
+                            base_exists = any(
+                                p.get("id") == clean_base for p in meta["parents"]
+                            )
+                            if not base_exists:
+                                meta["parents"].append({"id": clean_base, "score": None})
+                
+                if dependency_info.get("parent_models"):
+                    meta["lineage_parents"] = dependency_info["parent_models"]
+                
+                if dependency_info:
+                    meta["lineage"] = dependency_info
+
             print(f"[INGEST] Computing metrics...")
             metrics_start = time.time()
 

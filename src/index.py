@@ -3,7 +3,8 @@ from pathlib import Path
 import re
 import os
 import json
-from typing import Dict, Any, Optional
+import requests
+from typing import Dict, Any, Optional, List
 from starlette.datastructures import UploadFile
 import uvicorn
 import random
@@ -1037,11 +1038,52 @@ async def list_artifacts(request: Request, offset: str = None):
                                         if artifact_id:
                                             break
                                 
-                                # Fallback to model id/name if not found in database
+                                # If not found in database, try to get artifact_id from S3 metadata
+                                if not artifact_id:
+                                    try:
+                                        # Sanitize model name for S3 path
+                                        sanitized_name = sanitize_model_id_for_s3(model_name)
+                                        version = model.get("version", "main")
+                                        safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                        metadata_key = f"models/{sanitized_name}/{safe_version}/metadata.json"
+                                        
+                                        # Try to read metadata from S3
+                                        from botocore.exceptions import ClientError
+                                        try:
+                                            response = s3.get_object(Bucket=ap_arn, Key=metadata_key)
+                                            metadata_json = response["Body"].read().decode("utf-8")
+                                            metadata = json.loads(metadata_json)
+                                            artifact_id = metadata.get("artifact_id")
+                                            
+                                            # If found in S3 metadata, restore to database for future queries
+                                            if artifact_id:
+                                                save_artifact(
+                                                    artifact_id,
+                                                    {
+                                                        "name": model_name,
+                                                        "type": "model",
+                                                        "version": version,
+                                                        "id": artifact_id,
+                                                        "url": metadata.get(
+                                                            "url",
+                                                            f"https://huggingface.co/{model_name}",
+                                                        ),
+                                                    },
+                                                )
+                                        except ClientError as e:
+                                            error_code = e.response.get("Error", {}).get("Code", "")
+                                            if error_code != "NoSuchKey":
+                                                logger.debug(f"Error reading S3 metadata {metadata_key}: {error_code}")
+                                        except Exception as e:
+                                            logger.debug(f"Error parsing S3 metadata {metadata_key}: {str(e)}")
+                                    except Exception as e:
+                                        logger.debug(f"Error accessing S3 metadata for {model_name}: {str(e)}")
+                                
+                                # Final fallback: use model id/name (should rarely happen)
                                 if not artifact_id:
                                     artifact_id = model.get("id", model.get("name", ""))
                                 
-                                if artifact_id not in seen_ids:
+                                if artifact_id and artifact_id not in seen_ids:
                                     results.append(
                                         {
                                             "name": model_name,
@@ -1107,70 +1149,189 @@ async def list_artifacts(request: Request, offset: str = None):
         )
 
 
-def _extract_dataset_code_names_from_readme(readme_text: str) -> Dict[str, str]:
-    """
-    Extract dataset and code names from README text using LLM-like analysis.
-    Looks for common patterns like "dataset:", "uses dataset", "code:", etc.
-    Returns dict with "dataset_name" and "code_name" keys (or None if not found).
-    """
+def _build_regex_patterns():
+    hf_dataset_regex = r"https?://huggingface\.co/datasets/([A-Za-z0-9_\-]+(?:/[A-Za-z0-9_\-]+)?)"
+    github_regex = r"https?://github\.com/([A-Za-z0-9_\-]+/[A-Za-z0-9_\-\.]+)"
+    yaml_dataset_regex = r"datasets:\s*\n\s*-\s*([A-Za-z0-9_\-/]+)"
+    foundation_model_regexes = [
+        r"fine[- ]?tuned (?:from|on) ([A-Za-z0-9_\-/]+)",
+        r"based on ([A-Za-z0-9_\-/]+)",
+        r"parent[_ ]model:\s*([A-Za-z0-9_\-/]+)",
+        r"model[_ ]name[_ ]or[_ ]path:\s*([A-Za-z0-9_\-/]+)",
+    ]
+    benchmark_regexes = [
+        r"evaluated on ([A-Za-z0-9_\-/]+)",
+        r"evaluation[_ ]dataset:\s*([A-Za-z0-9_\-/]+)",
+        r"tested on ([A-Za-z0-9_\-/]+)",
+    ]
+    return {
+        "hf_dataset": hf_dataset_regex,
+        "github": github_regex,
+        "yaml_dataset": yaml_dataset_regex,
+        "foundation_models": foundation_model_regexes,
+        "benchmarks": benchmark_regexes,
+    }
+
+def _apply_text_patterns(text_content: str) -> Dict[str, List[str]]:
+    if not text_content:
+        return {"datasets": [], "code_repos": [], "parent_models": [], "evaluation_datasets": []}
+    
+    patterns = _build_regex_patterns()
+    findings = {"datasets": [], "code_repos": [], "parent_models": [], "evaluation_datasets": []}
+    
+    hf_matches = re.findall(patterns["hf_dataset"], text_content)
+    findings["datasets"].extend([f"https://huggingface.co/datasets/{m}" for m in hf_matches])
+    
+    gh_matches = re.findall(patterns["github"], text_content)
+    findings["code_repos"].extend([f"https://github.com/{m}" for m in set(gh_matches)])
+    
+    yaml_matches = re.findall(patterns["yaml_dataset"], text_content, re.MULTILINE)
+    for match in yaml_matches:
+        url = f"https://huggingface.co/datasets/{match}"
+        if url not in findings["datasets"]:
+            findings["datasets"].append(url)
+    
+    for pattern in patterns["foundation_models"]:
+        matches = re.findall(pattern, text_content, re.IGNORECASE)
+        findings["parent_models"].extend(matches)
+    
+    for pattern in patterns["benchmarks"]:
+        matches = re.findall(pattern, text_content, re.IGNORECASE)
+        findings["evaluation_datasets"].extend(matches)
+    
+    for category in findings:
+        findings[category] = list(set(findings[category]))
+    
+    return findings
+
+def _complete_urls(raw_data: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    completed = {"datasets": [], "code_repos": [], "parent_models": [], "evaluation_datasets": []}
+    
+    for item in raw_data.get("datasets", []):
+        if item.startswith("http"):
+            completed["datasets"].append(item)
+        else:
+            completed["datasets"].append(f"https://huggingface.co/datasets/{item}")
+    
+    for item in raw_data.get("code_repos", []):
+        if item.startswith("http"):
+            cleaned = item.rstrip("/").replace(".git", "")
+            completed["code_repos"].append(cleaned)
+        else:
+            completed["code_repos"].append(f"https://github.com/{item}")
+    
+    completed["parent_models"] = raw_data.get("parent_models", [])
+    completed["evaluation_datasets"] = raw_data.get("evaluation_datasets", [])
+    
+    return completed
+
+def _parse_dependencies(documentation_text: str, artifact_identifier: str) -> Dict[str, List[str]]:
+    text_length = len(documentation_text.strip()) if documentation_text else 0
+    if text_length < 50:
+        logger.warning(f"Documentation content too short for {artifact_identifier}")
+        raw_findings = _apply_text_patterns(documentation_text)
+        return _complete_urls(raw_findings)
+    
+    if len(documentation_text) > 10000:
+        documentation_text = documentation_text[:10000] + "\n...[truncated]"
+    
+    system_prompt = """You are tasked with analyzing documentation for a machine learning model to comprehensively extract all dependency relationships and artifact connections. Your objective is to carefully examine the provided documentation and identify every relevant reference to datasets, code repositories, foundation models, and evaluation benchmarks that are connected to this model.
+
+The documentation you receive contains information about a machine learning model, and your role is to systematically extract dependency information that reveals how this model relates to other artifacts in the machine learning ecosystem. You must identify training datasets that were used to develop the model, source code repositories where the implementation can be found, base or foundation models that this model was built upon or fine-tuned from, and evaluation datasets that were used to assess the model's performance.
+
+When examining the documentation, pay careful attention to explicit mentions of datasets used during training. These might appear as references to data collections, training data sources, or specific dataset names. Look for complete URLs when available, particularly for HuggingFace datasets which often appear as full web addresses. When only dataset identifiers are mentioned without full URLs, such as common benchmark names like "squad" or "imagenet-1k", include just those identifiers in your response.
+
+For source repositories, you should identify any references to codebases, GitHub repositories, or implementation links. These typically appear as GitHub URLs but may also be referenced in other formats. When you encounter repository references, ensure you capture the complete URL when available, and normalize any variations such as URLs ending with .git or trailing slashes.
+
+When identifying base models or foundation models, look for explicit statements about model inheritance, fine-tuning relationships, or mentions of pretrained models that this model builds upon. These relationships are crucial for understanding the model's lineage and dependencies. The documentation may use various phrasings such as "fine-tuned from", "based on", "derived from", or similar expressions that indicate a parent-child relationship between models.
+
+For evaluation datasets, search for references to benchmarks, test sets, validation data, or assessment datasets that were used to evaluate the model's capabilities. These might be mentioned in sections discussing model performance, evaluation results, or testing procedures.
+
+It is essential that you only extract information that is explicitly stated in the documentation. You must not make inferences, assumptions, or guesses about dependencies that are not clearly mentioned. If a particular category of dependency is not explicitly referenced in the documentation, you should return an empty array for that category rather than attempting to infer what might be related.
+
+Your response must be formatted as a single, valid JSON object with no additional text, explanations, or markdown formatting. The JSON structure should contain four arrays: data_sources for training datasets, source_repositories for code repositories, base_models for foundation models, and test_data for evaluation datasets. Each array should contain the relevant identifiers or URLs that you identified in the documentation. If no information is found for a particular category, use an empty array. The entire response must be valid JSON that can be parsed directly without any preprocessing or extraction of code blocks."""
+
+    api_key = os.getenv("GEN_AI_STUDIO_API_KEY")
+    if not api_key:
+        raw_findings = _apply_text_patterns(documentation_text)
+        return _complete_urls(raw_findings)
+    
+    try:
+        logger.info("Attempting to use LLM service for dependency analysis")
+        http_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        request_payload = {
+            "model": "llama4:latest",
+            "messages": [{"role": "user", "content": f"{system_prompt}\n\nDocumentation Content:\n{documentation_text}"}],
+            "temperature": 0.0,
+        }
+        http_response = requests.post(
+            "https://genai.api.purdue.edu/v1/chat/completions",
+            headers=http_headers,
+            json=request_payload,
+            timeout=30,
+        )
+        
+        if http_response.status_code == 200:
+            raw_output = http_response.json()["choices"][0]["message"]["content"].strip()
+            cleaned_output = raw_output
+            if "```json" in cleaned_output:
+                cleaned_output = cleaned_output.split("```json")[1].split("```")[0]
+            elif "```" in cleaned_output:
+                cleaned_output = cleaned_output.split("```")[1].split("```")[0]
+            
+            try:
+                json_data = json.loads(cleaned_output.strip())
+                if isinstance(json_data, dict):
+                    mapped_result = {
+                        "datasets": json_data.get("data_sources", []),
+                        "code_repos": json_data.get("source_repositories", []),
+                        "parent_models": json_data.get("base_models", []),
+                        "evaluation_datasets": json_data.get("test_data", []),
+                    }
+                    return _complete_urls(mapped_result)
+            except json.JSONDecodeError as parse_error:
+                logger.warning(f"Could not parse LLM response as JSON: {parse_error}")
+                logger.debug(f"Raw output: {raw_output}")
+        
+        logger.warning(f"LLM service returned status {http_response.status_code}")
+    except requests.exceptions.Timeout:
+        logger.error("LLM service request timed out")
+    except Exception as error:
+        logger.error(f"Error during LLM service call: {error}", exc_info=True)
+    
+    raw_findings = _apply_text_patterns(documentation_text)
+    return _complete_urls(raw_findings)
+
+def _extract_dataset_code_names_from_readme(readme_text: str, model_name: str = None) -> Dict[str, Any]:
     if not readme_text:
-        return {"dataset_name": None, "code_name": None}
-
+        return {"dataset_name": None, "code_name": None, "parent_models": [], "lineage": {}}
+    
+    dependency_info = _parse_dependencies(readme_text, model_name or "unknown")
+    
     dataset_name = None
+    if dependency_info.get("datasets"):
+        dataset_url = dependency_info["datasets"][0]
+        if dataset_url.startswith("https://huggingface.co/datasets/"):
+            dataset_name = dataset_url.replace("https://huggingface.co/datasets/", "")
+        else:
+            dataset_name = dataset_url
+    
     code_name = None
-
-    # Common patterns for dataset mentions
-    dataset_patterns = [
-        r"dataset[:\s]+([A-Za-z0-9_\-/]+)",
-        r"uses?\s+([A-Za-z0-9_\-/]+)\s+dataset",
-        r"trained\s+on\s+([A-Za-z0-9_\-/]+)",
-        r"([A-Za-z0-9_\-/]+)\s+dataset",
-    ]
-
-    # Common patterns for code/library mentions
-    code_patterns = [
-        r"code[:\s]+([A-Za-z0-9_\-/]+)",
-        r"library[:\s]+([A-Za-z0-9_\-/]+)",
-        r"uses?\s+([A-Za-z0-9_\-/]+)\s+library",
-        r"built\s+with\s+([A-Za-z0-9_\-/]+)",
-        r"([A-Za-z0-9_\-/]+)\s+library",
-    ]
-
-    readme_lower = readme_text.lower()
-
-    # Try to extract dataset name
-    for pattern in dataset_patterns:
-        matches = re.finditer(pattern, readme_lower, re.IGNORECASE)
-        for match in matches:
-            candidate = match.group(1).strip()
-            # Filter out common false positives
-            if (
-                candidate
-                and len(candidate) > 2
-                and candidate not in ["the", "this", "that", "our"]
-            ):
-                dataset_name = candidate
-                break
-        if dataset_name:
-            break
-
-    # Try to extract code/library name
-    for pattern in code_patterns:
-        matches = re.finditer(pattern, readme_lower, re.IGNORECASE)
-        for match in matches:
-            candidate = match.group(1).strip()
-            # Filter out common false positives
-            if (
-                candidate
-                and len(candidate) > 2
-                and candidate not in ["the", "this", "that", "our"]
-            ):
-                code_name = candidate
-                break
-        if code_name:
-            break
-
-    return {"dataset_name": dataset_name, "code_name": code_name}
+    if dependency_info.get("code_repos"):
+        code_url = dependency_info["code_repos"][0]
+        if code_url.startswith("https://github.com/"):
+            code_name = code_url.replace("https://github.com/", "").rstrip("/").replace(".git", "")
+        else:
+            code_name = code_url
+    
+    parent_models = dependency_info.get("parent_models", [])
+    
+    return {
+        "dataset_name": dataset_name,
+        "code_name": code_name,
+        "parent_models": parent_models,
+        "lineage": dependency_info
+    }
 
 
 def _link_model_to_datasets_code(
@@ -1206,8 +1367,7 @@ def _link_model_to_datasets_code(
     if not readme_text:
         return
 
-    # Extract dataset and code names from README
-    extracted = _extract_dataset_code_names_from_readme(readme_text)
+    extracted = _extract_dataset_code_names_from_readme(readme_text, model_name)
     dataset_name = extracted.get("dataset_name")
     code_name = extracted.get("code_name")
 
@@ -2926,12 +3086,13 @@ async def post_artifact_ingest(request: Request):
                                     )
                                     break
                         if readme_text:
-                            # Extract dataset and code names from README
                             extracted = _extract_dataset_code_names_from_readme(
-                                readme_text
+                                readme_text, name
                             )
                             dataset_name = extracted.get("dataset_name")
                             code_name = extracted.get("code_name")
+                            parent_models = extracted.get("parent_models", [])
+                            lineage_data = extracted.get("lineage", {})
                 except Exception as e:
                     logger.debug(f"Could not extract README for linking: {str(e)}")
 
@@ -3288,12 +3449,13 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                                     )
                                     break
                         if readme_text:
-                            # Extract dataset and code names from README
                             extracted = _extract_dataset_code_names_from_readme(
-                                readme_text
+                                readme_text, artifact_name
                             )
                             dataset_name = extracted.get("dataset_name")
                             code_name = extracted.get("code_name")
+                            parent_models = extracted.get("parent_models", [])
+                            lineage_data = extracted.get("lineage", {})
                 except Exception as e:
                     logger.debug(f"Could not extract README for linking: {str(e)}")
 
@@ -3858,10 +4020,10 @@ def get_artifact_cost(
                 # Update main artifact's total_cost to include all dependencies
                 result[id]["total_cost"] = round(total_size_mb, 2)
             else:
-                # When dependency=false, return BOTH standalone_cost and total_cost (where standalone_cost = total_cost)
+                # When dependency=false, return ONLY total_cost per spec
+                # Spec example: {"3847247294": {"total_cost": 412.5}}
                 result = {
                     id: {
-                        "standalone_cost": round(standalone_size_mb, 2),
                         "total_cost": round(standalone_size_mb, 2),
                     }
                 }
@@ -3926,10 +4088,10 @@ def get_artifact_cost(
                 # For datasets/code, there are no dependencies, so total_cost = standalone_cost
                 result[id]["total_cost"] = round(total_size_mb, 2)
             else:
-                # When dependency=false, return BOTH standalone_cost and total_cost (where standalone_cost = total_cost)
+                # When dependency=false, return ONLY total_cost per spec
+                # Spec example: {"3847247294": {"total_cost": 412.5}}
                 result = {
                     id: {
-                        "standalone_cost": round(standalone_size_mb, 2),
                         "total_cost": round(standalone_size_mb, 2),
                     }
                 }
@@ -4157,14 +4319,14 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2
         ),
         "net_score_latency": round(
-            float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2
+            float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0) / 1000.0, 2
         ),
         "ramp_up_time": round(
             float(alias(rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0),
             2,
         ),
         "ramp_up_time_latency": round(
-            float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2
+            float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0) / 1000.0, 2
         ),
         "bus_factor": round(
             float(
@@ -4176,7 +4338,7 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             2,
         ),
         "bus_factor_latency": round(
-            float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2
+            float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0) / 1000.0, 2
         ),
         "performance_claims": round(
             float(
@@ -4194,14 +4356,14 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             float(
                 alias(rating, "performance_claims_latency", "PerformanceClaimsLatency")
                 or 0.0
-            ),
+            ) / 1000.0,
             2,
         ),
         "license": round(
             float(alias(rating, "license", "License", "score_license") or 0.0), 2
         ),
         "license_latency": round(
-            float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2
+            float(alias(rating, "license_latency", "LicenseLatency") or 0.0) / 1000.0, 2
         ),
         "dataset_and_code_score": round(
             float(
@@ -4223,7 +4385,7 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
                     "DatasetAndCodeScoreLatency",
                 )
                 or 0.0
-            ),
+            ) / 1000.0,
             2,
         ),
         "dataset_quality": round(
@@ -4238,7 +4400,7 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
         "dataset_quality_latency": round(
             float(
                 alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0
-            ),
+            ) / 1000.0,
             2,
         ),
         "code_quality": round(
@@ -4249,7 +4411,7 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             2,
         ),
         "code_quality_latency": round(
-            float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2
+            float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0) / 1000.0, 2
         ),
         "reproducibility": round(
             float(
@@ -4267,7 +4429,7 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             float(
                 alias(rating, "reproducibility_latency", "ReproducibilityLatency")
                 or 0.0
-            ),
+            ) / 1000.0,
             2,
         ),
         "reviewedness": round(
@@ -4278,18 +4440,17 @@ def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str,
             2,
         ),
         "reviewedness_latency": round(
-            float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0),
-            2,
+            float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0) / 1000.0, 2
         ),
         "tree_score": round(
             float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2
         ),
         "tree_score_latency": round(
-            float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2
+            float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0) / 1000.0, 2
         ),
         "size_score": _extract_size_scores(rating),
         "size_score_latency": round(
-            float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2
+            float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0) / 1000.0, 2
         ),
     }
 
