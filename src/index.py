@@ -4148,10 +4148,10 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
         }
 
 
-def _build_rating_response(id: str, rating: Dict[str, Any]) -> Dict[str, Any]:
+def _build_rating_response(model_name: str, rating: Dict[str, Any]) -> Dict[str, Any]:
     """Build ModelRating response with all required fields."""
     return {
-        "name": id,
+        "name": model_name,
         "category": alias(rating, "category") or "unknown",
         "net_score": round(
             float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2
@@ -4380,8 +4380,10 @@ def get_model_rate(id: str, request: Request):
                 logger.info(f"DEBUG: list_models returned {len(models_found)} models")
                 if models_found:
                     found = True
-                    model_name = id  # Use id as model name
-                    logger.info(f"DEBUG: Model found via list_models")
+                    # Extract actual model name from S3 result
+                    first_model = models_found[0]
+                    model_name = first_model.get("name", id)  # Use actual model name from S3, fallback to id
+                    logger.info(f"DEBUG: Model found via list_models: name='{model_name}'")
                 else:
                     logger.info(f"DEBUG: No models found, trying common versions")
                     common_versions = ["1.0.0", "main", "latest"]
@@ -4456,7 +4458,9 @@ def get_model_rate(id: str, request: Request):
                     # Fall through to analyze
                 else:
                     logger.info(f"DEBUG: Using cached rating result for id='{id}'")
-                    return _build_rating_response(id, rating)
+                    # Use model_name if available, otherwise fallback to id
+                    effective_name = model_name if model_name else id
+                    return _build_rating_response(effective_name, rating)
 
             if status == "timeout":
                 # Async rating timed out - fall through to synchronous rating
@@ -4513,7 +4517,9 @@ def get_model_rate(id: str, request: Request):
             if id in _rating_start_times:
                 del _rating_start_times[id]
 
-        return _build_rating_response(id, rating)
+        # Use model_name if available, otherwise fallback to id
+        effective_name = model_name if model_name else id
+        return _build_rating_response(effective_name, rating)
     except HTTPException:
         raise
     except Exception as e:
