@@ -923,12 +923,25 @@ async def list_artifacts(request: Request, offset: str = None):
                     if result is None:
                         result = {"models": []}
                     models = result.get("models") or []
+                    # Get all artifacts from database to map model names to artifact_ids
+                    all_artifacts = list_all_artifacts()
+                    artifact_map = {}
+                    for artifact in all_artifacts:
+                        if artifact.get("type") == "model":
+                            artifact_name = artifact.get("name")
+                            artifact_id = artifact.get("id")
+                            if artifact_name and artifact_id:
+                                artifact_map[artifact_name] = artifact_id
+                    
                     for model in models:
                         if isinstance(model, dict):
+                            model_name = model.get("name", "")
+                            # Look up artifact_id from database, fallback to model id/name
+                            artifact_id = artifact_map.get(model_name, model.get("id", model_name))
                             results.append(
                                 {
-                                    "name": model.get("name", ""),
-                                    "id": model.get("id", model.get("name", "")),
+                                    "name": model_name,
+                                    "id": artifact_id,
                                     "type": "model",
                                 }
                             )
@@ -1012,16 +1025,31 @@ async def list_artifacts(request: Request, offset: str = None):
                             model_name = model.get("name", "")
                             # Exact name match (not regex, direct comparison)
                             if model_name == name:
-                                model_id = model.get("id", model.get("name", ""))
-                                if model_id not in seen_ids:
+                                # Look up artifact_id from database by matching model name
+                                artifact_id = None
+                                all_artifacts = list_all_artifacts()
+                                for artifact in all_artifacts:
+                                    if (
+                                        artifact.get("name") == model_name
+                                        and artifact.get("type") == "model"
+                                    ):
+                                        artifact_id = artifact.get("id")
+                                        if artifact_id:
+                                            break
+                                
+                                # Fallback to model id/name if not found in database
+                                if not artifact_id:
+                                    artifact_id = model.get("id", model.get("name", ""))
+                                
+                                if artifact_id not in seen_ids:
                                     results.append(
                                         {
                                             "name": model_name,
-                                            "id": model_id,
+                                            "id": artifact_id,
                                             "type": "model",
                                         }
                                     )
-                                    seen_ids.add(model_id)
+                                    seen_ids.add(artifact_id)
                                     # Return only first match for exact name
                                     break
 
