@@ -3754,43 +3754,112 @@ def get_model_rate(id: str, request: Request):
             rating = None
         
         # Analyze model content if not cached (synchronous fallback)
+        # Use a per-model lock to prevent duplicate concurrent analysis
         if not rating:
-            logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
-            try:
-                # Use model_name if available, otherwise use id
-                analysis_id = model_name if model_name else id
-                logger.info(f"DEBUG: Calling analyze_model_content with: '{analysis_id}'")
-                rating = analyze_model_content(analysis_id)
-                logger.info(f"DEBUG: analyze_model_content returned: {rating}")
-                if not rating:
-                    logger.error(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="The artifact rating system encountered an error while computing at least one metric.",
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(
-                    f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}", exc_info=True
-                )
-                logger.error(
-                    f"Error analyzing model content for {id}: {str(e)}", exc_info=True
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
-                )
-
-        # Cache the rating result before returning (thread-safe)
-        with _rating_lock:
-            _rating_results[id] = rating
-            _rating_status[id] = "completed"
-            # Clean up start time if it exists
-            if id in _rating_start_times:
-                del _rating_start_times[id]
+            # Check if another request is already analyzing this model
+            analysis_lock_key = f"sync_analysis_{id}"
+            is_first_request = False
+            
+            with _rating_lock:
+                # Double-check cache after acquiring lock (another request might have completed)
+                rating = _rating_results.get(id)
+                if rating:
+                    logger.info(f"DEBUG: Got cached rating after acquiring lock for '{id}'")
+                else:
+                    # Check if analysis is in progress
+                    if analysis_lock_key not in _rating_locks:
+                        # We're the first request - create lock and mark as analyzing
+                        _rating_locks[analysis_lock_key] = threading.Event()
+                        _rating_status[analysis_lock_key] = "pending"
+                        is_first_request = True
+                        logger.info(f"DEBUG: First request to analyze '{id}' - starting analysis")
+                    else:
+                        # Another request is analyzing - we'll wait for it
+                        logger.info(f"DEBUG: Another request analyzing '{id}', will wait...")
+            
+            if not rating:
+                if is_first_request:
+                    # We're the first request - do the analysis
+                    logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
+                    try:
+                        # Use model_name if available, otherwise use id
+                        analysis_id = model_name if model_name else id
+                        logger.info(f"DEBUG: Calling analyze_model_content with: '{analysis_id}'")
+                        rating = analyze_model_content(analysis_id)
+                        logger.info(f"DEBUG: analyze_model_content returned: {rating}")
+                        if not rating:
+                            logger.error(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'")
+                            raise HTTPException(
+                                status_code=500,
+                                detail="The artifact rating system encountered an error while computing at least one metric.",
+                            )
+                    except HTTPException:
+                        # Clean up on error
+                        with _rating_lock:
+                            if analysis_lock_key in _rating_locks:
+                                _rating_locks[analysis_lock_key].set()
+                                del _rating_locks[analysis_lock_key]
+                            if analysis_lock_key in _rating_status:
+                                del _rating_status[analysis_lock_key]
+                        raise
+                    except Exception as e:
+                        logger.error(
+                            f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}", exc_info=True
+                        )
+                        logger.error(
+                            f"Error analyzing model content for {id}: {str(e)}", exc_info=True
+                        )
+                        # Clean up on error
+                        with _rating_lock:
+                            if analysis_lock_key in _rating_locks:
+                                _rating_locks[analysis_lock_key].set()
+                                del _rating_locks[analysis_lock_key]
+                            if analysis_lock_key in _rating_status:
+                                del _rating_status[analysis_lock_key]
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
+                        )
+                    
+                    # Cache the rating result and signal waiting requests
+                    with _rating_lock:
+                        _rating_results[id] = rating
+                        _rating_status[id] = "completed"
+                        # Clean up start time if it exists
+                        if id in _rating_start_times:
+                            del _rating_start_times[id]
+                        # Signal waiting requests
+                        if analysis_lock_key in _rating_locks:
+                            _rating_locks[analysis_lock_key].set()
+                else:
+                    # Another request is analyzing - wait for it (with 2 minute timeout for test)
+                    analysis_event = _rating_locks.get(analysis_lock_key)
+                    if analysis_event:
+                        logger.info(f"DEBUG: Waiting for concurrent analysis of '{id}'...")
+                        if analysis_event.wait(timeout=120):  # 2 minute timeout per test requirement
+                            # Check cache after waiting
+                            with _rating_lock:
+                                rating = _rating_results.get(id)
+                                if rating:
+                                    logger.info(f"DEBUG: Got cached rating after waiting for '{id}'")
+                                else:
+                                    logger.warning(f"DEBUG: No rating after waiting for '{id}' - may have failed")
+                        else:
+                            logger.warning(f"DEBUG: Timeout waiting for concurrent analysis of '{id}'")
+                            raise HTTPException(
+                                status_code=500,
+                                detail="The artifact rating system encountered an error while computing at least one metric.",
+                            )
         
-        return _build_rating_response(id, rating)
+        if not rating:
+            raise HTTPException(
+                status_code=500,
+                detail="The artifact rating system encountered an error while computing at least one metric.",
+            )
+        
+        # Use model_name for the name field to match expected value (should match ingested model name)
+        response_name = model_name if model_name else id
+        return _build_rating_response(response_name, rating)
     except HTTPException:
         raise
     except Exception as e:

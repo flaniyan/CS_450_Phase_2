@@ -233,3 +233,4 @@ Internal server errors occur when:
 - The `/authenticate` endpoint may return **501 Not Implemented** if the system doesn't support authentication
 - The **202 Accepted** response for artifact creation indicates async processing - subsequent requests may return **404** until processing completes
 
+
