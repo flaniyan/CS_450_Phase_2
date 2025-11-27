@@ -58,11 +58,12 @@ module "iam" {
 }
 
 module "ecs" {
-  source            = "../../modules/ecs"
-  artifacts_bucket  = local.artifacts_bucket
-  image_tag         = var.image_tag
-  ddb_tables_arnmap = local.ddb_tables_arnmap
-  kms_key_arn       = module.monitoring.kms_key_arn
+  source                  = "../../modules/ecs"
+  artifacts_bucket        = local.artifacts_bucket
+  image_tag               = var.image_tag
+  ddb_tables_arnmap       = local.ddb_tables_arnmap
+  kms_key_arn             = module.monitoring.kms_key_arn
+  github_token_secret_arn = module.monitoring.github_token_secret_arn
 }
 
 module "api_gateway" {

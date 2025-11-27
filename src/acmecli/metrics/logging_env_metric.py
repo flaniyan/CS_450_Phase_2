@@ -17,10 +17,10 @@ class LoggingEnvMetric:
             score += 0.5
         if "debug" in readme_text or "logging" in readme_text:
             score += 0.3
-        
+
         if readme_text or env_vars:
             score = max(score, 0.5)
-        
+
         value = round(float(min(1.0, max(0.5, score))), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)

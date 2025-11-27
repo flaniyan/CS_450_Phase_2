@@ -89,7 +89,7 @@ class BusFactorMetric:
 
         if contributors or full_name or forks > 0 or stars > 0 or downloads > 0:
             score = max(score, 0.5)
-        
+
         if meta:
             score = max(score, 0.5)
 

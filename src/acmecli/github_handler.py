@@ -12,7 +12,9 @@ class GitHubHandler:
 
     def __init__(self):
         github_token = os.environ.get("GITHUB_TOKEN")
-        self._has_token = bool(github_token and github_token != "ghp_test_token_placeholder")
+        self._has_token = bool(
+            github_token and github_token != "ghp_test_token_placeholder"
+        )
         self._headers = {
             "User-Agent": "ACME-CLI/1.0",
             "Accept": "application/vnd.github.v3+json",

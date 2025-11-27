@@ -2,6 +2,7 @@
 Configuration constants for rating system.
 All thresholds and defaults are configurable via environment variables.
 """
+
 import os
 from typing import List
 
@@ -29,6 +30,3 @@ DEFAULT_MODEL_VERSIONS: List[str] = os.getenv(
 
 # Rounding precision for scores
 SCORE_PRECISION = int(os.getenv("RATING_SCORE_PRECISION", "2"))
-
-
-

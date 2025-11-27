@@ -63,14 +63,6 @@ from .services.artifact_storage import (
     clear_all_artifacts,
 )
 from .services.rating import run_scorer, alias, analyze_model_content
-from .services.rating_config import (
-    INGESTIBILITY_THRESHOLD,
-    DEFAULT_SCORE,
-    DEFAULT_CATEGORY,
-    DEFAULT_SIZE_SCORES,
-    DEFAULT_MODEL_VERSIONS,
-    SCORE_PRECISION,
-)
 from .services.license_compatibility import (
     extract_model_license,
     extract_github_license,
@@ -79,22 +71,24 @@ from .services.license_compatibility import (
 
 # bearer = HTTPBearer(auto_error=True)  # Unused - removed to prevent any accidental security enforcement
 
+
 # Configure CloudWatch logging
 def setup_cloudwatch_logging():
     """Configure CloudWatch Logs handler using watchtower"""
     aws_region = os.getenv("AWS_REGION", "us-east-1")
     log_group = os.getenv("CLOUDWATCH_LOG_GROUP", "/acme-api/application-logs")
-    
+
     # Only add CloudWatch handler if AWS is available (in production)
     try:
         # Test if AWS credentials are available by checking STS (simpler than logs API)
         import boto3
+
         sts = boto3.client("sts", region_name=aws_region)
         sts.get_caller_identity()  # Simple test that AWS credentials work
-        
+
         # Create a boto3 CloudWatch Logs client with the region
         logs_client = boto3.client("logs", region_name=aws_region)
-        
+
         # Add CloudWatch handler to root logger
         root_logger = logging.getLogger()
         cloudwatch_handler = watchtower.CloudWatchLogHandler(
@@ -107,16 +101,25 @@ def setup_cloudwatch_logging():
         root_logger.addHandler(cloudwatch_handler)
         # Force a test log to verify it works
         test_logger = logging.getLogger("cloudwatch_test")
-        test_logger.info(f"CloudWatch logging configured: log_group={log_group}, region={aws_region}")
-        print(f"SUCCESS: CloudWatch handler added. Log group: {log_group}, Stream: api", file=sys.stderr)
+        test_logger.info(
+            f"CloudWatch logging configured: log_group={log_group}, region={aws_region}"
+        )
+        print(
+            f"SUCCESS: CloudWatch handler added. Log group: {log_group}, Stream: api",
+            file=sys.stderr,
+        )
     except Exception as e:
         # AWS not available - fallback to standard logging
         # Log to stderr so it appears in ECS container logs
         import traceback
+
         error_details = traceback.format_exc()
         print(f"ERROR: CloudWatch logging failed: {e}", file=sys.stderr)
         print(f"Traceback: {error_details}", file=sys.stderr)
-        logging.warning(f"CloudWatch logging not available: {e}. Using standard logging.")
+        logging.warning(
+            f"CloudWatch logging not available: {e}. Using standard logging."
+        )
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -185,6 +188,7 @@ app.add_middleware(
 
 # Thread-safe counter for concurrent requests
 import threading
+
 _concurrent_requests = 0
 _concurrent_requests_lock = threading.Lock()
 
@@ -194,41 +198,44 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Generate or extract correlation ID for request tracing
         correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
-        
+
         # Add correlation ID to request state for use in handlers
         request.state.correlation_id = correlation_id
-        
+
         # Track concurrent requests
         global _concurrent_requests
         with _concurrent_requests_lock:
             _concurrent_requests += 1
             current_concurrent = _concurrent_requests
-        
+
         # Publish concurrent requests gauge metric
         try:
             from .services.performance.instrumentation import publish_metric
+
             publish_metric(
                 "ConcurrentRequests",
                 value=float(current_concurrent),
                 unit="Count",
-                dimensions={"Component": "ECS"}
+                dimensions={"Component": "ECS"},
             )
         except Exception as e:
             logger.debug(f"Failed to publish concurrent requests metric: {str(e)}")
-        
+
         # Capture request start time for duration calculation
         start_time = time.time()
-        
+
         # Extract client IP (check various headers for proxy/load balancer scenarios)
         client_ip = (
             request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or request.headers.get("X-Real-IP", "")
-            or request.client.host if request.client else "unknown"
+            or request.client.host
+            if request.client
+            else "unknown"
         )
-        
+
         # Extract user agent
         user_agent = request.headers.get("User-Agent", "unknown")
-        
+
         # Prepare structured log data
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -242,67 +249,81 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             "duration_ms": None,  # Will be calculated after response
             "concurrent_requests": current_concurrent,
         }
-        
+
         # Log request start
-        logger.info(f"API Request: {json.dumps({**log_data, 'event': 'request_start'})}")
-        
+        logger.info(
+            f"API Request: {json.dumps({**log_data, 'event': 'request_start'})}"
+        )
+
         try:
             # Process request
             response = await call_next(request)
-            
+
             # Calculate duration
             duration_ms = round((time.time() - start_time) * 1000, 2)
-            
+
             # Publish request processing time metric to CloudWatch
             try:
                 from .services.performance.instrumentation import publish_metric
+
                 publish_metric(
                     "RequestProcessingTime",
                     value=duration_ms,
                     unit="Milliseconds",
-                    dimensions={"Component": "ECS", "Path": request.url.path}
+                    dimensions={"Component": "ECS", "Path": request.url.path},
                 )
             except Exception as e:
-                logger.debug(f"Failed to publish request processing time metric: {str(e)}")
-            
+                logger.debug(
+                    f"Failed to publish request processing time metric: {str(e)}"
+                )
+
             # Add correlation ID to response headers
             response.headers["X-Correlation-ID"] = correlation_id
-            
+
             # Update log data with response info
-            log_data.update({
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-                "event": "request_complete"
-            })
-            
+            log_data.update(
+                {
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                    "event": "request_complete",
+                }
+            )
+
             # Log structured API metrics as JSON
             logger.info(f"API Metrics: {json.dumps(log_data)}")
-            
+
             return response
         except Exception as e:
             # Calculate duration even on error
             duration_ms = round((time.time() - start_time) * 1000, 2)
-            
+
             # Publish request processing time metric even on error
             try:
                 from .services.performance.instrumentation import publish_metric
+
                 publish_metric(
                     "RequestProcessingTime",
                     value=duration_ms,
                     unit="Milliseconds",
-                    dimensions={"Component": "ECS", "Path": request.url.path, "Error": "true"}
+                    dimensions={
+                        "Component": "ECS",
+                        "Path": request.url.path,
+                        "Error": "true",
+                    },
                 )
             except Exception:
                 pass
-            
+
             # Update log data with error info
-            log_data.update({
-                "status_code": 500,
-                "duration_ms": duration_ms,
-                "error": str(e),
-                "event": "request_error"
-            })
-            
+            log_data.update(
+                {
+                    "status_code": 500,
+                    "duration_ms": duration_ms,
+                    "error": str(e),
+                    "event": "request_error",
+                }
+            )
+
             # Log error with structured data
             logger.error(f"API Error: {json.dumps(log_data)}", exc_info=True)
             raise
@@ -325,7 +346,7 @@ async def startup_event():
             logger.info(f"Route: {list(route.methods)} {route.path}")
     logger.info("=== END REGISTERED ROUTES ===")
     ensure_default_admin()
-    
+
     # Initialize _artifact_storage from DynamoDB (for datasets and code)
     # This ensures immediate consistency for queries
     try:
@@ -343,9 +364,13 @@ async def startup_event():
                         "id": artifact_id,
                         "url": artifact.get("url", ""),
                     }
-        logger.info(f"Initialized _artifact_storage with {len(_artifact_storage)} dataset/code artifacts")
+        logger.info(
+            f"Initialized _artifact_storage with {len(_artifact_storage)} dataset/code artifacts"
+        )
     except Exception as e:
-        logger.warning(f"Failed to initialize _artifact_storage from DynamoDB: {str(e)}")
+        logger.warning(
+            f"Failed to initialize _artifact_storage from DynamoDB: {str(e)}"
+        )
         # Continue without initialization - _artifact_storage will be populated as artifacts are created
 
 
@@ -380,7 +405,9 @@ def sanitize_model_id_for_s3(model_id: str) -> str:
     )
 
 
-def generate_download_url(artifact_name: str, artifact_type: str, version: str = "main") -> str:
+def generate_download_url(
+    artifact_name: str, artifact_type: str, version: str = "main"
+) -> str:
     """
     Generate a download URL for an artifact.
     Per spec example, use a simple path-based URL format.
@@ -391,10 +418,20 @@ def generate_download_url(artifact_name: str, artifact_type: str, version: str =
     # Use a simple path-based format matching the spec example
     # The spec shows: https://ec2-10-121-34-12/download/bert-base-uncased
     # We'll use a similar format with the artifact name
-    return f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/model.zip" if artifact_type == "model" else f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+    return (
+        f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/model.zip"
+        if artifact_type == "model"
+        else f"https://s3.amazonaws.com/{ap_arn}/{artifact_type}s/{sanitized_name}/{version}/metadata.json"
+    )
 
 
-def build_artifact_response(artifact_name: str, artifact_id: str, artifact_type: str, url: str, version: str = "main") -> Dict[str, Any]:
+def build_artifact_response(
+    artifact_name: str,
+    artifact_id: str,
+    artifact_type: str,
+    url: str,
+    version: str = "main",
+) -> Dict[str, Any]:
     """
     Build a standardized artifact response with metadata, data.url, and data.download_url.
     """
@@ -405,10 +442,7 @@ def build_artifact_response(artifact_name: str, artifact_id: str, artifact_type:
             "id": artifact_id,
             "type": artifact_type,
         },
-        "data": {
-            "url": url,
-            "download_url": download_url
-        },
+        "data": {"url": url, "download_url": download_url},
     }
 
 
@@ -418,26 +452,33 @@ def _cleanup_stuck_ratings():
     This prevents ratings from being stuck indefinitely.
     """
     global _rating_status, _rating_start_times, _rating_lock
-    
+
     current_time = time.time()
     stuck_threshold = 600  # 10 minutes
-    
+
     with _rating_lock:
         stuck_ids = []
         for artifact_id, start_time in list(_rating_start_times.items()):
-            if artifact_id in _rating_status and _rating_status[artifact_id] == "pending":
+            if (
+                artifact_id in _rating_status
+                and _rating_status[artifact_id] == "pending"
+            ):
                 elapsed = current_time - start_time
                 if elapsed > stuck_threshold:
                     stuck_ids.append(artifact_id)
-                    logger.warning(f"DEBUG: Detected stuck rating for id='{artifact_id}' (stuck for {elapsed:.1f}s), marking as failed")
+                    logger.warning(
+                        f"DEBUG: Detected stuck rating for id='{artifact_id}' (stuck for {elapsed:.1f}s), marking as failed"
+                    )
                     _rating_status[artifact_id] = "failed"
                     _rating_results[artifact_id] = None
                     if artifact_id in _rating_locks:
                         _rating_locks[artifact_id].set()
                     del _rating_start_times[artifact_id]
-        
+
         if stuck_ids:
-            logger.warning(f"DEBUG: Cleaned up {len(stuck_ids)} stuck rating(s): {stuck_ids}")
+            logger.warning(
+                f"DEBUG: Cleaned up {len(stuck_ids)} stuck rating(s): {stuck_ids}"
+            )
 
 
 def _run_async_rating(artifact_id: str, model_name: str, version: str):
@@ -446,51 +487,68 @@ def _run_async_rating(artifact_id: str, model_name: str, version: str):
     Updates _rating_status and _rating_results when complete.
     """
     global _rating_status, _rating_locks, _rating_results, _rating_start_times, _rating_lock
-    
+
     try:
         with _rating_lock:
-            logger.info(f"DEBUG: [ASYNC RATING] Starting rating for artifact_id='{artifact_id}', model_name='{model_name}'")
+            logger.info(
+                f"DEBUG: [ASYNC RATING] Starting rating for artifact_id='{artifact_id}', model_name='{model_name}'"
+            )
             # Start time should already be set when rating was initialized, but update it if not
             if artifact_id not in _rating_start_times:
                 _rating_start_times[artifact_id] = time.time()
             # Ensure status is pending (it should already be, but make sure)
             _rating_status[artifact_id] = "pending"
-        
+
         # Perform rating with timeout protection
         # Note: signal-based timeout doesn't work well in threads, so we'll rely on the calling code's timeout
         # But we can add progress logging to help debug slow ratings
-        logger.info(f"DEBUG: [ASYNC RATING] Calling analyze_model_content for '{model_name}'...")
+        logger.info(
+            f"DEBUG: [ASYNC RATING] Calling analyze_model_content for '{model_name}'..."
+        )
         start_time = time.time()
         rating = analyze_model_content(model_name)
         elapsed_time = time.time() - start_time
-        logger.info(f"DEBUG: [ASYNC RATING] analyze_model_content completed in {elapsed_time:.2f}s for '{model_name}'")
-        
+        logger.info(
+            f"DEBUG: [ASYNC RATING] analyze_model_content completed in {elapsed_time:.2f}s for '{model_name}'"
+        )
+
         with _rating_lock:
             if not rating:
-                logger.warning(f"DEBUG: [ASYNC RATING] Rating returned None/empty for '{model_name}'")
+                logger.warning(
+                    f"DEBUG: [ASYNC RATING] Rating returned None/empty for '{model_name}'"
+                )
                 _rating_status[artifact_id] = "failed"
                 _rating_results[artifact_id] = None
             else:
-                net_score = alias(rating, "net_score", "NetScore", "netScore") or DEFAULT_SCORE
-                if net_score < INGESTIBILITY_THRESHOLD:
-                    logger.warning(f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < {INGESTIBILITY_THRESHOLD}")
+                net_score = alias(rating, "net_score", "NetScore", "netScore") or 0.0
+                if net_score < 0.5:
+                    logger.warning(
+                        f"DEBUG: [ASYNC RATING] Model disqualified: net_score={net_score} < 0.5"
+                    )
                     _rating_status[artifact_id] = "disqualified"
                     _rating_results[artifact_id] = None
                 else:
-                    logger.info(f"DEBUG: [ASYNC RATING] Rating completed successfully: net_score={net_score}")
+                    logger.info(
+                        f"DEBUG: [ASYNC RATING] Rating completed successfully: net_score={net_score}"
+                    )
                     _rating_status[artifact_id] = "completed"
                     _rating_results[artifact_id] = rating
-            
+
             # Clean up tracking data
             if artifact_id in _rating_start_times:
                 del _rating_start_times[artifact_id]
-        
+
         # Signal that rating is complete
         if artifact_id in _rating_locks:
             _rating_locks[artifact_id].set()
-            logger.info(f"DEBUG: [ASYNC RATING] Signaled completion for artifact_id='{artifact_id}'")
+            logger.info(
+                f"DEBUG: [ASYNC RATING] Signaled completion for artifact_id='{artifact_id}'"
+            )
     except Exception as e:
-        logger.error(f"DEBUG: [ASYNC RATING] Error during rating for '{artifact_id}': {str(e)}", exc_info=True)
+        logger.error(
+            f"DEBUG: [ASYNC RATING] Error during rating for '{artifact_id}': {str(e)}",
+            exc_info=True,
+        )
         with _rating_lock:
             _rating_status[artifact_id] = "failed"
             _rating_results[artifact_id] = None
@@ -511,7 +569,7 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
             if not model_name:
                 model_name = sanitize_model_id_for_s3(artifact_id)
             # Try multiple versions
-            for version in DEFAULT_MODEL_VERSIONS:
+            for version in ["1.0.0", "main", "latest"]:
                 sizes = get_model_sizes(model_name, version)
                 if "error" not in sizes:
                     size_bytes = sizes.get("full", 0)
@@ -522,14 +580,17 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
             artifact = get_generic_artifact_metadata(artifact_type, artifact_id)
             if not artifact:
                 artifact = get_artifact_from_db(artifact_id)
-            
+
             if artifact:
                 # First, try to get size from download URL (actual artifact size)
                 url = artifact.get("url", "")
                 if url:
                     try:
                         import requests
-                        head_response = requests.head(url, timeout=10, allow_redirects=True)
+
+                        head_response = requests.head(
+                            url, timeout=10, allow_redirects=True
+                        )
                         content_length = head_response.headers.get("Content-Length")
                         if content_length:
                             size_mb = int(content_length) / (1024 * 1024)
@@ -537,13 +598,13 @@ def _get_artifact_size_mb(artifact_type: str, artifact_id: str) -> float:
                                 return size_mb
                     except Exception as e:
                         logger.debug(f"Error getting size from URL {url}: {str(e)}")
-                
+
                 # Fallback: try to get size from S3 if artifact was uploaded
                 artifact_name = artifact.get("name", "")
                 if artifact_name:
                     sanitized_name = sanitize_model_id_for_s3(artifact_name)
                     # Try common versions
-                    for version in DEFAULT_MODEL_VERSIONS:
+                    for version in ["main", "1.0.0", "latest"]:
                         try:
                             # For datasets/code, check if there's a zip file or actual artifact file
                             # (not just metadata.json)
@@ -570,10 +631,10 @@ def _get_model_name_for_s3(artifact_id: str) -> Optional[str]:
     """
     Helper function to get the model name from artifact_id for S3 lookups.
     Models are stored in S3 by name (sanitized), not by artifact_id.
-    
+
     Args:
         artifact_id: The artifact ID to look up
-        
+
     Returns:
         Sanitized model name for S3, or None if not found
     """
@@ -582,7 +643,7 @@ def _get_model_name_for_s3(artifact_id: str) -> Optional[str]:
         artifact = get_generic_artifact_metadata("model", artifact_id)
         if not artifact:
             artifact = get_artifact_from_db(artifact_id)
-        
+
         if artifact and artifact.get("type") == "model":
             name = artifact.get("name", "")
             if name:
@@ -640,6 +701,7 @@ def verify_auth_token(request: Request) -> bool:
 
     # Check if this is the static token from /authenticate endpoint (autograder compatibility)
     from .services.auth_public import STATIC_TOKEN
+
     if token == STATIC_TOKEN:
         logger.debug("DEBUG: Static token from /authenticate accepted")
         return True
@@ -656,8 +718,10 @@ def verify_auth_token(request: Request) -> bool:
         if decoded_token is None:
             logger.debug("DEBUG: JWT verification failed - token is invalid or expired")
             return False
-        
-        logger.debug(f"DEBUG: JWT verification successful - user_id: {decoded_token.get('user_id', decoded_token.get('username', 'unknown'))}")
+
+        logger.debug(
+            f"DEBUG: JWT verification successful - user_id: {decoded_token.get('user_id', decoded_token.get('username', 'unknown'))}"
+        )
         return True
     except Exception as e:
         logger.warning(f"DEBUG: Exception during JWT verification: {str(e)}")
@@ -677,58 +741,56 @@ async def trigger_performance_workload(request: Request):
     """
     try:
         body = await request.json()
-        
+
         # Extract parameters with defaults
         num_clients = body.get("num_clients", 100)
         model_id = body.get("model_id", "arnir0/Tiny-LLM")
         artifact_id = body.get("artifact_id")
         duration_seconds = body.get("duration_seconds", 300)
-        
+
         # Validate parameters
         if not isinstance(num_clients, int) or num_clients < 1:
             raise HTTPException(
-                status_code=400,
-                detail="num_clients must be a positive integer"
+                status_code=400, detail="num_clients must be a positive integer"
             )
         if not isinstance(model_id, str) or not model_id:
             raise HTTPException(
-                status_code=400,
-                detail="model_id must be a non-empty string"
+                status_code=400, detail="model_id must be a non-empty string"
             )
-        if duration_seconds is not None and (not isinstance(duration_seconds, int) or duration_seconds < 1):
+        if duration_seconds is not None and (
+            not isinstance(duration_seconds, int) or duration_seconds < 1
+        ):
             raise HTTPException(
-                status_code=400,
-                detail="duration_seconds must be a positive integer"
+                status_code=400, detail="duration_seconds must be a positive integer"
             )
-        
+
         # Import and trigger workload
         from .services.performance.workload_trigger import trigger_workload
-        
+
         # Use API Gateway URL as the base URL for load generation
         # This is where clients will actually make requests
         # Can be overridden via environment variable
-        base_url = os.getenv("API_BASE_URL", "https://pc1plkgnbd.execute-api.us-east-1.amazonaws.com/prod")
-        
+        base_url = os.getenv(
+            "API_BASE_URL",
+            "https://pc1plkgnbd.execute-api.us-east-1.amazonaws.com/prod",
+        )
+
         result = trigger_workload(
             num_clients=num_clients,
             model_id=model_id,
             artifact_id=artifact_id,
             duration_seconds=duration_seconds,
-            base_url=base_url
+            base_url=base_url,
         )
-        
-        return JSONResponse(
-            status_code=202,  # Accepted
-            content=result
-        )
-        
+
+        return JSONResponse(status_code=202, content=result)  # Accepted
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error triggering performance workload: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to trigger performance workload: {str(e)}"
+            status_code=500, detail=f"Failed to trigger performance workload: {str(e)}"
         )
 
 
@@ -741,29 +803,34 @@ def get_performance_results(run_id: str):
     try:
         from .services.performance.results_retrieval import get_performance_results
         from .services.performance.workload_trigger import get_workload_status
-        
+
         # Get workload status from in-memory store
         workload_status = get_workload_status(run_id)
-        
+
         # Get aggregated results
         result = get_performance_results(run_id, workload_status)
-        
+
         # If run not found and no metrics in DynamoDB, return 404
-        if result.get("status") == "not_found" and result["metrics"]["total_requests"] == 0:
+        if (
+            result.get("status") == "not_found"
+            and result["metrics"]["total_requests"] == 0
+        ):
             raise HTTPException(
                 status_code=404,
-                detail=f"Performance run with run_id {run_id} not found"
+                detail=f"Performance run with run_id {run_id} not found",
             )
-        
+
         return JSONResponse(status_code=200, content=result)
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving performance results for run_id={run_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error retrieving performance results for run_id={run_id}: {str(e)}",
+            exc_info=True,
+        )
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve performance results: {str(e)}"
+            status_code=500, detail=f"Failed to retrieve performance results: {str(e)}"
         )
 
 
@@ -865,12 +932,16 @@ async def list_artifacts(request: Request, offset: str = None):
                                     "type": "model",
                                 }
                             )
-                
+
                 # Search _artifact_storage for datasets and code (immediate consistency)
-                if not types_filter or "dataset" in types_filter or "code" in types_filter:
+                if (
+                    not types_filter
+                    or "dataset" in types_filter
+                    or "code" in types_filter
+                ):
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_type_stored = artifact_data.get("type", "")
-                        if (not types_filter or artifact_type_stored in types_filter):
+                        if not types_filter or artifact_type_stored in types_filter:
                             results.append(
                                 {
                                     "name": artifact_data.get("name", ""),
@@ -878,7 +949,7 @@ async def list_artifacts(request: Request, offset: str = None):
                                     "type": artifact_type_stored,
                                 }
                             )
-                
+
                 # Also get artifacts from database (for models and any missing datasets/code)
                 all_artifacts = list_all_artifacts()
                 seen_ids = {r.get("id") for r in results}  # Avoid duplicates
@@ -886,7 +957,9 @@ async def list_artifacts(request: Request, offset: str = None):
                     artifact_type_stored = artifact.get("type", "")
                     artifact_id = artifact.get("id", "")
                     # Only add if not already in results and matches filter
-                    if artifact_id not in seen_ids and (not types_filter or artifact_type_stored in types_filter):
+                    if artifact_id not in seen_ids and (
+                        not types_filter or artifact_type_stored in types_filter
+                    ):
                         results.append(
                             {
                                 "name": artifact.get("name", artifact_id),
@@ -899,7 +972,7 @@ async def list_artifacts(request: Request, offset: str = None):
                 # Exact name match - need to return only a single package per spec requirement
                 # Check all sources but return only the first exact match found
                 seen_ids = set()
-                
+
                 # Priority order: Database -> S3 -> In-memory storage
                 # Check database first (most authoritative)
                 all_artifacts = list_all_artifacts()
@@ -909,9 +982,12 @@ async def list_artifacts(request: Request, offset: str = None):
                     artifact_type_stored = artifact.get("type", "")
                     # Exact name match (case-sensitive, no regex)
                     # Ensure artifact_name is not None or empty
-                    if (artifact_name and artifact_name == name and 
-                        (not types_filter or artifact_type_stored in types_filter) and
-                        artifact_id not in seen_ids):
+                    if (
+                        artifact_name
+                        and artifact_name == name
+                        and (not types_filter or artifact_type_stored in types_filter)
+                        and artifact_id not in seen_ids
+                    ):
                         results.append(
                             {
                                 "name": artifact_name,
@@ -922,56 +998,7 @@ async def list_artifacts(request: Request, offset: str = None):
                         seen_ids.add(artifact_id)
                         # Return only the first match - single package requirement
                         break
-                
-                # If not found by name, check if 'name' is actually an artifact_id
-                if not results:
-                    # Try looking up by artifact_id in database
-                    artifact_by_id = get_artifact_from_db(name)
-                    if artifact_by_id:
-                        artifact_id = artifact_by_id.get("id", "")
-                        artifact_name = artifact_by_id.get("name", "")
-                        artifact_type_stored = artifact_by_id.get("type", "")
-                        if (artifact_id and 
-                            (not types_filter or artifact_type_stored in types_filter) and
-                            artifact_id not in seen_ids):
-                            results.append(
-                                {
-                                    "name": artifact_name or artifact_id,
-                                    "id": artifact_id,
-                                    "type": artifact_type_stored,
-                                }
-                            )
-                            seen_ids.add(artifact_id)
-                            # Return only the first match
-                            break
-                    # Also try generic metadata lookup
-                    if not results:
-                        artifact_by_id = get_generic_artifact_metadata("model", name)
-                        if not artifact_by_id:
-                            # Try other types
-                            for atype in ["dataset", "code"]:
-                                if not types_filter or atype in types_filter:
-                                    artifact_by_id = get_generic_artifact_metadata(atype, name)
-                                    if artifact_by_id:
-                                        break
-                        if artifact_by_id:
-                            artifact_id = artifact_by_id.get("id", name)
-                            artifact_name = artifact_by_id.get("name", artifact_id)
-                            artifact_type_stored = artifact_by_id.get("type", "")
-                            if (artifact_id and 
-                                (not types_filter or artifact_type_stored in types_filter) and
-                                artifact_id not in seen_ids):
-                                results.append(
-                                    {
-                                        "name": artifact_name,
-                                        "id": artifact_id,
-                                        "type": artifact_type_stored,
-                                    }
-                                )
-                                seen_ids.add(artifact_id)
-                                # Return only the first match
-                                break
-                
+
                 # If not found in database, search S3 for models
                 if not results and (not types_filter or "model" in types_filter):
                     escaped_name = re.escape(name)
@@ -997,16 +1024,24 @@ async def list_artifacts(request: Request, offset: str = None):
                                     seen_ids.add(model_id)
                                     # Return only first match for exact name
                                     break
-                
+
                 # If still not found, search _artifact_storage for datasets and code
-                if not results and (not types_filter or "dataset" in types_filter or "code" in types_filter):
+                if not results and (
+                    not types_filter
+                    or "dataset" in types_filter
+                    or "code" in types_filter
+                ):
                     for artifact_id, artifact_data in _artifact_storage.items():
                         artifact_name = artifact_data.get("name", "")
                         artifact_type_stored = artifact_data.get("type", "")
                         # Exact name match (case-sensitive)
-                        if (artifact_name == name and 
-                            (not types_filter or artifact_type_stored in types_filter) and
-                            artifact_id not in seen_ids):
+                        if (
+                            artifact_name == name
+                            and (
+                                not types_filter or artifact_type_stored in types_filter
+                            )
+                            and artifact_id not in seen_ids
+                        ):
                             results.append(
                                 {
                                     "name": artifact_name,
@@ -1052,57 +1087,67 @@ def _extract_dataset_code_names_from_readme(readme_text: str) -> Dict[str, str]:
     """
     if not readme_text:
         return {"dataset_name": None, "code_name": None}
-    
+
     dataset_name = None
     code_name = None
-    
+
     # Common patterns for dataset mentions
     dataset_patterns = [
-        r'dataset[:\s]+([A-Za-z0-9_\-/]+)',
-        r'uses?\s+([A-Za-z0-9_\-/]+)\s+dataset',
-        r'trained\s+on\s+([A-Za-z0-9_\-/]+)',
-        r'([A-Za-z0-9_\-/]+)\s+dataset',
+        r"dataset[:\s]+([A-Za-z0-9_\-/]+)",
+        r"uses?\s+([A-Za-z0-9_\-/]+)\s+dataset",
+        r"trained\s+on\s+([A-Za-z0-9_\-/]+)",
+        r"([A-Za-z0-9_\-/]+)\s+dataset",
     ]
-    
+
     # Common patterns for code/library mentions
     code_patterns = [
-        r'code[:\s]+([A-Za-z0-9_\-/]+)',
-        r'library[:\s]+([A-Za-z0-9_\-/]+)',
-        r'uses?\s+([A-Za-z0-9_\-/]+)\s+library',
-        r'built\s+with\s+([A-Za-z0-9_\-/]+)',
-        r'([A-Za-z0-9_\-/]+)\s+library',
+        r"code[:\s]+([A-Za-z0-9_\-/]+)",
+        r"library[:\s]+([A-Za-z0-9_\-/]+)",
+        r"uses?\s+([A-Za-z0-9_\-/]+)\s+library",
+        r"built\s+with\s+([A-Za-z0-9_\-/]+)",
+        r"([A-Za-z0-9_\-/]+)\s+library",
     ]
-    
+
     readme_lower = readme_text.lower()
-    
+
     # Try to extract dataset name
     for pattern in dataset_patterns:
         matches = re.finditer(pattern, readme_lower, re.IGNORECASE)
         for match in matches:
             candidate = match.group(1).strip()
             # Filter out common false positives
-            if candidate and len(candidate) > 2 and candidate not in ['the', 'this', 'that', 'our']:
+            if (
+                candidate
+                and len(candidate) > 2
+                and candidate not in ["the", "this", "that", "our"]
+            ):
                 dataset_name = candidate
                 break
         if dataset_name:
             break
-    
+
     # Try to extract code/library name
     for pattern in code_patterns:
         matches = re.finditer(pattern, readme_lower, re.IGNORECASE)
         for match in matches:
             candidate = match.group(1).strip()
             # Filter out common false positives
-            if candidate and len(candidate) > 2 and candidate not in ['the', 'this', 'that', 'our']:
+            if (
+                candidate
+                and len(candidate) > 2
+                and candidate not in ["the", "this", "that", "our"]
+            ):
                 code_name = candidate
                 break
         if code_name:
             break
-    
+
     return {"dataset_name": dataset_name, "code_name": code_name}
 
 
-def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text: str = None):
+def _link_model_to_datasets_code(
+    artifact_id: str, model_name: str, readme_text: str = None
+):
     """
     Link a model to datasets and code artifacts by:
     1. Extracting dataset/code names from README
@@ -1113,34 +1158,38 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
         # Try to get README from model metadata
         try:
             from .services.s3_service import download_model
+
             zip_content = download_model(model_name, "main", "full")
             if zip_content:
                 import zipfile
                 import io
+
                 with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
                     for file_info in zip_file.filelist:
                         if "readme" in file_info.filename.lower():
-                            readme_text = zip_file.read(file_info).decode("utf-8", errors="ignore")
+                            readme_text = zip_file.read(file_info).decode(
+                                "utf-8", errors="ignore"
+                            )
                             break
         except Exception as e:
             logger.debug(f"Could not extract README for linking: {str(e)}")
             return
-    
+
     if not readme_text:
         return
-    
+
     # Extract dataset and code names from README
     extracted = _extract_dataset_code_names_from_readme(readme_text)
     dataset_name = extracted.get("dataset_name")
     code_name = extracted.get("code_name")
-    
+
     if not dataset_name and not code_name:
         return
-    
+
     # Find matching artifacts from database and _artifact_storage (for immediate consistency)
     dataset_id = None
     code_id = None
-    
+
     # Normalize names by replacing "/" with "-" for consistent matching
     # This ensures names like "google-research/bert" match "google-research-bert"
     def normalize_name(name: str) -> str:
@@ -1148,7 +1197,7 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
         if not name:
             return ""
         return name.replace("/", "-")
-    
+
     # Search for datasets (check _artifact_storage first, then database)
     if dataset_name:
         normalized_dataset_name = normalize_name(dataset_name)
@@ -1159,12 +1208,17 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
                 artifact_name = artifact_data.get("name", "")
                 normalized_artifact_name = normalize_name(artifact_name)
                 # Match using normalized names (handles both "google-research/bert" and "google-research-bert")
-                if (normalized_dataset_name.lower() in normalized_artifact_name.lower() or 
-                    normalized_artifact_name.lower() in normalized_dataset_name.lower() or
-                    dataset_name.lower() in artifact_name.lower() or 
-                    artifact_name.lower() in dataset_name.lower()):
+                if (
+                    normalized_dataset_name.lower() in normalized_artifact_name.lower()
+                    or normalized_artifact_name.lower()
+                    in normalized_dataset_name.lower()
+                    or dataset_name.lower() in artifact_name.lower()
+                    or artifact_name.lower() in dataset_name.lower()
+                ):
                     dataset_id = artifact_id
-                    logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from _artifact_storage")
+                    logger.info(
+                        f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from _artifact_storage"
+                    )
                     break
 
         # If not found in _artifact_storage, check database
@@ -1174,12 +1228,17 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
                 artifact_name = artifact.get("name", "")
                 normalized_artifact_name = normalize_name(artifact_name)
                 # Match using normalized names
-                if (normalized_dataset_name.lower() in normalized_artifact_name.lower() or 
-                    normalized_artifact_name.lower() in normalized_dataset_name.lower() or
-                    dataset_name.lower() in artifact_name.lower() or 
-                    artifact_name.lower() in dataset_name.lower()):
+                if (
+                    normalized_dataset_name.lower() in normalized_artifact_name.lower()
+                    or normalized_artifact_name.lower()
+                    in normalized_dataset_name.lower()
+                    or dataset_name.lower() in artifact_name.lower()
+                    or artifact_name.lower() in dataset_name.lower()
+                ):
                     dataset_id = artifact.get("id")
-                    logger.info(f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from database")
+                    logger.info(
+                        f"DEBUG: Linked model '{model_name}' to dataset '{artifact_name}' (id={dataset_id}) from database"
+                    )
                     break
 
     # Search for code (check _artifact_storage first, then database)
@@ -1191,12 +1250,16 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
                 artifact_name = artifact_data.get("name", "")
                 normalized_artifact_name = normalize_name(artifact_name)
                 # Match using normalized names
-                if (normalized_code_name.lower() in normalized_artifact_name.lower() or 
-                    normalized_artifact_name.lower() in normalized_code_name.lower() or
-                    code_name.lower() in artifact_name.lower() or 
-                    artifact_name.lower() in code_name.lower()):
+                if (
+                    normalized_code_name.lower() in normalized_artifact_name.lower()
+                    or normalized_artifact_name.lower() in normalized_code_name.lower()
+                    or code_name.lower() in artifact_name.lower()
+                    or artifact_name.lower() in code_name.lower()
+                ):
                     code_id = artifact_id
-                    logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from _artifact_storage")
+                    logger.info(
+                        f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from _artifact_storage"
+                    )
                     break
 
         # If not found in _artifact_storage, check database
@@ -1206,33 +1269,39 @@ def _link_model_to_datasets_code(artifact_id: str, model_name: str, readme_text:
                 artifact_name = artifact.get("name", "")
                 normalized_artifact_name = normalize_name(artifact_name)
                 # Match using normalized names
-                if (normalized_code_name.lower() in normalized_artifact_name.lower() or 
-                    normalized_artifact_name.lower() in normalized_code_name.lower() or
-                    code_name.lower() in artifact_name.lower() or 
-                    artifact_name.lower() in code_name.lower()):
+                if (
+                    normalized_code_name.lower() in normalized_artifact_name.lower()
+                    or normalized_artifact_name.lower() in normalized_code_name.lower()
+                    or code_name.lower() in artifact_name.lower()
+                    or artifact_name.lower() in code_name.lower()
+                ):
                     code_id = artifact.get("id")
-                    logger.info(f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from database")
+                    logger.info(
+                        f"DEBUG: Linked model '{model_name}' to code '{artifact_name}' (id={code_id}) from database"
+                    )
                     break
-    
+
     # Update model entry with links
     updates = {}
     if dataset_id:
         updates["dataset_id"] = dataset_id
     if code_id:
         updates["code_id"] = code_id
-    
+
     if updates:
         update_artifact(artifact_id, updates)
 
 
-def _link_dataset_code_to_models(artifact_id: str, artifact_name: str, artifact_type: str):
+def _link_dataset_code_to_models(
+    artifact_id: str, artifact_name: str, artifact_type: str
+):
     """
     When uploading a dataset/code, find models that reference it and link them.
     Queries Model entries where dataset_id/code_id is NULL but dataset_name/code_name matches.
     """
     if artifact_type not in ["dataset", "code"]:
         return
-    
+
     # Find models with NULL links that might match
     if artifact_type == "dataset":
         models = find_models_with_null_link("dataset")
@@ -1240,55 +1309,75 @@ def _link_dataset_code_to_models(artifact_id: str, artifact_name: str, artifact_
             model_id = model.get("id")
             model_name = model.get("name", "")
             model_dataset_name = model.get("dataset_name", "")
-            
+
             # Normalize names for matching (replace "/" with "-")
             normalized_artifact_name = artifact_name.replace("/", "-")
-            normalized_model_dataset_name = model_dataset_name.replace("/", "-") if model_dataset_name else ""
-            
+            normalized_model_dataset_name = (
+                model_dataset_name.replace("/", "-") if model_dataset_name else ""
+            )
+
             if model_dataset_name:
                 # Match stored dataset_name with artifact name (using normalized names)
-                if (normalized_artifact_name.lower() in normalized_model_dataset_name.lower() or 
-                    normalized_model_dataset_name.lower() in normalized_artifact_name.lower() or
-                    artifact_name.lower() in model_dataset_name.lower() or 
-                    model_dataset_name.lower() in artifact_name.lower()):
+                if (
+                    normalized_artifact_name.lower()
+                    in normalized_model_dataset_name.lower()
+                    or normalized_model_dataset_name.lower()
+                    in normalized_artifact_name.lower()
+                    or artifact_name.lower() in model_dataset_name.lower()
+                    or model_dataset_name.lower() in artifact_name.lower()
+                ):
                     update_artifact(model_id, {"dataset_id": artifact_id})
-                    logger.info(f"DEBUG: Linked dataset '{artifact_name}' to model '{model_name}' (id={model_id}) via dataset_name='{model_dataset_name}'")
+                    logger.info(
+                        f"DEBUG: Linked dataset '{artifact_name}' to model '{model_name}' (id={model_id}) via dataset_name='{model_dataset_name}'"
+                    )
             else:
                 # Fallback: simple name matching if dataset_name not stored
                 if artifact_name.lower() in model_name.lower():
                     update_artifact(model_id, {"dataset_id": artifact_id})
-                    logger.info(f"DEBUG: Linked dataset '{artifact_name}' to model '{model_name}' (id={model_id}) via name matching")
-    
+                    logger.info(
+                        f"DEBUG: Linked dataset '{artifact_name}' to model '{model_name}' (id={model_id}) via name matching"
+                    )
+
     elif artifact_type == "code":
         models = find_models_with_null_link("code")
         for model in models:
             model_id = model.get("id")
             model_name = model.get("name", "")
             model_code_name = model.get("code_name", "")
-            
+
             # Normalize names for matching (replace "/" with "-")
             normalized_artifact_name = artifact_name.replace("/", "-")
-            normalized_model_code_name = model_code_name.replace("/", "-") if model_code_name else ""
-            
+            normalized_model_code_name = (
+                model_code_name.replace("/", "-") if model_code_name else ""
+            )
+
             if model_code_name:
                 # Match stored code_name with artifact name (using normalized names)
-                if (normalized_artifact_name.lower() in normalized_model_code_name.lower() or 
-                    normalized_model_code_name.lower() in normalized_artifact_name.lower() or
-                    artifact_name.lower() in model_code_name.lower() or 
-                    model_code_name.lower() in artifact_name.lower()):
+                if (
+                    normalized_artifact_name.lower()
+                    in normalized_model_code_name.lower()
+                    or normalized_model_code_name.lower()
+                    in normalized_artifact_name.lower()
+                    or artifact_name.lower() in model_code_name.lower()
+                    or model_code_name.lower() in artifact_name.lower()
+                ):
                     update_artifact(model_id, {"code_id": artifact_id})
-                    logger.info(f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via code_name='{model_code_name}'")
+                    logger.info(
+                        f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via code_name='{model_code_name}'"
+                    )
             else:
                 # Fallback: simple name matching if code_name not stored
                 if artifact_name.lower() in model_name.lower():
                     update_artifact(model_id, {"code_id": artifact_id})
-                    logger.info(f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via name matching")
+                    logger.info(
+                        f"DEBUG: Linked code '{artifact_name}' to model '{model_name}' (id={model_id}) via name matching"
+                    )
 
 
 @app.delete("/reset")
 def reset_system(request: Request):
     global _rating_status, _rating_locks, _rating_results
-    
+
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
@@ -1367,6 +1456,7 @@ def get_package(id: str, request: Request):
     logger.info(f"DEBUG: Route handler executed for /package/{id}")
     return get_artifact("model", id, request)
 
+
 @app.get("/artifact/byName/{name:path}")
 def get_artifact_by_name(name: str, request: Request):
     global _artifact_storage
@@ -1374,7 +1464,7 @@ def get_artifact_by_name(name: str, request: Request):
     logger.info(f"=== GET /artifact/byName/{name} ===")
     logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
     logger.info(f"DEBUG: Searching for artifact with name: '{name}'")
-    
+
     if not verify_auth_token(request):
         logger.error(f"DEBUG: Authentication failed for /artifact/byName/{name}")
         raise HTTPException(
@@ -1382,7 +1472,7 @@ def get_artifact_by_name(name: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     logger.info(f"DEBUG: ✅ Authentication passed for /artifact/byName/{name}")
-    
+
     try:
         # Validate name parameter
         logger.info(f"DEBUG: Validating name parameter: '{name}'")
@@ -1399,7 +1489,7 @@ def get_artifact_by_name(name: str, request: Request):
         logger.info(f"DEBUG: ===== SEARCHING S3 FOR MODELS =====")
         logger.info(f"DEBUG: Searching S3 for models with name pattern: {name_pattern}")
         result = list_models(name_regex=name_pattern, limit=1000)
-        models_found = len(result.get('models', []))
+        models_found = len(result.get("models", []))
         logger.info(f"DEBUG: list_models returned {models_found} models")
         artifacts = []
 
@@ -1409,26 +1499,35 @@ def get_artifact_by_name(name: str, request: Request):
         all_db_artifacts = list_all_artifacts()
         logger.info(f"DEBUG: ===== CHECKING DATABASE =====")
         logger.info(f"DEBUG: Database artifacts count: {len(all_db_artifacts)}")
-        
+
         # Add models from S3 - find their artifact_ids from database
         for model in result.get("models", []):
             model_name = model.get("name", "")
-            logger.info(f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'")
+            logger.info(
+                f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'"
+            )
             if model_name == name:  # Exact match
                 logger.info(f"DEBUG: Found exact match in S3: {model_name}")
                 # Find artifact_id(s) for this model name in database
                 found_ids = []
                 for artifact in all_db_artifacts:
                     artifact_id = artifact.get("id", "")
-                    if artifact.get("name") == model_name and artifact.get("type") == "model":
+                    if (
+                        artifact.get("name") == model_name
+                        and artifact.get("type") == "model"
+                    ):
                         if artifact_id and artifact_id not in seen_artifact_ids:
                             found_ids.append(artifact_id)
                             seen_artifact_ids.add(artifact_id)
-                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in database for model '{model_name}'")
-                
+                            logger.info(
+                                f"DEBUG: Found artifact_id '{artifact_id}' in database for model '{model_name}'"
+                            )
+
                 # If not found in database, search S3 metadata files
                 if not found_ids:
-                    logger.info(f"DEBUG: No artifact_id in database for '{model_name}', searching S3 metadata")
+                    logger.info(
+                        f"DEBUG: No artifact_id in database for '{model_name}', searching S3 metadata"
+                    )
                     # Search S3 metadata files for this model name
                     try:
                         # List all models and check their metadata
@@ -1444,35 +1543,58 @@ def get_artifact_by_name(name: str, request: Request):
                                     .replace("\\", "_")
                                 )
                                 version = m.get("version", "main")
-                                safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                safe_version = (
+                                    version.replace("/", "_")
+                                    .replace(":", "_")
+                                    .replace("\\", "_")
+                                )
                                 metadata_key = f"models/{sanitized_name}/{safe_version}/metadata.json"
                                 try:
-                                    response = s3.get_object(Bucket=ap_arn, Key=metadata_key)
-                                    metadata_json = response["Body"].read().decode("utf-8")
+                                    response = s3.get_object(
+                                        Bucket=ap_arn, Key=metadata_key
+                                    )
+                                    metadata_json = (
+                                        response["Body"].read().decode("utf-8")
+                                    )
                                     metadata = json.loads(metadata_json)
                                     artifact_id = metadata.get("artifact_id")
-                                    if artifact_id and artifact_id not in seen_artifact_ids:
+                                    if (
+                                        artifact_id
+                                        and artifact_id not in seen_artifact_ids
+                                    ):
                                         found_ids.append(artifact_id)
                                         seen_artifact_ids.add(artifact_id)
                                         # Restore to database
-                                        save_artifact(artifact_id, {
-                                            "name": model_name,
-                                            "type": "model",
-                                            "version": version,
-                                            "id": artifact_id,
-                                            "url": metadata.get("url", f"https://huggingface.co/{model_name}")
-                                        })
-                                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in S3 metadata for model '{model_name}'")
+                                        save_artifact(
+                                            artifact_id,
+                                            {
+                                                "name": model_name,
+                                                "type": "model",
+                                                "version": version,
+                                                "id": artifact_id,
+                                                "url": metadata.get(
+                                                    "url",
+                                                    f"https://huggingface.co/{model_name}",
+                                                ),
+                                            },
+                                        )
+                                        logger.info(
+                                            f"DEBUG: Found artifact_id '{artifact_id}' in S3 metadata for model '{model_name}'"
+                                        )
                                         break
                                 except Exception as e:
-                                    logger.debug(f"DEBUG: Could not read metadata from {metadata_key}: {str(e)}")
+                                    logger.debug(
+                                        f"DEBUG: Could not read metadata from {metadata_key}: {str(e)}"
+                                    )
                                     continue
                     except Exception as e:
                         logger.warning(f"DEBUG: Error searching S3 metadata: {str(e)}")
-                
+
                 # If we found artifact_ids, use them; otherwise use model name as fallback
                 if found_ids:
-                    logger.info(f"DEBUG: Using {len(found_ids)} artifact_id(s) from storage/S3")
+                    logger.info(
+                        f"DEBUG: Using {len(found_ids)} artifact_id(s) from storage/S3"
+                    )
                     for artifact_id in found_ids:
                         artifacts.append(
                             {
@@ -1483,7 +1605,9 @@ def get_artifact_by_name(name: str, request: Request):
                         )
                 else:
                     # Fallback: use model name as id if no artifact_id found
-                    logger.warning(f"DEBUG: No artifact_id found in storage or S3 for '{model_name}', using fallback")
+                    logger.warning(
+                        f"DEBUG: No artifact_id found in storage or S3 for '{model_name}', using fallback"
+                    )
                     fallback_id = model.get("id", model_name)
                     if fallback_id not in seen_artifact_ids:
                         seen_artifact_ids.add(fallback_id)
@@ -1491,17 +1615,25 @@ def get_artifact_by_name(name: str, request: Request):
                             {
                                 "name": model_name,
                                 "id": fallback_id,
-                        "type": "model",
-                    }
-                )
+                                "type": "model",
+                            }
+                        )
 
         # Search _artifact_storage for datasets and code (immediate consistency)
-        logger.info(f"DEBUG: Searching _artifact_storage for datasets and code with name='{name}'")
+        logger.info(
+            f"DEBUG: Searching _artifact_storage for datasets and code with name='{name}'"
+        )
         for artifact_id, artifact_data in _artifact_storage.items():
             artifact_name = artifact_data.get("name", "")
             artifact_type = artifact_data.get("type", "")
-            if artifact_name == name and artifact_id and artifact_id not in seen_artifact_ids:
-                logger.info(f"DEBUG: Found {artifact_type} in _artifact_storage: id='{artifact_id}', name='{artifact_name}'")
+            if (
+                artifact_name == name
+                and artifact_id
+                and artifact_id not in seen_artifact_ids
+            ):
+                logger.info(
+                    f"DEBUG: Found {artifact_type} in _artifact_storage: id='{artifact_id}', name='{artifact_name}'"
+                )
                 seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
@@ -1510,15 +1642,21 @@ def get_artifact_by_name(name: str, request: Request):
                         "type": artifact_type,
                     }
                 )
-        
+
         # Add artifacts from database (all artifact types including models)
         logger.info(f"DEBUG: Searching database for artifacts with name='{name}'")
         storage_matches = 0
         for artifact in all_db_artifacts:
             artifact_id = artifact.get("id", "")
-            if artifact.get("name") == name and artifact_id and artifact_id not in seen_artifact_ids:  # Exact match
+            if (
+                artifact.get("name") == name
+                and artifact_id
+                and artifact_id not in seen_artifact_ids
+            ):  # Exact match
                 storage_matches += 1
-                logger.info(f"DEBUG: Found artifact in database: id='{artifact_id}', name='{artifact.get('name')}', type='{artifact.get('type')}'")
+                logger.info(
+                    f"DEBUG: Found artifact in database: id='{artifact_id}', name='{artifact.get('name')}', type='{artifact.get('type')}'"
+                )
                 seen_artifact_ids.add(artifact_id)
                 artifacts.append(
                     {
@@ -1528,33 +1666,52 @@ def get_artifact_by_name(name: str, request: Request):
                     }
                 )
         logger.info(f"DEBUG: Found {storage_matches} additional artifacts in database")
-        
+
         # Also search S3 for datasets and code artifacts (fallback)
         for artifact_type in ["dataset", "code"]:
             try:
-                logger.info(f"DEBUG: Searching S3 for {artifact_type} artifacts with name='{name}'")
-                result = list_artifacts_from_s3(artifact_type=artifact_type, name_regex=f"^{re.escape(name)}$", limit=1000)
+                logger.info(
+                    f"DEBUG: Searching S3 for {artifact_type} artifacts with name='{name}'"
+                )
+                result = list_artifacts_from_s3(
+                    artifact_type=artifact_type,
+                    name_regex=f"^{re.escape(name)}$",
+                    limit=1000,
+                )
                 for artifact in result.get("artifacts", []):
                     artifact_name = artifact.get("name")
                     artifact_id = artifact.get("artifact_id")
-                    if artifact_name == name and artifact_id and artifact_id not in seen_artifact_ids:
+                    if (
+                        artifact_name == name
+                        and artifact_id
+                        and artifact_id not in seen_artifact_ids
+                    ):
                         seen_artifact_ids.add(artifact_id)
                         # Restore to database
-                        save_artifact(artifact_id, {
-                            "name": artifact_name,
-                            "type": artifact_type,
-                            "version": artifact.get("version", "main"),
-                            "id": artifact_id,
-                            "url": f"https://example.com/{artifact_type}/{artifact_name}"
-                        })
-                        artifacts.append({
-                            "name": artifact_name,
-                            "id": artifact_id,
-                            "type": artifact_type,
-                        })
-                        logger.info(f"DEBUG: Found {artifact_type} artifact in S3: id='{artifact_id}', name='{artifact_name}'")
+                        save_artifact(
+                            artifact_id,
+                            {
+                                "name": artifact_name,
+                                "type": artifact_type,
+                                "version": artifact.get("version", "main"),
+                                "id": artifact_id,
+                                "url": f"https://example.com/{artifact_type}/{artifact_name}",
+                            },
+                        )
+                        artifacts.append(
+                            {
+                                "name": artifact_name,
+                                "id": artifact_id,
+                                "type": artifact_type,
+                            }
+                        )
+                        logger.info(
+                            f"DEBUG: Found {artifact_type} artifact in S3: id='{artifact_id}', name='{artifact_name}'"
+                        )
             except Exception as e:
-                logger.warning(f"DEBUG: Error searching S3 for {artifact_type}: {str(e)}")
+                logger.warning(
+                    f"DEBUG: Error searching S3 for {artifact_type}: {str(e)}"
+                )
 
         logger.info(f"DEBUG: Total artifacts found: {len(artifacts)}")
         if not artifacts:
@@ -1585,12 +1742,14 @@ async def search_artifacts_by_regex(request: Request):
         body = {}
         content_type = request.headers.get("content-type", "").lower()
         logger.info(f"Content-Type: {content_type}")
-        
+
         # Read raw body first (before any parsing attempts)
         raw_body_bytes = await request.body()
-        raw_body_str = raw_body_bytes.decode('utf-8', errors='ignore') if raw_body_bytes else ""
+        raw_body_str = (
+            raw_body_bytes.decode("utf-8", errors="ignore") if raw_body_bytes else ""
+        )
         logger.info(f"Raw request body (length: {len(raw_body_bytes)}): {raw_body_str}")
-        
+
         # Parse based on content type
         try:
             if "application/json" in content_type:
@@ -1609,27 +1768,33 @@ async def search_artifacts_by_regex(request: Request):
                             # If it looks like {regex: ...} without quotes, try to fix it
                             if re.match(r'^\s*\{[^"]*regex[^"]*:', fixed_json):
                                 # Try to extract regex value and reconstruct proper JSON
-                                regex_match = re.search(r'regex\s*:\s*([^}]+)', fixed_json)
+                                regex_match = re.search(
+                                    r"regex\s*:\s*([^}]+)", fixed_json
+                                )
                                 if regex_match:
-                                    regex_value = regex_match.group(1).strip().strip('"\'')
+                                    regex_value = (
+                                        regex_match.group(1).strip().strip("\"'")
+                                    )
                                     fixed_json = f'{{"regex": "{regex_value}"}}'
                                     logger.info(f"Attempting to fix JSON: {fixed_json}")
                                     body = json.loads(fixed_json)
-                                    logger.info(f"Successfully parsed fixed JSON body: {body}")
+                                    logger.info(
+                                        f"Successfully parsed fixed JSON body: {body}"
+                                    )
                                 else:
                                     raise HTTPException(
                                         status_code=400,
-                                        detail=f"Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{\"regex\": \"pattern\"}}",
+                                        detail=f'Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{"regex": "pattern"}}',
                                     )
                             else:
                                 raise HTTPException(
                                     status_code=400,
-                                    detail=f"Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{\"regex\": \"pattern\"}}",
+                                    detail=f'Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{"regex": "pattern"}}',
                                 )
                         except json.JSONDecodeError:
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{\"regex\": \"pattern\"}}",
+                                detail=f'Invalid JSON in request body: {str(json_err)}. Received: {repr(raw_body_str[:100])}. Please use proper JSON format: {{"regex": "pattern"}}',
                             )
                 else:
                     logger.error("Empty request body")
@@ -1645,7 +1810,7 @@ async def search_artifacts_by_regex(request: Request):
                     logger.info(f"Parsed form body: {body}")
                 except:
                     # If form parsing fails, try to parse raw body as JSON anyway
-                    if raw_body_str and raw_body_str.strip().startswith('{'):
+                    if raw_body_str and raw_body_str.strip().startswith("{"):
                         try:
                             body = json.loads(raw_body_str)
                             logger.info(f"Parsed raw body as JSON: {body}")
@@ -1662,7 +1827,9 @@ async def search_artifacts_by_regex(request: Request):
         except HTTPException:
             raise
         except Exception as parse_error:
-            logger.error(f"Error parsing request body: {str(parse_error)}", exc_info=True)
+            logger.error(
+                f"Error parsing request body: {str(parse_error)}", exc_info=True
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid. Error: {str(parse_error)}",
@@ -1685,7 +1852,9 @@ async def search_artifacts_by_regex(request: Request):
         # Validate regex field
         regex_pattern = search_criteria.get("regex")
         if not regex_pattern or not isinstance(regex_pattern, str):
-            logger.error(f"Missing or invalid regex field. search_criteria: {search_criteria}")
+            logger.error(
+                f"Missing or invalid regex field. search_criteria: {search_criteria}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
@@ -1693,93 +1862,122 @@ async def search_artifacts_by_regex(request: Request):
 
         # Validate regex pattern and check for ReDoS (Regular Expression Denial of Service) patterns
         # Check for dangerous patterns that cause catastrophic backtracking
-        
+
         # Pattern 1: Overlapping alternations with quantifiers - (a|aa)*, (a|aaa)*, etc.
         # This is a classic ReDoS pattern that causes exponential backtracking
         # Match patterns like (a|aa)*, (a|aaa)+, (x|xx)*, etc.
-        alternation_with_quantifier = re.search(r'\(([^|()]+)\|([^|()]+)\)([*+?])', regex_pattern)
+        alternation_with_quantifier = re.search(
+            r"\(([^|()]+)\|([^|()]+)\)([*+?])", regex_pattern
+        )
         if alternation_with_quantifier:
             alt1, alt2, quantifier = alternation_with_quantifier.groups()
             alt1 = alt1.strip()
             alt2 = alt2.strip()
             # Check if one alternative is a prefix of another (e.g., "a" is prefix of "aa")
             # This causes exponential backtracking when combined with quantifiers
-            if (alt1 in alt2 or alt2 in alt1) and len(alt1) > 0 and len(alt2) > 0 and alt1 != alt2:
-                logger.warning(f"ReDoS risk detected: overlapping alternation with quantifier found: '{regex_pattern[:100]}' (alt1='{alt1}', alt2='{alt2}', quantifier='{quantifier}')")
+            if (
+                (alt1 in alt2 or alt2 in alt1)
+                and len(alt1) > 0
+                and len(alt2) > 0
+                and alt1 != alt2
+            ):
+                logger.warning(
+                    f"ReDoS risk detected: overlapping alternation with quantifier found: '{regex_pattern[:100]}' (alt1='{alt1}', alt2='{alt2}', quantifier='{quantifier}')"
+                )
                 raise HTTPException(
                     status_code=400,
                     detail="The regex pattern contains potentially dangerous constructs (overlapping alternations with quantifiers) that may cause performance issues. Please use a simpler pattern.",
                 )
-        
+
         # Also check for more complex alternations with multiple alternatives
         # Pattern like (a|aa|aaa)*
-        complex_alternation = re.search(r'\([^)]+\|[^)]+\|[^)]+\)[*+?]', regex_pattern)
+        complex_alternation = re.search(r"\([^)]+\|[^)]+\|[^)]+\)[*+?]", regex_pattern)
         if complex_alternation:
-            logger.warning(f"ReDoS risk detected: complex alternation with quantifier found: '{regex_pattern[:100]}'")
+            logger.warning(
+                f"ReDoS risk detected: complex alternation with quantifier found: '{regex_pattern[:100]}'"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="The regex pattern contains potentially dangerous constructs (complex alternations with quantifiers) that may cause performance issues. Please use a simpler pattern.",
             )
-        
+
         # Pattern 2: Nested quantifiers - (a+)+, (a*)*, (a{1,99999}){1,99999}, etc.
         # Check for nested quantifiers with ranges
-        nested_range_quantifier = re.search(r'\([^)]*\{[^}]+\}[^)]*\)\s*\{[^}]+\}', regex_pattern)
+        nested_range_quantifier = re.search(
+            r"\([^)]*\{[^}]+\}[^)]*\)\s*\{[^}]+\}", regex_pattern
+        )
         if nested_range_quantifier:
-            logger.warning(f"ReDoS risk detected: nested range quantifiers found: '{regex_pattern[:100]}'")
+            logger.warning(
+                f"ReDoS risk detected: nested range quantifiers found: '{regex_pattern[:100]}'"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="The regex pattern contains potentially dangerous constructs (nested range quantifiers) that may cause performance issues. Please use a simpler pattern.",
             )
-        
+
         # Check for large quantifier ranges that could cause performance issues
-        large_range_match = re.findall(r'\{(\d+),(\d+)\}', regex_pattern)
+        large_range_match = re.findall(r"\{(\d+),(\d+)\}", regex_pattern)
         for min_val, max_val in large_range_match:
             try:
                 min_int = int(min_val)
                 max_int = int(max_val)
                 # If range is very large (e.g., {1,99999}), it can cause performance issues
                 if max_int > 1000 or (max_int - min_int) > 1000:
-                    logger.warning(f"ReDoS risk detected: large quantifier range found: {{{min_val},{max_val}}} in '{regex_pattern[:100]}'")
+                    logger.warning(
+                        f"ReDoS risk detected: large quantifier range found: {{{min_val},{max_val}}} in '{regex_pattern[:100]}'"
+                    )
                     raise HTTPException(
                         status_code=400,
                         detail=f"The regex pattern contains a large quantifier range ({{{min_val},{max_val}}}) that may cause performance issues. Maximum range is 1000.",
                     )
             except ValueError:
                 pass  # Skip if conversion fails
-        
+
         # Check for nested quantifiers with +, *, ?
         dangerous_patterns = [
-            r'\([^)]+\+\)\s*\+',  # Nested quantifiers like (a+)+
-            r'\([^)]+\*\)\s*\*',  # Nested quantifiers like (a*)*
-            r'\([^)]+\+\s*\)\s*\+',  # Multiple nested quantifiers
-            r'\([^)]+\+\s*\)\s*\*',  # Mixed nested quantifiers
-            r'\([^)]+\*\)\s*\+',  # Mixed nested quantifiers
-            r'\([^)]+\+\)\s*\?',  # Nested with ?
-            r'\([^)]+\*\)\s*\?',  # Nested with ?
+            r"\([^)]+\+\)\s*\+",  # Nested quantifiers like (a+)+
+            r"\([^)]+\*\)\s*\*",  # Nested quantifiers like (a*)*
+            r"\([^)]+\+\s*\)\s*\+",  # Multiple nested quantifiers
+            r"\([^)]+\+\s*\)\s*\*",  # Mixed nested quantifiers
+            r"\([^)]+\*\)\s*\+",  # Mixed nested quantifiers
+            r"\([^)]+\+\)\s*\?",  # Nested with ?
+            r"\([^)]+\*\)\s*\?",  # Nested with ?
         ]
-        
+
         # Check for specific ReDoS patterns
         for dangerous_pattern in dangerous_patterns:
             if re.search(dangerous_pattern, regex_pattern):
-                logger.warning(f"ReDoS risk detected: dangerous pattern found in '{regex_pattern[:100]}'")
+                logger.warning(
+                    f"ReDoS risk detected: dangerous pattern found in '{regex_pattern[:100]}'"
+                )
                 raise HTTPException(
                     status_code=400,
                     detail="The regex pattern contains potentially dangerous constructs that may cause performance issues. Please use a simpler pattern.",
                 )
-        
+
         # Pattern 3: Multiple consecutive quantifier groups - (a+)(a+)(a+)(a+)
         # Pattern like (a+)(a+)(a+)(a+)(a+)(a+)$ is a classic ReDoS attack
-        nested_quantifier_count = regex_pattern.count('(a+') + regex_pattern.count('(a*')
+        nested_quantifier_count = regex_pattern.count("(a+") + regex_pattern.count(
+            "(a*"
+        )
         # Count sequences of quantifier groups
-        consecutive_quantifier_groups = len(re.findall(r'\([^)]*[+*]\s*\)\s*\([^)]*[+*]\s*\)', regex_pattern))
+        consecutive_quantifier_groups = len(
+            re.findall(r"\([^)]*[+*]\s*\)\s*\([^)]*[+*]\s*\)", regex_pattern)
+        )
         # Check for specific ReDoS pattern: multiple (a+) groups in sequence
-        if re.search(r'\(a\+\)\s*\(a\+\)\s*\(a\+\)\s*\(a\+\)', regex_pattern) or nested_quantifier_count > 3 or consecutive_quantifier_groups > 2:
-            logger.warning(f"ReDoS risk detected: pattern has {nested_quantifier_count} nested quantifiers or {consecutive_quantifier_groups} consecutive quantifier groups: '{regex_pattern[:100]}'")
+        if (
+            re.search(r"\(a\+\)\s*\(a\+\)\s*\(a\+\)\s*\(a\+\)", regex_pattern)
+            or nested_quantifier_count > 3
+            or consecutive_quantifier_groups > 2
+        ):
+            logger.warning(
+                f"ReDoS risk detected: pattern has {nested_quantifier_count} nested quantifiers or {consecutive_quantifier_groups} consecutive quantifier groups: '{regex_pattern[:100]}'"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="The regex pattern is too complex and may cause performance issues. Please use a simpler pattern.",
             )
-        
+
         # Validate regex pattern syntax
         try:
             compiled_pattern = re.compile(regex_pattern)
@@ -1789,7 +1987,7 @@ async def search_artifacts_by_regex(request: Request):
                 status_code=400,
                 detail="There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid",
             )
-        
+
         # Additional safety: limit regex pattern length
         if len(regex_pattern) > 500:
             logger.warning(f"Regex pattern too long: {len(regex_pattern)} characters")
@@ -1802,7 +2000,7 @@ async def search_artifacts_by_regex(request: Request):
         logger.info(f"DEBUG: Starting regex search with pattern: '{regex_pattern}'")
         artifacts = []
         seen_artifact_ids = set()
-        
+
         # Search models from S3 (with reduced limit to prevent ReDoS)
         logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}'")
         try:
@@ -1812,22 +2010,31 @@ async def search_artifacts_by_regex(request: Request):
             logger.info(f"DEBUG: Found {len(models_found)} models in S3 matching regex")
             for model in models_found:
                 model_name = model.get("name", "")
-                logger.info(f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'")
+                logger.info(
+                    f"DEBUG: Processing model from S3: name='{model_name}', version='{model.get('version', 'N/A')}'"
+                )
                 # Find artifact_id for this model name in database
                 artifact_id = None
                 all_artifacts = list_all_artifacts()
                 for stored_artifact in all_artifacts:
                     stored_id = stored_artifact.get("id", "")
-                    if stored_artifact.get("name") == model_name and stored_artifact.get("type") == "model":
+                    if (
+                        stored_artifact.get("name") == model_name
+                        and stored_artifact.get("type") == "model"
+                    ):
                         artifact_id = stored_id
-                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in database for model '{model_name}'")
+                        logger.info(
+                            f"DEBUG: Found artifact_id '{artifact_id}' in database for model '{model_name}'"
+                        )
                         break
-                
+
                 # Use found artifact_id or fallback to model name
                 if not artifact_id:
                     artifact_id = model.get("id", model_name)
-                    logger.warning(f"DEBUG: No artifact_id in storage for '{model_name}', using fallback: '{artifact_id}'")
-                
+                    logger.warning(
+                        f"DEBUG: No artifact_id in storage for '{model_name}', using fallback: '{artifact_id}'"
+                    )
+
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
@@ -1837,9 +2044,14 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "model",
                         }
                     )
-                    logger.info(f"DEBUG: Added model artifact: name='{model_name}', id='{artifact_id}'")
+                    logger.info(
+                        f"DEBUG: Added model artifact: name='{model_name}', id='{artifact_id}'"
+                    )
         except Exception as e:
-            logger.error(f"DEBUG: Error searching models with regex {regex_pattern}: {str(e)}", exc_info=True)
+            logger.error(
+                f"DEBUG: Error searching models with regex {regex_pattern}: {str(e)}",
+                exc_info=True,
+            )
             logger.warning(
                 f"Error searching models with regex {regex_pattern}: {str(e)}"
             )
@@ -1848,18 +2060,28 @@ async def search_artifacts_by_regex(request: Request):
         logger.info(f"DEBUG: Searching datasets in S3 with regex: '{regex_pattern}'")
         try:
             # Limit results to prevent ReDoS attacks
-            result = list_artifacts_from_s3(artifact_type="dataset", name_regex=regex_pattern, limit=100)
+            result = list_artifacts_from_s3(
+                artifact_type="dataset", name_regex=regex_pattern, limit=100
+            )
             datasets_found = result.get("artifacts", [])
-            logger.info(f"DEBUG: Found {len(datasets_found)} datasets in S3 matching regex")
+            logger.info(
+                f"DEBUG: Found {len(datasets_found)} datasets in S3 matching regex"
+            )
             for dataset in datasets_found:
                 dataset_name = dataset.get("name", "")
                 dataset_version = dataset.get("version", "main")
-                logger.info(f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset_version}'")
+                logger.info(
+                    f"DEBUG: Processing dataset from S3: name='{dataset_name}', version='{dataset_version}'"
+                )
                 # Try to get artifact_id from metadata.json file
                 artifact_id = None
                 try:
                     sanitized_name = sanitize_model_id_for_s3(dataset_name)
-                    safe_version = dataset_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    safe_version = (
+                        dataset_version.replace("/", "_")
+                        .replace(":", "_")
+                        .replace("\\", "_")
+                    )
                     s3_key = f"datasets/{sanitized_name}/{safe_version}/metadata.json"
                     logger.info(f"DEBUG: Reading metadata from S3: {s3_key}")
                     response = s3.get_object(Bucket=ap_arn, Key=s3_key)
@@ -1869,31 +2091,46 @@ async def search_artifacts_by_regex(request: Request):
                     metadata_name = metadata.get("name")
                     if metadata_name:
                         dataset_name = metadata_name
-                        logger.info(f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset")
+                        logger.info(
+                            f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset"
+                        )
                     metadata_name = metadata.get("name")
                     if metadata_name:
                         dataset_name = metadata_name
-                        logger.info(f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset")
+                        logger.info(
+                            f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset"
+                        )
                     if artifact_id:
-                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for dataset '{dataset_name}'")
+                        logger.info(
+                            f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for dataset '{dataset_name}'"
+                        )
                 except Exception as e:
-                    logger.debug(f"DEBUG: Could not read metadata.json for dataset '{dataset_name}': {str(e)}")
-                
+                    logger.debug(
+                        f"DEBUG: Could not read metadata.json for dataset '{dataset_name}': {str(e)}"
+                    )
+
                 # Fallback: Find artifact_id in database
                 if not artifact_id:
                     all_artifacts = list_all_artifacts()
                     for stored_artifact in all_artifacts:
                         stored_id = stored_artifact.get("id", "")
-                        if stored_artifact.get("name") == dataset_name and stored_artifact.get("type") == "dataset":
+                        if (
+                            stored_artifact.get("name") == dataset_name
+                            and stored_artifact.get("type") == "dataset"
+                        ):
                             artifact_id = stored_id
-                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in database for dataset '{dataset_name}'")
+                            logger.info(
+                                f"DEBUG: Found artifact_id '{artifact_id}' in database for dataset '{dataset_name}'"
+                            )
                             break
-                
+
                 # Last fallback: use dataset name
                 if not artifact_id:
                     artifact_id = dataset_name
-                    logger.warning(f"DEBUG: No artifact_id found for '{dataset_name}', using fallback: '{artifact_id}'")
-                
+                    logger.warning(
+                        f"DEBUG: No artifact_id found for '{dataset_name}', using fallback: '{artifact_id}'"
+                    )
+
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
@@ -1903,29 +2140,46 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "dataset",
                         }
                     )
-                    logger.info(f"DEBUG: Added dataset artifact: name='{dataset_name}', id='{artifact_id}'")
+                    logger.info(
+                        f"DEBUG: Added dataset artifact: name='{dataset_name}', id='{artifact_id}'"
+                    )
         except Exception as e:
-            logger.error(f"DEBUG: Error searching datasets with regex {regex_pattern}: {str(e)}", exc_info=True)
+            logger.error(
+                f"DEBUG: Error searching datasets with regex {regex_pattern}: {str(e)}",
+                exc_info=True,
+            )
             logger.warning(
                 f"Error searching datasets with regex {regex_pattern}: {str(e)}"
             )
-        
+
         # Search code artifacts from S3
-        logger.info(f"DEBUG: Searching code artifacts in S3 with regex: '{regex_pattern}'")
+        logger.info(
+            f"DEBUG: Searching code artifacts in S3 with regex: '{regex_pattern}'"
+        )
         try:
             # Limit results to prevent ReDoS attacks
-            result = list_artifacts_from_s3(artifact_type="code", name_regex=regex_pattern, limit=100)
+            result = list_artifacts_from_s3(
+                artifact_type="code", name_regex=regex_pattern, limit=100
+            )
             code_artifacts_found = result.get("artifacts", [])
-            logger.info(f"DEBUG: Found {len(code_artifacts_found)} code artifacts in S3 matching regex")
+            logger.info(
+                f"DEBUG: Found {len(code_artifacts_found)} code artifacts in S3 matching regex"
+            )
             for code_artifact in code_artifacts_found:
                 code_name = code_artifact.get("name", "")
                 code_version = code_artifact.get("version", "main")
-                logger.info(f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_version}'")
+                logger.info(
+                    f"DEBUG: Processing code artifact from S3: name='{code_name}', version='{code_version}'"
+                )
                 # Try to get artifact_id from metadata.json file
                 artifact_id = None
                 try:
                     sanitized_name = sanitize_model_id_for_s3(code_name)
-                    safe_version = code_version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                    safe_version = (
+                        code_version.replace("/", "_")
+                        .replace(":", "_")
+                        .replace("\\", "_")
+                    )
                     s3_key = f"codes/{sanitized_name}/{safe_version}/metadata.json"
                     logger.info(f"DEBUG: Reading metadata from S3: {s3_key}")
                     response = s3.get_object(Bucket=ap_arn, Key=s3_key)
@@ -1935,27 +2189,40 @@ async def search_artifacts_by_regex(request: Request):
                     metadata_name = metadata.get("name")
                     if metadata_name:
                         code_name = metadata_name
-                        logger.info(f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset")
+                        logger.info(
+                            f"DEBUG: Extracted name '{dataset_name}' from metadata.json for dataset"
+                        )
                     if artifact_id:
-                        logger.info(f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for code artifact '{code_name}'")
+                        logger.info(
+                            f"DEBUG: Found artifact_id '{artifact_id}' from metadata.json for code artifact '{code_name}'"
+                        )
                 except Exception as e:
-                    logger.debug(f"DEBUG: Could not read metadata.json for code artifact '{code_name}': {str(e)}")
-                
+                    logger.debug(
+                        f"DEBUG: Could not read metadata.json for code artifact '{code_name}': {str(e)}"
+                    )
+
                 # Fallback: Find artifact_id in database
                 if not artifact_id:
                     all_artifacts = list_all_artifacts()
                     for stored_artifact in all_artifacts:
                         stored_id = stored_artifact.get("id", "")
-                        if stored_artifact.get("name") == code_name and stored_artifact.get("type") == "code":
+                        if (
+                            stored_artifact.get("name") == code_name
+                            and stored_artifact.get("type") == "code"
+                        ):
                             artifact_id = stored_id
-                            logger.info(f"DEBUG: Found artifact_id '{artifact_id}' in database for code artifact '{code_name}'")
+                            logger.info(
+                                f"DEBUG: Found artifact_id '{artifact_id}' in database for code artifact '{code_name}'"
+                            )
                             break
-                
+
                 # Last fallback: use code name
                 if not artifact_id:
                     artifact_id = code_name
-                    logger.warning(f"DEBUG: No artifact_id found for '{code_name}', using fallback: '{artifact_id}'")
-                
+                    logger.warning(
+                        f"DEBUG: No artifact_id found for '{code_name}', using fallback: '{artifact_id}'"
+                    )
+
                 if artifact_id not in seen_artifact_ids:
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
@@ -1965,9 +2232,14 @@ async def search_artifacts_by_regex(request: Request):
                             "type": "code",
                         }
                     )
-                    logger.info(f"DEBUG: Added code artifact: name='{code_name}', id='{artifact_id}'")
+                    logger.info(
+                        f"DEBUG: Added code artifact: name='{code_name}', id='{artifact_id}'"
+                    )
         except Exception as e:
-            logger.error(f"DEBUG: Error searching code artifacts with regex {regex_pattern}: {str(e)}", exc_info=True)
+            logger.error(
+                f"DEBUG: Error searching code artifacts with regex {regex_pattern}: {str(e)}",
+                exc_info=True,
+            )
             logger.warning(
                 f"Error searching code artifacts with regex {regex_pattern}: {str(e)}"
             )
@@ -1975,7 +2247,9 @@ async def search_artifacts_by_regex(request: Request):
         # Search artifacts in storage matching regex, but verify they exist in S3
         # Search database for artifacts matching regex
         all_artifacts = list_all_artifacts()
-        logger.info(f"DEBUG: Searching database (size: {len(all_artifacts)}) for artifacts matching regex")
+        logger.info(
+            f"DEBUG: Searching database (size: {len(all_artifacts)}) for artifacts matching regex"
+        )
         storage_matches = 0
         for artifact in all_artifacts:
             artifact_id = artifact.get("id", "")
@@ -1985,21 +2259,37 @@ async def search_artifacts_by_regex(request: Request):
                 # Use compiled pattern and limit input length to prevent ReDoS
                 if len(artifact_name) > 1000:
                     continue  # Skip very long names to prevent ReDoS
-                if compiled_pattern.search(artifact_name) and artifact_id not in seen_artifact_ids:
-                    logger.info(f"DEBUG: Found potential match in storage: id='{artifact_id}', name='{artifact_name}', type='{artifact_type}'")
+                if (
+                    compiled_pattern.search(artifact_name)
+                    and artifact_id not in seen_artifact_ids
+                ):
+                    logger.info(
+                        f"DEBUG: Found potential match in storage: id='{artifact_id}', name='{artifact_name}', type='{artifact_type}'"
+                    )
                     # Verify artifact exists in S3 before including it
                     artifact_exists = False
                     try:
                         if artifact_type == "model":
                             # Check if model exists in S3
-                            sanitized_artifact_name = sanitize_model_id_for_s3(artifact_name)
-                            logger.info(f"DEBUG: Verifying model in S3: sanitized_name='{sanitized_artifact_name}'")
-                            result = list_models(name_regex=f"^{re.escape(sanitized_artifact_name)}$", limit=1)
+                            sanitized_artifact_name = sanitize_model_id_for_s3(
+                                artifact_name
+                            )
+                            logger.info(
+                                f"DEBUG: Verifying model in S3: sanitized_name='{sanitized_artifact_name}'"
+                            )
+                            result = list_models(
+                                name_regex=f"^{re.escape(sanitized_artifact_name)}$",
+                                limit=1,
+                            )
                             if result.get("models"):
                                 model = result["models"][0]
                                 v = model.get("version", "main")
                                 model_n = model.get("name", sanitized_artifact_name)
-                                safe_version = v.replace("/", "_").replace(":", "_").replace("\\", "_")
+                                safe_version = (
+                                    v.replace("/", "_")
+                                    .replace(":", "_")
+                                    .replace("\\", "_")
+                                )
                                 s3_key = f"models/{model_n}/{safe_version}/model.zip"
                                 logger.info(f"DEBUG: Checking S3 key: {s3_key}")
                                 try:
@@ -2007,33 +2297,52 @@ async def search_artifacts_by_regex(request: Request):
                                     artifact_exists = True
                                     logger.info(f"DEBUG: Model exists in S3: {s3_key}")
                                 except ClientError as e:
-                                    logger.warning(f"DEBUG: Model not found in S3: {s3_key}, error: {e}")
+                                    logger.warning(
+                                        f"DEBUG: Model not found in S3: {s3_key}, error: {e}"
+                                    )
                                     pass
                             else:
-                                logger.warning(f"DEBUG: No models found in S3 for '{sanitized_artifact_name}'")
+                                logger.warning(
+                                    f"DEBUG: No models found in S3 for '{sanitized_artifact_name}'"
+                                )
                         else:
                             # For datasets and code, check if metadata.json exists in S3
                             sanitized_name = sanitize_model_id_for_s3(artifact_name)
                             version = artifact.get("version", "main")
-                            safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                            safe_version = (
+                                version.replace("/", "_")
+                                .replace(":", "_")
+                                .replace("\\", "_")
+                            )
                             s3_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
-                            logger.info(f"DEBUG: Verifying {artifact_type} in S3: key='{s3_key}'")
+                            logger.info(
+                                f"DEBUG: Verifying {artifact_type} in S3: key='{s3_key}'"
+                            )
                             try:
                                 s3.head_object(Bucket=ap_arn, Key=s3_key)
                                 artifact_exists = True
-                                logger.info(f"DEBUG: {artifact_type} exists in S3: {s3_key}")
+                                logger.info(
+                                    f"DEBUG: {artifact_type} exists in S3: {s3_key}"
+                                )
                             except ClientError as e:
-                                logger.warning(f"DEBUG: {artifact_type} not found in S3: {s3_key}, error: {e}")
+                                logger.warning(
+                                    f"DEBUG: {artifact_type} not found in S3: {s3_key}, error: {e}"
+                                )
                                 pass
                     except Exception as e:
-                        logger.error(f"DEBUG: Exception verifying artifact in S3: {str(e)}", exc_info=True)
+                        logger.error(
+                            f"DEBUG: Exception verifying artifact in S3: {str(e)}",
+                            exc_info=True,
+                        )
                         pass
-                    
+
                     # Only include if artifact exists in S3
                     if not artifact_exists:
-                        logger.warning(f"DEBUG: Skipping artifact '{artifact_id}' - not found in S3")
+                        logger.warning(
+                            f"DEBUG: Skipping artifact '{artifact_id}' - not found in S3"
+                        )
                         continue
-                    
+
                     storage_matches += 1
                     seen_artifact_ids.add(artifact_id)
                     artifacts.append(
@@ -2043,13 +2352,19 @@ async def search_artifacts_by_regex(request: Request):
                             "type": artifact_type,
                         }
                     )
-                    logger.info(f"DEBUG: Added artifact from storage: name='{artifact_name}', id='{artifact_id}', type='{artifact_type}'")
+                    logger.info(
+                        f"DEBUG: Added artifact from storage: name='{artifact_name}', id='{artifact_id}', type='{artifact_type}'"
+                    )
             except re.error as e:
                 # Skip invalid regex matches
-                logger.warning(f"DEBUG: Regex error for artifact '{artifact_id}': {str(e)}")
+                logger.warning(
+                    f"DEBUG: Regex error for artifact '{artifact_id}': {str(e)}"
+                )
                 continue
 
-        logger.info(f"DEBUG: Found {storage_matches} additional artifacts in storage matching regex")
+        logger.info(
+            f"DEBUG: Found {storage_matches} additional artifacts in storage matching regex"
+        )
 
         logger.info(f"DEBUG: Total artifacts found: {len(artifacts)}")
         if not artifacts:
@@ -2075,7 +2390,7 @@ async def search_artifacts_by_regex(request: Request):
 def get_artifact(artifact_type: str, id: str, request: Request):
     logger.info(f"=== GET /artifact/{artifact_type}/{id} ===")
     logger.info(f"DEBUG: Request headers: {dict(request.headers)}")
-    
+
     if not verify_auth_token(request):
         logger.error(f"DEBUG: Authentication failed for /artifact/{artifact_type}/{id}")
         raise HTTPException(
@@ -2083,12 +2398,14 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
     logger.info(f"DEBUG: Authentication passed for /artifact/{artifact_type}/{id}")
-    
+
     try:
         if artifact_type == "model":
             logger.info(f"DEBUG: ===== GET ARTIFACT BY ID START =====")
-            logger.info(f"DEBUG: Querying model with id='{id}', artifact_type='{artifact_type}'")
-            
+            logger.info(
+                f"DEBUG: Querying model with id='{id}', artifact_type='{artifact_type}'"
+            )
+
             # First, check if id is in database (artifact_id lookup)
             # Try to get full metadata first, fallback to basic if needed
             artifact = get_generic_artifact_metadata("model", id)
@@ -2101,72 +2418,100 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     if id in _rating_status:
                         status = _rating_status[id]
                         logger.info(f"DEBUG: Rating status for id='{id}': {status}")
-                        
+
                         if status == "pending":
                             # Block until rating completes (with timeout)
-                            logger.info(f"DEBUG: Rating pending, waiting for completion...")
+                            logger.info(
+                                f"DEBUG: Rating pending, waiting for completion..."
+                            )
                             if id in _rating_locks:
                                 # Wait up to 300 seconds (5 minutes) for rating to complete
                                 event = _rating_locks[id]
                                 if not event.wait(timeout=300):
-                                    logger.warning(f"DEBUG: Rating timeout for id='{id}' after 300s, will continue without blocking")
+                                    logger.warning(
+                                        f"DEBUG: Rating timeout for id='{id}' after 300s, will continue without blocking"
+                                    )
                                     # Don't raise error - just continue and let the request proceed
                                     # The rating endpoint will handle it with synchronous fallback
                                 # Re-check status after wait
                                 status = _rating_status.get(id, "unknown")
-                        
+
                         if status == "disqualified" or status == "failed":
                             logger.warning(f"DEBUG: Rating {status} for id='{id}'")
-                            raise HTTPException(status_code=404, detail="Artifact does not exist.")
-                    
-                    logger.info(f"DEBUG: ✅ Artifact type matches 'model', returning immediately")
+                            raise HTTPException(
+                                status_code=404, detail="Artifact does not exist."
+                            )
+
+                    logger.info(
+                        f"DEBUG: ✅ Artifact type matches 'model', returning immediately"
+                    )
                     artifact_name = artifact.get("name", id)
-                    artifact_url = artifact.get("url", f"https://huggingface.co/{artifact_name}")
+                    artifact_url = artifact.get(
+                        "url", f"https://huggingface.co/{artifact_name}"
+                    )
                     artifact_version = artifact.get("version", "main")
-                    result = build_artifact_response(artifact_name, id, artifact_type, artifact_url, artifact_version)
+                    result = build_artifact_response(
+                        artifact_name, id, artifact_type, artifact_url, artifact_version
+                    )
                     logger.info(f"DEBUG: Returning result: {result}")
                     return result
                 else:
-                    logger.warning(f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+                    logger.warning(
+                        f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'"
+                    )
             else:
                 logger.info(f"DEBUG: ❌ Artifact id '{id}' NOT found in database")
-            
+
             # If not in database, try to find artifact metadata in S3 by artifact_id
             logger.info(f"DEBUG: ===== SEARCHING S3 METADATA =====")
             logger.info(f"DEBUG: Calling find_artifact_metadata_by_id('{id}')...")
             import time
+
             s3_start = time.time()
             s3_metadata = find_artifact_metadata_by_id(id)
             s3_elapsed = time.time() - s3_start
             logger.info(f"DEBUG: S3 metadata lookup took {s3_elapsed:.3f}s")
-            
+
             if s3_metadata:
                 logger.info(f"DEBUG: ✅ Found S3 metadata: {s3_metadata}")
                 if s3_metadata.get("type") == "model":
                     model_name = s3_metadata.get("name")
                     stored_version = s3_metadata.get("version", "main")
-                    logger.info(f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}', version='{stored_version}'")
+                    logger.info(
+                        f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}', version='{stored_version}'"
+                    )
                     # Restore to database for future lookups
-                    save_artifact(id, {
-                        "name": model_name,
-                        "type": "model",
-                        "version": stored_version,
-                        "id": id,
-                        "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                    })
+                    save_artifact(
+                        id,
+                        {
+                            "name": model_name,
+                            "type": "model",
+                            "version": stored_version,
+                            "id": id,
+                            "url": s3_metadata.get(
+                                "url", f"https://huggingface.co/{model_name}"
+                            ),
+                        },
+                    )
                     logger.info(f"DEBUG: ✅ Restored artifact to database: id='{id}'")
-                    model_url = s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                    result = build_artifact_response(model_name, id, artifact_type, model_url, stored_version)
+                    model_url = s3_metadata.get(
+                        "url", f"https://huggingface.co/{model_name}"
+                    )
+                    result = build_artifact_response(
+                        model_name, id, artifact_type, model_url, stored_version
+                    )
                     logger.info(f"DEBUG: Returning result from S3: {result}")
                     return result
                 else:
-                    logger.warning(f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'")
+                    logger.warning(
+                        f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'"
+                    )
             else:
                 logger.info(f"DEBUG: ❌ Artifact id '{id}' NOT found in S3 metadata")
-            
+
             logger.info(f"DEBUG: ===== FALLING BACK TO MODEL NAME LOOKUP =====")
             logger.info(f"DEBUG: Will try to use id '{id}' as model name")
-            
+
             # If not found in S3 metadata, try to find model by name (id might be model name)
             # First, try using the ID as-is (for numeric artifact IDs)
             # Then try sanitizing it (for model names with slashes)
@@ -2175,25 +2520,33 @@ def get_artifact(artifact_type: str, id: str, request: Request):
             model_name_for_s3 = None
             actual_model_name = id  # Default to ID
             list_models_result = None
-            
+
             # Try to get model name from database if ID is an artifact_id
             model_name_for_s3 = _get_model_name_for_s3(id)
             if not model_name_for_s3:
                 # If not found, try sanitizing the ID (in case it's a model name with slashes)
                 model_name_for_s3 = sanitize_model_id_for_s3(id)
-            
+
             logger.info(f"DEBUG: Trying list_models with regex: '^{re.escape(id)}$'")
             try:
-                list_models_result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
-                logger.info(f"DEBUG: list_models returned {len(list_models_result.get('models', []))} models")
+                list_models_result = list_models(
+                    name_regex=f"^{re.escape(id)}$", limit=1000
+                )
+                logger.info(
+                    f"DEBUG: list_models returned {len(list_models_result.get('models', []))} models"
+                )
                 if list_models_result.get("models"):
                     for model in list_models_result["models"]:
                         v = model["version"]
                         model_n = model.get("name", model_name_for_s3 or id)
-                        actual_model_name = model_n  # Use the actual model name from list_models
+                        actual_model_name = (
+                            model_n  # Use the actual model name from list_models
+                        )
                         # Sanitize model name for S3
                         sanitized_name = sanitize_model_id_for_s3(model_n)
-                        logger.info(f"DEBUG: Checking model: name='{model_n}', sanitized='{sanitized_name}', version='{v}'")
+                        logger.info(
+                            f"DEBUG: Checking model: name='{model_n}', sanitized='{sanitized_name}', version='{v}'"
+                        )
                         try:
                             s3_key = f"models/{sanitized_name}/{v}/model.zip"
                             logger.info(f"DEBUG: Checking S3 key: {s3_key}")
@@ -2205,18 +2558,24 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                             break
                         except ClientError as e:
                             error_code = e.response.get("Error", {}).get("Code", "")
-                            logger.debug(f"DEBUG: S3 key {s3_key} not found: {error_code}")
+                            logger.debug(
+                                f"DEBUG: S3 key {s3_key} not found: {error_code}"
+                            )
                             if error_code == "NoSuchKey" or error_code == "404":
                                 continue
                             else:
-                                logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+                                logger.warning(
+                                    f"Unexpected error checking {s3_key}: {error_code}"
+                                )
             except Exception as e:
                 logger.warning(f"Error calling list_models: {e}", exc_info=True)
-            
+
             # If not found, try common versions with sanitized name
             if not found:
-                logger.info(f"DEBUG: Not found via list_models, trying common versions: {DEFAULT_MODEL_VERSIONS}")
-                common_versions = DEFAULT_MODEL_VERSIONS
+                logger.info(
+                    f"DEBUG: Not found via list_models, trying common versions: ['1.0.0', 'main', 'latest']"
+                )
+                common_versions = ["1.0.0", "main", "latest"]
                 for v in common_versions:
                     try:
                         # Use sanitized name for S3 lookup
@@ -2225,28 +2584,48 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         version = v
                         found = True
-                        logger.info(f"DEBUG: ✅ Found model with common version: {s3_key}")
+                        logger.info(
+                            f"DEBUG: ✅ Found model with common version: {s3_key}"
+                        )
                         break
                     except ClientError as e:
                         error_code = e.response.get("Error", {}).get("Code", "")
-                        logger.debug(f"DEBUG: Common version {s3_key} not found: {error_code}")
+                        logger.debug(
+                            f"DEBUG: Common version {s3_key} not found: {error_code}"
+                        )
                         if error_code == "NoSuchKey" or error_code == "404":
                             continue
                         else:
-                            logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
-            
+                            logger.warning(
+                                f"Unexpected error checking {s3_key}: {error_code}"
+                            )
+
             if not found:
-                logger.error(f"DEBUG: ❌❌❌ MODEL NOT FOUND - All lookup methods failed ❌❌❌")
-                logger.error(f"DEBUG: Final status: found={found}, version={version}, id='{id}'")
+                logger.error(
+                    f"DEBUG: ❌❌❌ MODEL NOT FOUND - All lookup methods failed ❌❌❌"
+                )
+                logger.error(
+                    f"DEBUG: Final status: found={found}, version={version}, id='{id}'"
+                )
                 all_artifacts = list_all_artifacts()
                 artifact_ids = [a.get("id", "") for a in all_artifacts if a.get("id")]
                 logger.error(f"DEBUG: Database artifact IDs: {artifact_ids[:20]}")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            
+
             # Return model - use actual model name if found, otherwise use ID
-            logger.info(f"DEBUG: ✅✅✅ RETURNING MODEL (fallback to name lookup) ✅✅✅")
-            logger.info(f"DEBUG: Using model name: '{actual_model_name}', id='{id}', version='{version}'")
-            result = build_artifact_response(actual_model_name, id, artifact_type, f"https://huggingface.co/{actual_model_name}", version or "main")
+            logger.info(
+                f"DEBUG: ✅✅✅ RETURNING MODEL (fallback to name lookup) ✅✅✅"
+            )
+            logger.info(
+                f"DEBUG: Using model name: '{actual_model_name}', id='{id}', version='{version}'"
+            )
+            result = build_artifact_response(
+                actual_model_name,
+                id,
+                artifact_type,
+                f"https://huggingface.co/{actual_model_name}",
+                version or "main",
+            )
             logger.info(f"DEBUG: Final result: {result}")
             return result
         else:
@@ -2262,71 +2641,117 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     # Artifact found in database with correct type - return it immediately
                     # S3 verification is optional, not required
                     artifact_name = artifact.get("name", id)
-                    artifact_url = artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                    artifact_url = artifact.get(
+                        "url", f"https://example.com/{artifact_type}/{artifact_name}"
+                    )
                     artifact_version = artifact.get("version", "main")
-                    result = build_artifact_response(artifact_name, id, artifact_type, artifact_url, artifact_version)
-                    logger.info(f"DEBUG: Returning {artifact_type} artifact from database: {result}")
+                    result = build_artifact_response(
+                        artifact_name, id, artifact_type, artifact_url, artifact_version
+                    )
+                    logger.info(
+                        f"DEBUG: Returning {artifact_type} artifact from database: {result}"
+                    )
                     return result
                 else:
-                    logger.warning(f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'")
-                    raise HTTPException(status_code=404, detail="Artifact does not exist.")
+                    logger.warning(
+                        f"DEBUG: Artifact type mismatch: expected '{artifact_type}', got '{artifact.get('type')}'"
+                    )
+                    raise HTTPException(
+                        status_code=404, detail="Artifact does not exist."
+                    )
             else:
                 logger.info(f"DEBUG: Artifact id '{id}' not found in database")
                 # Try S3 metadata as fallback (for backward compatibility)
-                logger.info(f"DEBUG: Trying S3 metadata as fallback for {artifact_type} artifact")
+                logger.info(
+                    f"DEBUG: Trying S3 metadata as fallback for {artifact_type} artifact"
+                )
                 s3_metadata = find_artifact_metadata_by_id(id)
                 if s3_metadata and s3_metadata.get("type") == artifact_type:
                     artifact_name = s3_metadata.get("name", id)
-                    artifact_url = s3_metadata.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                    artifact_url = s3_metadata.get(
+                        "url", f"https://example.com/{artifact_type}/{artifact_name}"
+                    )
                     # Restore to database for future lookups
-                    save_artifact(id, {
-                        "name": artifact_name,
-                        "type": artifact_type,
-                        "version": s3_metadata.get("version", "main"),
-                        "id": id,
-                        "url": artifact_url
-                    })
-                    logger.info(f"DEBUG: Restored {artifact_type} artifact from S3 to database: id='{id}'")
+                    save_artifact(
+                        id,
+                        {
+                            "name": artifact_name,
+                            "type": artifact_type,
+                            "version": s3_metadata.get("version", "main"),
+                            "id": id,
+                            "url": artifact_url,
+                        },
+                    )
+                    logger.info(
+                        f"DEBUG: Restored {artifact_type} artifact from S3 to database: id='{id}'"
+                    )
                     artifact_version = s3_metadata.get("version", "main")
-                    result = build_artifact_response(artifact_name, id, artifact_type, artifact_url, artifact_version)
-                    logger.info(f"DEBUG: Returning {artifact_type} artifact from S3: {result}")
+                    result = build_artifact_response(
+                        artifact_name, id, artifact_type, artifact_url, artifact_version
+                    )
+                    logger.info(
+                        f"DEBUG: Returning {artifact_type} artifact from S3: {result}"
+                    )
                     return result
-                
+
                 # Try S3 lookup by name (if ID is actually a name with special characters)
-                logger.info(f"DEBUG: Trying S3 lookup by name for {artifact_type} with id='{id}'")
+                logger.info(
+                    f"DEBUG: Trying S3 lookup by name for {artifact_type} with id='{id}'"
+                )
                 try:
                     # Search S3 for artifacts matching the name
                     sanitized_name = sanitize_model_id_for_s3(id)
-                    logger.info(f"DEBUG: Searching S3 for {artifact_type} with sanitized name: '{sanitized_name}'")
-                    s3_result = list_artifacts_from_s3(artifact_type=artifact_type, name_regex=f"^{re.escape(id)}$", limit=10)
+                    logger.info(
+                        f"DEBUG: Searching S3 for {artifact_type} with sanitized name: '{sanitized_name}'"
+                    )
+                    s3_result = list_artifacts_from_s3(
+                        artifact_type=artifact_type,
+                        name_regex=f"^{re.escape(id)}$",
+                        limit=10,
+                    )
                     if s3_result.get("artifacts"):
                         for s3_artifact in s3_result["artifacts"]:
                             s3_artifact_name = s3_artifact.get("name", "")
                             s3_artifact_id = s3_artifact.get("artifact_id", "")
                             # Match by name (supports IDs that are actually names)
                             if s3_artifact_name == id:
-                                logger.info(f"DEBUG: Found {artifact_type} in S3 by name: name='{s3_artifact_name}', id='{s3_artifact_id}'")
+                                logger.info(
+                                    f"DEBUG: Found {artifact_type} in S3 by name: name='{s3_artifact_name}', id='{s3_artifact_id}'"
+                                )
                                 # Use the artifact_id from S3 if available, otherwise use the provided id
                                 final_id = s3_artifact_id if s3_artifact_id else id
                                 artifact_url = f"https://example.com/{artifact_type}/{s3_artifact_name}"
                                 artifact_version = s3_artifact.get("version", "main")
                                 # Restore to database for future lookups
-                                save_artifact(final_id, {
-                                    "name": s3_artifact_name,
-                                    "type": artifact_type,
-                                    "version": artifact_version,
-                                    "id": final_id,
-                                    "url": artifact_url
-                                })
-                                result = build_artifact_response(s3_artifact_name, final_id, artifact_type, artifact_url, artifact_version)
-                                logger.info(f"DEBUG: Returning {artifact_type} artifact from S3 name lookup: {result}")
+                                save_artifact(
+                                    final_id,
+                                    {
+                                        "name": s3_artifact_name,
+                                        "type": artifact_type,
+                                        "version": artifact_version,
+                                        "id": final_id,
+                                        "url": artifact_url,
+                                    },
+                                )
+                                result = build_artifact_response(
+                                    s3_artifact_name,
+                                    final_id,
+                                    artifact_type,
+                                    artifact_url,
+                                    artifact_version,
+                                )
+                                logger.info(
+                                    f"DEBUG: Returning {artifact_type} artifact from S3 name lookup: {result}"
+                                )
                                 return result
                 except Exception as e:
                     logger.warning(f"DEBUG: Error searching S3 by name: {str(e)}")
-            
+
             # For datasets/code, also try searching by name if ID lookup fails
             # This allows using artifact names or other identifiers as IDs
-            logger.info(f"DEBUG: Trying name-based lookup in database for {artifact_type} with id='{id}'")
+            logger.info(
+                f"DEBUG: Trying name-based lookup in database for {artifact_type} with id='{id}'"
+            )
             all_artifacts = list_all_artifacts()
             for artifact in all_artifacts:
                 if artifact.get("type") == artifact_type:
@@ -2335,23 +2760,49 @@ def get_artifact(artifact_type: str, id: str, request: Request):
                     # Match by name or ID (supports both artifact IDs and names as lookup keys)
                     # Also support partial matches for names with special characters
                     if artifact_name == id or artifact_id == id:
-                        logger.info(f"DEBUG: Found {artifact_type} by name/ID match: name='{artifact_name}', id='{artifact_id}'")
-                        artifact_url = artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                        logger.info(
+                            f"DEBUG: Found {artifact_type} by name/ID match: name='{artifact_name}', id='{artifact_id}'"
+                        )
+                        artifact_url = artifact.get(
+                            "url",
+                            f"https://example.com/{artifact_type}/{artifact_name}",
+                        )
                         artifact_version = artifact.get("version", "main")
-                        result = build_artifact_response(artifact_name, artifact_id, artifact_type, artifact_url, artifact_version)
-                        logger.info(f"DEBUG: Returning {artifact_type} artifact from name lookup: {result}")
+                        result = build_artifact_response(
+                            artifact_name,
+                            artifact_id,
+                            artifact_type,
+                            artifact_url,
+                            artifact_version,
+                        )
+                        logger.info(
+                            f"DEBUG: Returning {artifact_type} artifact from name lookup: {result}"
+                        )
                         return result
                     # Also try sanitized name matching (for IDs with slashes that match sanitized names)
                     sanitized_artifact_name = sanitize_model_id_for_s3(artifact_name)
                     sanitized_id = sanitize_model_id_for_s3(id)
                     if sanitized_artifact_name == sanitized_id:
-                        logger.info(f"DEBUG: Found {artifact_type} by sanitized name match: name='{artifact_name}', id='{artifact_id}'")
-                        artifact_url = artifact.get("url", f"https://example.com/{artifact_type}/{artifact_name}")
+                        logger.info(
+                            f"DEBUG: Found {artifact_type} by sanitized name match: name='{artifact_name}', id='{artifact_id}'"
+                        )
+                        artifact_url = artifact.get(
+                            "url",
+                            f"https://example.com/{artifact_type}/{artifact_name}",
+                        )
                         artifact_version = artifact.get("version", "main")
-                        result = build_artifact_response(artifact_name, artifact_id, artifact_type, artifact_url, artifact_version)
-                        logger.info(f"DEBUG: Returning {artifact_type} artifact from sanitized name lookup: {result}")
+                        result = build_artifact_response(
+                            artifact_name,
+                            artifact_id,
+                            artifact_type,
+                            artifact_url,
+                            artifact_version,
+                        )
+                        logger.info(
+                            f"DEBUG: Returning {artifact_type} artifact from sanitized name lookup: {result}"
+                        )
                         return result
-            
+
             logger.error(f"DEBUG: {artifact_type} not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
@@ -2372,37 +2823,35 @@ async def post_artifact_ingest(request: Request):
     Ingest an artifact by name and version (form data).
     This is a convenience endpoint that accepts form data for model ingestion.
     """
-    
+
     if not verify_auth_token(request):
         raise HTTPException(
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
-    
+
     try:
         # Parse form data
         form = await request.form()
         name = form.get("name")
         version = form.get("version", "main")
         artifact_type = form.get("type", "model")
-        
+
         # Validate name parameter
         if not name or not name.strip():
             raise HTTPException(
                 status_code=400,
                 detail="Name parameter is required. Provide 'name' in form data.",
             )
-        
+
         name = name.strip()
-        
+
         # For models, use model_ingestion
         if artifact_type == "model":
             try:
                 # Check if artifact already exists
                 try:
-                    existing = list_models(
-                        name_regex=f"^{re.escape(name)}$", limit=1
-                    )
+                    existing = list_models(name_regex=f"^{re.escape(name)}$", limit=1)
                     if existing.get("models"):
                         raise HTTPException(
                             status_code=409, detail="Artifact exists already."
@@ -2411,45 +2860,53 @@ async def post_artifact_ingest(request: Request):
                     raise
                 except:
                     pass
-                
+
                 # Ingest the model (synchronous - must complete)
                 model_ingestion(name, version)
-                
+
                 # Generate artifact ID immediately (before rating)
                 logger.info(f"DEBUG: ===== GENERATING ARTIFACT ID =====")
                 artifact_id = str(random.randint(1000000000, 9999999999))
                 url = f"https://huggingface.co/{name}"
-                logger.info(f"DEBUG: Generated artifact_id: '{artifact_id}' for model '{name}'")
-                
+                logger.info(
+                    f"DEBUG: Generated artifact_id: '{artifact_id}' for model '{name}'"
+                )
+
                 # Initialize rating status and lock
                 with _rating_lock:
                     _rating_status[artifact_id] = "pending"
                     _rating_locks[artifact_id] = threading.Event()
                     _rating_start_times[artifact_id] = time.time()
-                
+
                 # Extract README and extract dataset/code names
                 readme_text = None
                 dataset_name = None
                 code_name = None
                 try:
                     from .services.s3_service import download_model
+
                     zip_content = download_model(name, version, "full")
                     if zip_content:
                         import zipfile
                         import io
+
                         with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
                             for file_info in zip_file.filelist:
                                 if "readme" in file_info.filename.lower():
-                                    readme_text = zip_file.read(file_info).decode("utf-8", errors="ignore")
+                                    readme_text = zip_file.read(file_info).decode(
+                                        "utf-8", errors="ignore"
+                                    )
                                     break
                         if readme_text:
                             # Extract dataset and code names from README
-                            extracted = _extract_dataset_code_names_from_readme(readme_text)
+                            extracted = _extract_dataset_code_names_from_readme(
+                                readme_text
+                            )
                             dataset_name = extracted.get("dataset_name")
                             code_name = extracted.get("code_name")
                 except Exception as e:
                     logger.debug(f"Could not extract README for linking: {str(e)}")
-                
+
                 # Store artifact metadata immediately (before rating completes)
                 # Include dataset_name and code_name if extracted from README
                 logger.info(f"DEBUG: Storing in database with key: '{artifact_id}'")
@@ -2466,60 +2923,86 @@ async def post_artifact_ingest(request: Request):
                 if code_name:
                     artifact_data["code_name"] = code_name
                 save_artifact(artifact_id, artifact_data)
-                
+
                 # Link to existing datasets/code if found
                 if readme_text:
                     _link_model_to_datasets_code(artifact_id, name, readme_text)
-                
+
                 # Start async rating in background thread
-                logger.info(f"DEBUG: Starting async rating for artifact_id='{artifact_id}'")
+                logger.info(
+                    f"DEBUG: Starting async rating for artifact_id='{artifact_id}'"
+                )
                 rating_thread = threading.Thread(
                     target=_run_async_rating,
                     args=(artifact_id, name, version),
-                    daemon=True
+                    daemon=True,
                 )
                 rating_thread.start()
-                logger.info(f"DEBUG: ✅ Stored in database: artifact_id='{artifact_id}'")
+                logger.info(
+                    f"DEBUG: ✅ Stored in database: artifact_id='{artifact_id}'"
+                )
                 # Verify artifact was saved
                 saved_artifact = get_artifact_from_db(artifact_id)
                 if saved_artifact:
-                    logger.info(f"DEBUG: Verified artifact exists in database: {saved_artifact}")
+                    logger.info(
+                        f"DEBUG: Verified artifact exists in database: {saved_artifact}"
+                    )
                 else:
-                    logger.warning(f"DEBUG: ⚠️ Could not verify artifact in database after save")
-                
+                    logger.warning(
+                        f"DEBUG: ⚠️ Could not verify artifact in database after save"
+                    )
+
                 # Store artifact metadata in S3 (model file already stored via model_ingestion)
                 # This must complete synchronously so queries can find the artifact
                 logger.info(f"DEBUG: ===== STORING ARTIFACT METADATA IN S3 =====")
-                logger.info(f"DEBUG: artifact_id='{artifact_id}', name='{name}', type='{artifact_type}', version='{version}'")
+                logger.info(
+                    f"DEBUG: artifact_id='{artifact_id}', name='{name}', type='{artifact_type}', version='{version}'"
+                )
                 try:
-                    result = store_artifact_metadata(artifact_id, name, artifact_type, version, url)
+                    result = store_artifact_metadata(
+                        artifact_id, name, artifact_type, version, url
+                    )
                     logger.info(f"DEBUG: ✅ S3 metadata storage result: {result}")
-                    
+
                     # Verify the metadata was stored by trying to read it back
                     # This ensures the write completed and is immediately readable
                     import time
+
                     logger.info(f"DEBUG: Verifying S3 metadata is readable...")
                     verify_metadata = None
                     for verify_attempt in range(3):
-                        logger.info(f"DEBUG: Verification attempt {verify_attempt + 1}/3")
+                        logger.info(
+                            f"DEBUG: Verification attempt {verify_attempt + 1}/3"
+                        )
                         verify_metadata = find_artifact_metadata_by_id(artifact_id)
                         if verify_metadata:
-                            logger.info(f"DEBUG: ✅✅✅ VERIFIED: S3 metadata exists for artifact_id '{artifact_id}' ✅✅✅")
+                            logger.info(
+                                f"DEBUG: ✅✅✅ VERIFIED: S3 metadata exists for artifact_id '{artifact_id}' ✅✅✅"
+                            )
                             logger.info(f"DEBUG: Verified metadata: {verify_metadata}")
                             break
                         else:
-                            logger.warning(f"DEBUG: ⚠️ Verification attempt {verify_attempt + 1} failed - metadata not found")
+                            logger.warning(
+                                f"DEBUG: ⚠️ Verification attempt {verify_attempt + 1} failed - metadata not found"
+                            )
                         if verify_attempt < 2:
                             logger.info(f"DEBUG: Waiting 0.1s before retry...")
                             time.sleep(0.1)  # Small delay before retry
-                    
+
                     if not verify_metadata:
-                        logger.error(f"DEBUG: ❌❌❌ WARNING: Could not verify S3 metadata for artifact_id '{artifact_id}' after 3 attempts ❌❌❌")
-                        logger.error(f"DEBUG: This may cause query failures if hitting different instance")
+                        logger.error(
+                            f"DEBUG: ❌❌❌ WARNING: Could not verify S3 metadata for artifact_id '{artifact_id}' after 3 attempts ❌❌❌"
+                        )
+                        logger.error(
+                            f"DEBUG: This may cause query failures if hitting different instance"
+                        )
                 except Exception as s3_error:
-                    logger.error(f"DEBUG: ❌ Exception storing artifact metadata in S3: {str(s3_error)}", exc_info=True)
+                    logger.error(
+                        f"DEBUG: ❌ Exception storing artifact metadata in S3: {str(s3_error)}",
+                        exc_info=True,
+                    )
                     # Don't fail ingestion if S3 metadata storage fails, but log it as an error
-                
+
                 result = {
                     "message": "Ingest successful",
                     "details": {
@@ -2531,16 +3014,24 @@ async def post_artifact_ingest(request: Request):
                     },
                 }
                 logger.info(f"DEBUG: ===== INGESTION COMPLETE =====")
-                logger.info(f"DEBUG: ✅✅✅ Returning ingestion result: {result} ✅✅✅")
+                logger.info(
+                    f"DEBUG: ✅✅✅ Returning ingestion result: {result} ✅✅✅"
+                )
                 logger.info(f"DEBUG: Artifact should now be queryable by:")
-                logger.info(f"DEBUG:   - artifact_id: '{artifact_id}' (GET /package/{artifact_id})")
+                logger.info(
+                    f"DEBUG:   - artifact_id: '{artifact_id}' (GET /package/{artifact_id})"
+                )
                 logger.info(f"DEBUG:   - name: '{name}' (GET /artifact/byName/{name})")
                 # Verify artifact was saved
                 saved_artifact = get_artifact_from_db(artifact_id)
                 if saved_artifact:
-                    logger.info(f"DEBUG: Verified artifact exists in database: id='{artifact_id}'")
+                    logger.info(
+                        f"DEBUG: Verified artifact exists in database: id='{artifact_id}'"
+                    )
                 else:
-                    logger.warning(f"DEBUG: ⚠️ Could not verify artifact in database after save")
+                    logger.warning(
+                        f"DEBUG: ⚠️ Could not verify artifact in database after save"
+                    )
                 return result
             except HTTPException:
                 raise
@@ -2557,24 +3048,29 @@ async def post_artifact_ingest(request: Request):
             # For non-model artifacts (dataset, code), store metadata in S3
             artifact_id = str(random.randint(1000000000, 9999999999))
             url = f"https://example.com/{artifact_type}/{name}"
-            save_artifact(artifact_id, {
-                "name": name,
-                "type": artifact_type,
-                "version": version,
-                "id": artifact_id,
-                "url": url,
-            })
-            
+            save_artifact(
+                artifact_id,
+                {
+                    "name": name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                },
+            )
+
             # Link this dataset/code to models that reference it
             _link_dataset_code_to_models(artifact_id, name, artifact_type)
-            
+
             # Store artifact metadata in S3
             try:
                 store_artifact_metadata(artifact_id, name, artifact_type, version, url)
             except Exception as s3_error:
-                logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                logger.warning(
+                    f"Failed to store artifact metadata in S3: {str(s3_error)}"
+                )
                 # Don't fail ingestion if S3 metadata storage fails
-            
+
             return {
                 "message": "Ingest successful",
                 "details": {
@@ -2588,7 +3084,9 @@ async def post_artifact_ingest(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in POST /artifact/ingest endpoint: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error in POST /artifact/ingest endpoint: {str(e)}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"Ingest failed: {str(e)}")
 
 
@@ -2606,14 +3104,14 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             status_code=403,
             detail="Authentication failed due to invalid or missing AuthenticationToken",
         )
-    
+
     # Validate artifact_type
     if artifact_type not in ["model", "dataset", "code"]:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid artifact_type: {artifact_type}. Must be one of: model, dataset, code",
         )
-    
+
     try:
         # Parse JSON body (required by spec - ArtifactData)
         try:
@@ -2623,7 +3121,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 status_code=400,
                 detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
             )
-        
+
         # Extract url from body (required field per ArtifactData schema)
         url = body.get("url", "")
         if not url or not isinstance(url, str) or not url.strip():
@@ -2631,10 +3129,10 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 status_code=400,
                 detail="There is missing field(s) in the artifact_data or it is formed improperly (must include a single url).",
             )
-        
+
         # Extract version if provided (for backward compatibility with model ingestion)
         version = body.get("version", "main")
-        
+
         # Extract name from body if provided, otherwise extract from URL
         # For GitHub URLs and other URLs with paths, replace "/" with "-" in the name
         name = body.get("name")  # Check if name is provided in request body first
@@ -2652,21 +3150,26 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             elif "github.com" in url:
                 # Extract GitHub repo path and replace "/" with "-"
                 # Example: https://github.com/google-research/bert -> google-research-bert
-                github_match = re.search(r'github\.com/([^/]+/[^/?#]+)', url)
+                github_match = re.search(r"github\.com/([^/]+/[^/?#]+)", url)
                 if github_match:
                     repo_path = github_match.group(1)
                     # Remove trailing .git if present
-                    repo_path = repo_path.rstrip('.git')
+                    repo_path = repo_path.rstrip(".git")
                     # Replace "/" with "-"
                     name = repo_path.replace("/", "-")
                 else:
                     # Fallback: use last part of URL
-                    name = url.split("/")[-1].rstrip('.git') if url else f"{artifact_type}-new"
+                    name = (
+                        url.split("/")[-1].rstrip(".git")
+                        if url
+                        else f"{artifact_type}-new"
+                    )
             else:
                 # For other URLs, extract the path and replace "/" with "-"
                 # Example: https://example.com/org/repo -> org-repo
                 try:
                     from urllib.parse import urlparse
+
                     parsed = urlparse(url)
                     path_parts = [p for p in parsed.path.split("/") if p]
                     if path_parts:
@@ -2682,7 +3185,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # For models, we need to distinguish between:
             # 1. hf_model_id: The HuggingFace model ID used for downloading/uploading (from URL)
             # 2. artifact_name: The name stored in database and used for querying (from body or URL)
-            
+
             # Extract HuggingFace model ID from URL (required for model_ingestion)
             hf_model_id = None
             if url and "huggingface.co" in url:
@@ -2699,19 +3202,19 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 elif "/resolve/" in clean_url:
                     clean_url = clean_url.split("/resolve/")[0]
                 hf_model_id = clean_url.strip("/")
-            
+
             # Determine artifact_name: use name from body if provided, otherwise use hf_model_id
-            artifact_name = name if name else (hf_model_id if hf_model_id else "unknown-model")
-            
+            artifact_name = (
+                name if name else (hf_model_id if hf_model_id else "unknown-model")
+            )
+
             # Use hf_model_id for ingestion (must be valid HuggingFace model ID)
             # If no hf_model_id from URL, use artifact_name (assumes it's a valid HuggingFace ID)
             model_id = hf_model_id if hf_model_id else artifact_name
 
             # Check if artifact already exists
             try:
-                existing = list_models(
-                    name_regex=f"^{re.escape(model_id)}$", limit=1
-                )
+                existing = list_models(name_regex=f"^{re.escape(model_id)}$", limit=1)
                 if existing.get("models"):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
@@ -2727,39 +3230,45 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # which is required for metrics like Reviewedness, CodeQuality, and Reproducibility
             try:
                 model_ingestion(model_id, version)
-                
+
                 # Generate artifact ID immediately (before rating)
                 artifact_id = str(random.randint(1000000000, 9999999999))
-                
+
                 # Initialize rating status and lock
                 with _rating_lock:
                     _rating_status[artifact_id] = "pending"
                     _rating_locks[artifact_id] = threading.Event()
                     _rating_start_times[artifact_id] = time.time()
-                
+
                 # Extract README and extract dataset/code names
                 readme_text = None
                 dataset_name = None
                 code_name = None
                 try:
                     from .services.s3_service import download_model
+
                     zip_content = download_model(model_id, version, "full")
                     if zip_content:
                         import zipfile
                         import io
+
                         with zipfile.ZipFile(io.BytesIO(zip_content), "r") as zip_file:
                             for file_info in zip_file.filelist:
                                 if "readme" in file_info.filename.lower():
-                                    readme_text = zip_file.read(file_info).decode("utf-8", errors="ignore")
+                                    readme_text = zip_file.read(file_info).decode(
+                                        "utf-8", errors="ignore"
+                                    )
                                     break
                         if readme_text:
                             # Extract dataset and code names from README
-                            extracted = _extract_dataset_code_names_from_readme(readme_text)
+                            extracted = _extract_dataset_code_names_from_readme(
+                                readme_text
+                            )
                             dataset_name = extracted.get("dataset_name")
                             code_name = extracted.get("code_name")
                 except Exception as e:
                     logger.debug(f"Could not extract README for linking: {str(e)}")
-                
+
                 # Store artifact metadata immediately (before rating completes)
                 # Include dataset_name and code_name if extracted from README
                 # Use artifact_name (from body or URL) for storage, not model_id (which is hf_model_id)
@@ -2776,32 +3285,42 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 if code_name:
                     artifact_data["code_name"] = code_name
                 save_artifact(artifact_id, artifact_data)
-                
+
                 # Link to existing datasets/code if found
                 if readme_text:
-                    _link_model_to_datasets_code(artifact_id, artifact_name, readme_text)
-                
+                    _link_model_to_datasets_code(
+                        artifact_id, artifact_name, readme_text
+                    )
+
                 # Start async rating in background thread
                 # Use model_id (hf_model_id) for rating since it needs the actual HuggingFace model
-                logger.info(f"DEBUG: Starting async rating for artifact_id='{artifact_id}'")
+                logger.info(
+                    f"DEBUG: Starting async rating for artifact_id='{artifact_id}'"
+                )
                 rating_thread = threading.Thread(
                     target=_run_async_rating,
                     args=(artifact_id, model_id, version),
-                    daemon=True
+                    daemon=True,
                 )
                 rating_thread.start()
-                
+
                 # Store artifact metadata in S3 (model file already stored via model_ingestion)
                 # Use artifact_name for metadata storage (this is what queries will look for)
                 try:
-                    store_artifact_metadata(artifact_id, artifact_name, artifact_type, version, url)
+                    store_artifact_metadata(
+                        artifact_id, artifact_name, artifact_type, version, url
+                    )
                 except Exception as s3_error:
-                    logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                    logger.warning(
+                        f"Failed to store artifact metadata in S3: {str(s3_error)}"
+                    )
                     # Don't fail ingestion if S3 metadata storage fails
-                
+
                 # Generate download_url for response
-                download_url = generate_download_url(artifact_name, artifact_type, version)
-                
+                download_url = generate_download_url(
+                    artifact_name, artifact_type, version
+                )
+
                 # Per spec: Return 201 for successful ingestion with full artifact response
                 # The spec shows 201 with the full artifact object including download_url
                 # 202 is for async rating, but we should return 201 since ingestion completed successfully
@@ -2813,10 +3332,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                                 "id": artifact_id,
                                 "type": artifact_type,
                             },
-                            "data": {
-                                "url": url,
-                                "download_url": download_url
-                            },
+                            "data": {"url": url, "download_url": download_url},
                         }
                     ),
                     media_type="application/json",
@@ -2837,16 +3353,20 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
             # For dataset and code artifacts, perform ingestion
             # Use the name from request body if provided, otherwise use name extracted from URL
             artifact_name = name if name else f"{artifact_type}-new"
-            
+
             # Check if artifact already exists (check both _artifact_storage and database)
             for existing_id, existing_data in _artifact_storage.items():
-                if (existing_data.get("url") == url and existing_data.get("type") == artifact_type) or (
-                    existing_data.get("name") == artifact_name and existing_data.get("type") == artifact_type
+                if (
+                    existing_data.get("url") == url
+                    and existing_data.get("type") == artifact_type
+                ) or (
+                    existing_data.get("name") == artifact_name
+                    and existing_data.get("type") == artifact_type
                 ):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
                     )
-            
+
             # Also check database
             all_artifacts = list_all_artifacts()
             for existing_artifact in all_artifacts:
@@ -2861,16 +3381,16 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                     raise HTTPException(
                         status_code=409, detail="Artifact exists already."
                     )
-            
+
             # If URL not provided but name is, construct URL
             if not url:
                 url = f"https://example.com/{artifact_type}/{artifact_name}"
-            
+
             # For dataset/code ingestion, we validate and store
             # In a full implementation, you might download, validate structure, etc.
             # For now, we perform basic validation and storage
             artifact_id = str(random.randint(1000000000, 9999999999))
-            
+
             # Store in _artifact_storage for immediate consistency
             _artifact_storage[artifact_id] = {
                 "name": artifact_name,
@@ -2879,29 +3399,36 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 "id": artifact_id,
                 "url": url,
             }
-            
+
             # Also save to DynamoDB for persistence
-            save_artifact(artifact_id, {
-                "name": artifact_name,
-                "type": artifact_type,
-                "version": version,
-                "id": artifact_id,
-                "url": url,
-            })
-            
+            save_artifact(
+                artifact_id,
+                {
+                    "name": artifact_name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                },
+            )
+
             # Link this dataset/code to models that reference it
             _link_dataset_code_to_models(artifact_id, artifact_name, artifact_type)
-            
+
             # Store artifact metadata in S3
             try:
-                store_artifact_metadata(artifact_id, artifact_name, artifact_type, version, url)
+                store_artifact_metadata(
+                    artifact_id, artifact_name, artifact_type, version, url
+                )
             except Exception as s3_error:
-                logger.warning(f"Failed to store artifact metadata in S3: {str(s3_error)}")
+                logger.warning(
+                    f"Failed to store artifact metadata in S3: {str(s3_error)}"
+                )
                 # Don't fail ingestion if S3 metadata storage fails
-            
+
             # Generate download_url for response
             download_url = generate_download_url(artifact_name, artifact_type, version)
-            
+
             return Response(
                 content=json.dumps(
                     {
@@ -2910,10 +3437,7 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                             "id": artifact_id,
                             "type": artifact_type,
                         },
-                        "data": {
-                            "url": url,
-                            "download_url": download_url
-                        },
+                        "data": {"url": url, "download_url": download_url},
                     }
                 ),
                 media_type="application/json",
@@ -2972,7 +3496,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                 # Try to get model name from database for S3 lookup
                 model_name = _get_model_name_for_s3(id)
                 if model_name:
-                    common_versions = DEFAULT_MODEL_VERSIONS
+                    common_versions = ["1.0.0", "main", "latest"]
                     for v in common_versions:
                         try:
                             s3_key = f"models/{model_name}/{v}/model.zip"
@@ -2985,7 +3509,7 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                                 continue
                 # Fallback: try by ID directly (in case it was stored by ID)
                 if not found:
-                    common_versions = DEFAULT_MODEL_VERSIONS
+                    common_versions = ["1.0.0", "main", "latest"]
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
@@ -2999,7 +3523,9 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                 # Also try by name regex
                 if not found:
                     try:
-                        result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
+                        result = list_models(
+                            name_regex=f"^{re.escape(id)}$", limit=1000
+                        )
                         if result.get("models"):
                             found = True
                     except Exception:
@@ -3031,12 +3557,15 @@ async def update_artifact(artifact_type: str, id: str, request: Request):
                         status_code=400,
                         detail="There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid. URL is required in data.",
                     )
-                update_artifact(id, {
-                    "name": metadata.get("name", artifact.get("name", id)),
-                    "type": artifact_type,
-                    "id": id,
-                    "url": url,
-                })
+                update_artifact(
+                    id,
+                    {
+                        "name": metadata.get("name", artifact.get("name", id)),
+                        "type": artifact_type,
+                        "id": id,
+                        "url": url,
+                    },
+                )
                 return Response(status_code=200)
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
     except HTTPException:
@@ -3071,7 +3600,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
             deleted = True
         if artifact_type == "model":
             deleted_count = 0
-            common_versions = DEFAULT_MODEL_VERSIONS
+            common_versions = ["1.0.0", "main", "latest"]
             for version in common_versions:
                 s3_key = f"models/{id}/{version}/model.zip"
                 try:
@@ -3104,7 +3633,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
                 except Exception:
                     pass
             if deleted_count == 0 and not deleted:
-                for version in DEFAULT_MODEL_VERSIONS:
+                for version in ["1.0.0", "main", "latest"]:
                     s3_key = f"models/{id}/{version}/model.zip"
                     try:
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -3157,7 +3686,7 @@ def get_artifact_cost(
             found = False
             artifact = get_artifact_from_db(id)
             if artifact and artifact.get("type") == "model":
-                    found = True
+                found = True
             if not found:
                 try:
                     result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
@@ -3178,13 +3707,15 @@ def get_artifact_cost(
                                 if error_code == "NoSuchKey" or error_code == "404":
                                     continue
                                 else:
-                                    logger.warning(f"Unexpected error checking {s3_key}: {error_code}")
+                                    logger.warning(
+                                        f"Unexpected error checking {s3_key}: {error_code}"
+                                    )
                     if not found:
                         # Try with sanitized name for S3 lookup (handles IDs with slashes)
                         model_name_for_s3 = _get_model_name_for_s3(id)
                         if not model_name_for_s3:
                             model_name_for_s3 = sanitize_model_id_for_s3(id)
-                        common_versions = DEFAULT_MODEL_VERSIONS
+                        common_versions = ["1.0.0", "main", "latest"]
                         for v in common_versions:
                             try:
                                 # Use sanitized name for S3 lookup
@@ -3198,40 +3729,47 @@ def get_artifact_cost(
                     pass
             if not found:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            
+
             # Get model name for S3 lookup (models are stored by name, not ID)
             model_name = _get_model_name_for_s3(id)
             if not model_name:
                 # Fallback: sanitize ID (in case it's a model name with special characters)
                 model_name = sanitize_model_id_for_s3(id)
-            
+
             # Try multiple versions to get size
             standalone_size_mb = 0.0
-            for version in DEFAULT_MODEL_VERSIONS:
+            for version in ["1.0.0", "main", "latest"]:
                 sizes = get_model_sizes(model_name, version)
                 if "error" not in sizes:
                     size_bytes = sizes.get("full", 0)
                     if size_bytes > 0:
                         standalone_size_mb = size_bytes / (1024 * 1024)
                         break
-            
+
             if standalone_size_mb == 0.0:
                 # Fallback: try to get size from download URL
-                artifact = get_generic_artifact_metadata("model", id) or get_artifact_from_db(id)
+                artifact = get_generic_artifact_metadata(
+                    "model", id
+                ) or get_artifact_from_db(id)
                 if artifact:
                     url = artifact.get("url", "")
                     if url:
                         try:
                             import requests
-                            head_response = requests.head(url, timeout=10, allow_redirects=True)
+
+                            head_response = requests.head(
+                                url, timeout=10, allow_redirects=True
+                            )
                             content_length = head_response.headers.get("Content-Length")
                             if content_length:
                                 standalone_size_mb = int(content_length) / (1024 * 1024)
                         except Exception as e:
                             logger.debug(f"Error getting model size from URL: {str(e)}")
-                
+
                 if standalone_size_mb == 0.0:
-                    raise HTTPException(status_code=404, detail="Model size could not be determined.")
+                    raise HTTPException(
+                        status_code=404, detail="Model size could not be determined."
+                    )
             if dependency:
                 # When dependency=true, return all artifacts (main + dependencies) with standalone_cost and total_cost
                 result = {}
@@ -3253,13 +3791,18 @@ def get_artifact_cost(
                 if artifact:
                     dataset_id = artifact.get("dataset_id")
                     code_id = artifact.get("code_id")
-                    
+
                     # Get dataset cost if linked
                     if dataset_id:
                         try:
                             dataset_artifact = get_artifact_from_db(dataset_id)
-                            if dataset_artifact and dataset_artifact.get("type") == "dataset":
-                                dataset_size_mb = _get_artifact_size_mb("dataset", dataset_id)
+                            if (
+                                dataset_artifact
+                                and dataset_artifact.get("type") == "dataset"
+                            ):
+                                dataset_size_mb = _get_artifact_size_mb(
+                                    "dataset", dataset_id
+                                )
                                 if dataset_size_mb > 0:
                                     total_size_mb += dataset_size_mb
                                     result[dataset_id] = {
@@ -3268,7 +3811,7 @@ def get_artifact_cost(
                                     }
                         except Exception as e:
                             logger.debug(f"Error getting dataset cost: {str(e)}")
-                    
+
                     # Get code cost if linked
                     if code_id:
                         try:
@@ -3291,7 +3834,7 @@ def get_artifact_cost(
                 result = {
                     id: {
                         "standalone_cost": round(standalone_size_mb, 2),
-                        "total_cost": round(standalone_size_mb, 2)
+                        "total_cost": round(standalone_size_mb, 2),
                     }
                 }
             return result
@@ -3301,10 +3844,12 @@ def get_artifact_cost(
             artifact = get_generic_artifact_metadata(artifact_type, id)
             if not artifact:
                 artifact = get_artifact_from_db(id)
-            
+
             # If not found by ID, try name-based lookup
             if not artifact:
-                logger.info(f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup")
+                logger.info(
+                    f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup"
+                )
                 all_artifacts = list_all_artifacts()
                 for art in all_artifacts:
                     if art.get("type") == artifact_type:
@@ -3314,7 +3859,9 @@ def get_artifact_cost(
                         if art_name == id or art_id == id:
                             artifact = art
                             id = art_id  # Use the actual artifact_id
-                            logger.info(f"DEBUG: Found {artifact_type} by name: name='{art_name}', id='{art_id}'")
+                            logger.info(
+                                f"DEBUG: Found {artifact_type} by name: name='{art_name}', id='{art_id}'"
+                            )
                             break
                         # Also try sanitized name matching
                         sanitized_art_name = sanitize_model_id_for_s3(art_name)
@@ -3322,28 +3869,32 @@ def get_artifact_cost(
                         if sanitized_art_name == sanitized_id:
                             artifact = art
                             id = art_id  # Use the actual artifact_id
-                            logger.info(f"DEBUG: Found {artifact_type} by sanitized name: name='{art_name}', id='{art_id}'")
+                            logger.info(
+                                f"DEBUG: Found {artifact_type} by sanitized name: name='{art_name}', id='{art_id}'"
+                            )
                             break
-            
+
             if not artifact:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
             if artifact.get("type") != artifact_type:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            
+
             # Calculate actual size from S3 or download URL
             standalone_size_mb = _get_artifact_size_mb(artifact_type, id)
-            
+
             if dependency:
                 # When dependency=true, return all artifacts (main + dependencies) with standalone_cost and total_cost
                 result = {}
                 total_size_mb = standalone_size_mb
-                
+
                 # Add main artifact
                 result[id] = {
                     "standalone_cost": round(standalone_size_mb, 2),
-                    "total_cost": round(standalone_size_mb, 2),  # Will be updated after dependencies
+                    "total_cost": round(
+                        standalone_size_mb, 2
+                    ),  # Will be updated after dependencies
                 }
-                
+
                 # For datasets/code, there are no dependencies, so total_cost = standalone_cost
                 result[id]["total_cost"] = round(total_size_mb, 2)
             else:
@@ -3351,7 +3902,7 @@ def get_artifact_cost(
                 result = {
                     id: {
                         "standalone_cost": round(standalone_size_mb, 2),
-                        "total_cost": round(standalone_size_mb, 2)
+                        "total_cost": round(standalone_size_mb, 2),
                     }
                 }
             return result
@@ -3405,8 +3956,8 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
             if not artifact:
                 artifact = get_artifact_from_db(id)
             if artifact and artifact.get("type") == "model":
-                    found = True
-                    artifact_name = artifact.get("name", id)
+                found = True
+                artifact_name = artifact.get("name", id)
 
             # Check in S3
             if not found:
@@ -3427,7 +3978,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 model_name_for_s3 = _get_model_name_for_s3(id)
                 if not model_name_for_s3:
                     model_name_for_s3 = sanitize_model_id_for_s3(id)
-                versions = DEFAULT_MODEL_VERSIONS
+                versions = ["1.0.0", "main", "latest"]
                 for v in versions:
                     try:
                         # Use sanitized name for S3 lookup
@@ -3447,7 +3998,7 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                 model_name_for_s3 = _get_model_name_for_s3(id)
                 if not model_name_for_s3:
                     model_name_for_s3 = sanitize_model_id_for_s3(id)
-                s3_key = f"models/{model_name_for_s3}/{version or DEFAULT_MODEL_VERSIONS[0]}/model.zip"
+                s3_key = f"models/{model_name_for_s3}/{version or '1.0.0'}/model.zip"
                 obj = s3.head_object(Bucket=ap_arn, Key=s3_key)
                 last_modified = obj.get("LastModified")
                 if last_modified:
@@ -3486,10 +4037,12 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
             artifact = get_generic_artifact_metadata(artifact_type, id)
             if not artifact:
                 artifact = get_artifact_from_db(id)
-            
+
             # If not found by ID, try name-based lookup
             if not artifact:
-                logger.info(f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup for audit")
+                logger.info(
+                    f"DEBUG: {artifact_type} not found by ID '{id}', trying name-based lookup for audit"
+                )
                 all_artifacts = list_all_artifacts()
                 for art in all_artifacts:
                     if art.get("type") == artifact_type:
@@ -3499,7 +4052,9 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                         if art_name == id or art_id == id:
                             artifact = art
                             id = art_id  # Use the actual artifact_id
-                            logger.info(f"DEBUG: Found {artifact_type} by name for audit: name='{art_name}', id='{art_id}'")
+                            logger.info(
+                                f"DEBUG: Found {artifact_type} by name for audit: name='{art_name}', id='{art_id}'"
+                            )
                             break
                         # Also try sanitized name matching
                         sanitized_art_name = sanitize_model_id_for_s3(art_name)
@@ -3507,25 +4062,27 @@ def get_artifact_audit(artifact_type: str, id: str, request: Request):
                         if sanitized_art_name == sanitized_id:
                             artifact = art
                             id = art_id  # Use the actual artifact_id
-                            logger.info(f"DEBUG: Found {artifact_type} by sanitized name for audit: name='{art_name}', id='{art_id}'")
+                            logger.info(
+                                f"DEBUG: Found {artifact_type} by sanitized name for audit: name='{art_name}', id='{art_id}'"
+                            )
                             break
-            
+
             if artifact and artifact.get("type") == artifact_type:
-                    # Add CREATE entry
-                    audit_entries.append(
-                        {
-                            "user": {"name": "system", "is_admin": False},
-                            "date": datetime.now(timezone.utc)
-                            .isoformat()
-                            .replace("+00:00", "Z"),
-                            "artifact": {
-                                "name": artifact.get("name", id),
-                                "id": id,
-                                "type": artifact_type,
-                            },
-                            "action": "CREATE",
-                        }
-                    )
+                # Add CREATE entry
+                audit_entries.append(
+                    {
+                        "user": {"name": "system", "is_admin": False},
+                        "date": datetime.now(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        "artifact": {
+                            "name": artifact.get("name", id),
+                            "id": id,
+                            "type": artifact_type,
+                        },
+                        "action": "CREATE",
+                    }
+                )
             else:
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
@@ -3548,67 +4105,164 @@ def _extract_size_scores(rating: Dict[str, Any]) -> Dict[str, float]:
     size_score = alias(rating, "size_score", "SizeScore", "score_size_score")
     if isinstance(size_score, dict):
         return {
-            "raspberry_pi": round(float(size_score.get("raspberry_pi", DEFAULT_SIZE_SCORES["raspberry_pi"])), SCORE_PRECISION),
-            "jetson_nano": round(float(size_score.get("jetson_nano", DEFAULT_SIZE_SCORES["jetson_nano"])), SCORE_PRECISION),
-            "desktop_pc": round(float(size_score.get("desktop_pc", DEFAULT_SIZE_SCORES["desktop_pc"])), SCORE_PRECISION),
-            "aws_server": round(float(size_score.get("aws_server", DEFAULT_SIZE_SCORES["aws_server"])), SCORE_PRECISION),
+            "raspberry_pi": round(float(size_score.get("raspberry_pi", 0.0)), 2),
+            "jetson_nano": round(float(size_score.get("jetson_nano", 0.0)), 2),
+            "desktop_pc": round(float(size_score.get("desktop_pc", 0.0)), 2),
+            "aws_server": round(float(size_score.get("aws_server", 0.0)), 2),
         }
     else:
         # If size_score is not a dict, return default values
-        return DEFAULT_SIZE_SCORES.copy()
+        return {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0,
+        }
 
 
 def _build_rating_response(id: str, rating: Dict[str, Any]) -> Dict[str, Any]:
-    """Build ModelRating response with all required fields per OpenAPI spec."""
+    """Build ModelRating response with all required fields."""
     return {
         "name": id,
-        "category": alias(rating, "category") or DEFAULT_CATEGORY,
-        "net_score": round(float(alias(rating, "net_score", "NetScore", "netScore") or DEFAULT_SCORE), SCORE_PRECISION),
-        "net_score_latency": round(float(alias(rating, "net_score_latency", "NetScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "ramp_up_time": round(float(alias(
-            rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "ramp_up_time_latency": round(float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "bus_factor": round(float(alias(
-            rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "bus_factor_latency": round(float(alias(rating, "bus_factor_latency", "BusFactorLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "performance_claims": round(float(alias(
-            rating,
-            "performance_claims",
-            "PerformanceClaims",
-            "score_performance_claims",
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "performance_claims_latency": round(float(alias(rating, "performance_claims_latency", "PerformanceClaimsLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "license": round(float(alias(rating, "license", "License", "score_license") or DEFAULT_SCORE), SCORE_PRECISION),
-        "license_latency": round(float(alias(rating, "license_latency", "LicenseLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "dataset_and_code_score": round(float(alias(
-            rating,
-            "dataset_code",
-            "DatasetCode",
-            "score_available_dataset_and_code",
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "dataset_and_code_score_latency": round(float(alias(rating, "dataset_and_code_score_latency", "DatasetAndCodeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "dataset_quality": round(float(alias(
-            rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "dataset_quality_latency": round(float(alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "code_quality": round(float(alias(
-            rating, "code_quality", "CodeQuality", "score_code_quality"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "code_quality_latency": round(float(alias(rating, "code_quality_latency", "CodeQualityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "reproducibility": round(float(alias(
-            rating, "reproducibility", "Reproducibility", "score_reproducibility"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "reproducibility_latency": round(float(alias(rating, "reproducibility_latency", "ReproducibilityLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "reviewedness": round(float(alias(
-            rating, "reviewedness", "Reviewedness", "score_reviewedness"
-        ) or DEFAULT_SCORE), SCORE_PRECISION),
-        "reviewedness_latency": round(float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or DEFAULT_SCORE), SCORE_PRECISION),
-        "tree_score": round(float(alias(rating, "treescore", "Treescore", "score_treescore") or DEFAULT_SCORE), SCORE_PRECISION),
-        "tree_score_latency": round(float(alias(rating, "tree_score_latency", "TreeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
+        "category": alias(rating, "category") or "unknown",
+        "net_score": round(
+            float(alias(rating, "net_score", "NetScore", "netScore") or 0.0), 2
+        ),
+        "net_score_latency": round(
+            float(alias(rating, "net_score_latency", "NetScoreLatency") or 0.0), 2
+        ),
+        "ramp_up_time": round(
+            float(alias(rating, "ramp_up", "RampUp", "score_ramp_up", "rampUp") or 0.0),
+            2,
+        ),
+        "ramp_up_time_latency": round(
+            float(alias(rating, "ramp_up_time_latency", "RampUpTimeLatency") or 0.0), 2
+        ),
+        "bus_factor": round(
+            float(
+                alias(
+                    rating, "bus_factor", "BusFactor", "score_bus_factor", "busFactor"
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "bus_factor_latency": round(
+            float(alias(rating, "bus_factor_latency", "BusFactorLatency") or 0.0), 2
+        ),
+        "performance_claims": round(
+            float(
+                alias(
+                    rating,
+                    "performance_claims",
+                    "PerformanceClaims",
+                    "score_performance_claims",
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "performance_claims_latency": round(
+            float(
+                alias(rating, "performance_claims_latency", "PerformanceClaimsLatency")
+                or 0.0
+            ),
+            2,
+        ),
+        "license": round(
+            float(alias(rating, "license", "License", "score_license") or 0.0), 2
+        ),
+        "license_latency": round(
+            float(alias(rating, "license_latency", "LicenseLatency") or 0.0), 2
+        ),
+        "dataset_and_code_score": round(
+            float(
+                alias(
+                    rating,
+                    "dataset_code",
+                    "DatasetCode",
+                    "score_available_dataset_and_code",
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "dataset_and_code_score_latency": round(
+            float(
+                alias(
+                    rating,
+                    "dataset_and_code_score_latency",
+                    "DatasetAndCodeScoreLatency",
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "dataset_quality": round(
+            float(
+                alias(
+                    rating, "dataset_quality", "DatasetQuality", "score_dataset_quality"
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "dataset_quality_latency": round(
+            float(
+                alias(rating, "dataset_quality_latency", "DatasetQualityLatency") or 0.0
+            ),
+            2,
+        ),
+        "code_quality": round(
+            float(
+                alias(rating, "code_quality", "CodeQuality", "score_code_quality")
+                or 0.0
+            ),
+            2,
+        ),
+        "code_quality_latency": round(
+            float(alias(rating, "code_quality_latency", "CodeQualityLatency") or 0.0), 2
+        ),
+        "reproducibility": round(
+            float(
+                alias(
+                    rating,
+                    "reproducibility",
+                    "Reproducibility",
+                    "score_reproducibility",
+                )
+                or 0.0
+            ),
+            2,
+        ),
+        "reproducibility_latency": round(
+            float(
+                alias(rating, "reproducibility_latency", "ReproducibilityLatency")
+                or 0.0
+            ),
+            2,
+        ),
+        "reviewedness": round(
+            float(
+                alias(rating, "reviewedness", "Reviewedness", "score_reviewedness")
+                or 0.0
+            ),
+            2,
+        ),
+        "reviewedness_latency": round(
+            float(alias(rating, "reviewedness_latency", "ReviewednessLatency") or 0.0),
+            2,
+        ),
+        "tree_score": round(
+            float(alias(rating, "treescore", "Treescore", "score_treescore") or 0.0), 2
+        ),
+        "tree_score_latency": round(
+            float(alias(rating, "tree_score_latency", "TreeScoreLatency") or 0.0), 2
+        ),
         "size_score": _extract_size_scores(rating),
-        "size_score_latency": round(float(alias(rating, "size_score_latency", "SizeScoreLatency") or DEFAULT_SCORE), SCORE_PRECISION),
+        "size_score_latency": round(
+            float(alias(rating, "size_score_latency", "SizeScoreLatency") or 0.0), 2
+        ),
     }
 
 
@@ -3619,11 +4273,13 @@ def get_model_rate(id: str, request: Request):
         # Handle empty IDs - allow flexible formats (alphanumeric, hyphens, underscores, slashes, dots, colons)
         # This supports both numeric artifact IDs and model names (e.g., "google-bert/bert-base-uncased")
         if not id or not id.strip() or id == "{id}":
-            logger.warning(f"DEBUG: Invalid id format: '{id}' (e.g., literal {{id}}) - returning zero metrics with status 200")
+            logger.warning(
+                f"DEBUG: Invalid id format: '{id}' (e.g., literal {{id}}) - returning zero metrics with status 200"
+            )
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
         logger.info(f"DEBUG: ===== GET_MODEL_RATE START =====")
         logger.info(f"DEBUG: Querying rate for id='{id}'")
-        
+
         found = False
         model_name = None
         # Check database for artifact - try full metadata first
@@ -3637,40 +4293,60 @@ def get_model_rate(id: str, request: Request):
                 model_name = artifact.get("name", id)
                 logger.info(f"DEBUG: ✅ Model found in database: name='{model_name}'")
             else:
-                logger.warning(f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'")
+                logger.warning(
+                    f"DEBUG: ⚠️ Artifact type mismatch: expected 'model', got '{artifact.get('type')}'"
+                )
         else:
-            logger.info(f"DEBUG: ❌ Artifact id '{id}' not found in database, searching S3 metadata")
+            logger.info(
+                f"DEBUG: ❌ Artifact id '{id}' not found in database, searching S3 metadata"
+            )
             # Try to find artifact metadata in S3 by artifact_id
             import time
+
             s3_start = time.time()
             s3_metadata = find_artifact_metadata_by_id(id)
             s3_elapsed = time.time() - s3_start
             logger.info(f"DEBUG: S3 metadata lookup took {s3_elapsed:.3f}s")
-            
+
             if s3_metadata:
                 logger.info(f"DEBUG: ✅ Found S3 metadata: {s3_metadata}")
                 if s3_metadata.get("type") == "model":
                     found = True
                     model_name = s3_metadata.get("name")
-                    logger.info(f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}'")
+                    logger.info(
+                        f"DEBUG: ✅ S3 metadata type is 'model': model_name='{model_name}'"
+                    )
                     # Restore to database for future lookups
-                    save_artifact(id, {
-                        "name": model_name,
-                        "type": "model",
-                        "version": s3_metadata.get("version", "main"),
-                        "id": id,
-                        "url": s3_metadata.get("url", f"https://huggingface.co/{model_name}")
-                    })
+                    save_artifact(
+                        id,
+                        {
+                            "name": model_name,
+                            "type": "model",
+                            "version": s3_metadata.get("version", "main"),
+                            "id": id,
+                            "url": s3_metadata.get(
+                                "url", f"https://huggingface.co/{model_name}"
+                            ),
+                        },
+                    )
                     logger.info(f"DEBUG: ✅ Restored to database: id='{id}'")
                 else:
-                    logger.warning(f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'")
+                    logger.warning(
+                        f"DEBUG: ⚠️ S3 metadata type mismatch: expected 'model', got '{s3_metadata.get('type')}'"
+                    )
             else:
-                logger.warning(f"DEBUG: ❌ S3 metadata not found for artifact_id '{id}'")
-        
+                logger.warning(
+                    f"DEBUG: ❌ S3 metadata not found for artifact_id '{id}'"
+                )
+
         if not found:
-            logger.info(f"DEBUG: Not found in storage or S3 metadata, searching S3 by model name")
+            logger.info(
+                f"DEBUG: Not found in storage or S3 metadata, searching S3 by model name"
+            )
             try:
-                logger.info(f"DEBUG: Calling list_models with regex: '^{re.escape(id)}$'")
+                logger.info(
+                    f"DEBUG: Calling list_models with regex: '^{re.escape(id)}$'"
+                )
                 result = list_models(name_regex=f"^{re.escape(id)}$", limit=1000)
                 models_found = result.get("models", [])
                 logger.info(f"DEBUG: list_models returned {len(models_found)} models")
@@ -3680,7 +4356,7 @@ def get_model_rate(id: str, request: Request):
                     logger.info(f"DEBUG: Model found via list_models")
                 else:
                     logger.info(f"DEBUG: No models found, trying common versions")
-                    common_versions = DEFAULT_MODEL_VERSIONS
+                    common_versions = ["1.0.0", "main", "latest"]
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
@@ -3688,29 +4364,33 @@ def get_model_rate(id: str, request: Request):
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             found = True
                             model_name = id  # Use id as model name
-                            logger.info(f"DEBUG: Found model with common version: {s3_key}")
+                            logger.info(
+                                f"DEBUG: Found model with common version: {s3_key}"
+                            )
                             break
                         except ClientError as e:
                             error_code = e.response.get("Error", {}).get("Code", "")
-                            logger.debug(f"DEBUG: Common version check failed: {s3_key}, error_code={error_code}")
+                            logger.debug(
+                                f"DEBUG: Common version check failed: {s3_key}, error_code={error_code}"
+                            )
                             continue
             except Exception as e:
                 logger.error(f"DEBUG: Exception searching S3: {str(e)}", exc_info=True)
                 pass
-        
+
         if not found:
             logger.error(f"DEBUG: Model not found: id='{id}'")
             raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
         # Clean up any stuck ratings before checking status
         _cleanup_stuck_ratings()
-        
+
         # Check rating status and block until complete
         # Thread-safe check: use a lock to prevent race conditions
         if id in _rating_status:
             status = _rating_status[id]
             logger.info(f"DEBUG: Rating status for id='{id}': {status}")
-            
+
             if status == "pending":
                 # Block until rating completes (with timeout)
                 logger.info(f"DEBUG: Rating pending, waiting for completion...")
@@ -3718,7 +4398,9 @@ def get_model_rate(id: str, request: Request):
                     # Wait up to 300 seconds (5 minutes) for rating to complete
                     event = _rating_locks[id]
                     if not event.wait(timeout=300):
-                        logger.warning(f"DEBUG: Rating timeout for id='{id}' after 300s, falling back to synchronous rating")
+                        logger.warning(
+                            f"DEBUG: Rating timeout for id='{id}' after 300s, falling back to synchronous rating"
+                        )
                         # Timeout occurred - async rating is taking too long
                         # Fall back to synchronous rating instead of failing
                         status = "timeout"
@@ -3727,139 +4409,83 @@ def get_model_rate(id: str, request: Request):
                         status = _rating_status.get(id, "unknown")
                 else:
                     # No lock found - rating might have failed to start
-                    logger.warning(f"DEBUG: No rating lock found for id='{id}', falling back to synchronous rating")
+                    logger.warning(
+                        f"DEBUG: No rating lock found for id='{id}', falling back to synchronous rating"
+                    )
                     status = "timeout"
-            
+
             if status == "disqualified" or status == "failed":
                 logger.warning(f"DEBUG: Rating {status} for id='{id}'")
                 raise HTTPException(status_code=404, detail="Artifact does not exist.")
-            
+
             if status == "completed":
                 # Use cached rating result
                 rating = _rating_results.get(id)
                 if not rating:
-                    logger.warning(f"DEBUG: Rating completed but no result cached, re-analyzing...")
+                    logger.warning(
+                        f"DEBUG: Rating completed but no result cached, re-analyzing..."
+                    )
                     # Fall through to analyze
                 else:
                     logger.info(f"DEBUG: Using cached rating result for id='{id}'")
                     return _build_rating_response(id, rating)
-            
+
             if status == "timeout":
                 # Async rating timed out - fall through to synchronous rating
-                logger.info(f"DEBUG: Async rating timed out for id='{id}', performing synchronous rating")
+                logger.info(
+                    f"DEBUG: Async rating timed out for id='{id}', performing synchronous rating"
+                )
                 rating = None
         else:
             # No rating status - might be an old artifact or non-model
             # Try to analyze directly
             rating = None
-        
+
         # Analyze model content if not cached (synchronous fallback)
-        # Use a per-model lock to prevent duplicate concurrent analysis
         if not rating:
-            # Check if another request is already analyzing this model
-            analysis_lock_key = f"sync_analysis_{id}"
-            is_first_request = False
-            
-            with _rating_lock:
-                # Double-check cache after acquiring lock (another request might have completed)
-                rating = _rating_results.get(id)
-                if rating:
-                    logger.info(f"DEBUG: Got cached rating after acquiring lock for '{id}'")
-                else:
-                    # Check if analysis is in progress
-                    if analysis_lock_key not in _rating_locks:
-                        # We're the first request - create lock and mark as analyzing
-                        _rating_locks[analysis_lock_key] = threading.Event()
-                        _rating_status[analysis_lock_key] = "pending"
-                        is_first_request = True
-                        logger.info(f"DEBUG: First request to analyze '{id}' - starting analysis")
-                    else:
-                        # Another request is analyzing - we'll wait for it
-                        logger.info(f"DEBUG: Another request analyzing '{id}', will wait...")
-            
-            if not rating:
-                if is_first_request:
-                    # We're the first request - do the analysis
-                    logger.info(f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'")
-                    try:
-                        # Use model_name if available, otherwise use id
-                        analysis_id = model_name if model_name else id
-                        logger.info(f"DEBUG: Calling analyze_model_content with: '{analysis_id}'")
-                        rating = analyze_model_content(analysis_id)
-                        logger.info(f"DEBUG: analyze_model_content returned: {rating}")
-                        if not rating:
-                            logger.error(f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'")
-                            raise HTTPException(
-                                status_code=500,
-                                detail="The artifact rating system encountered an error while computing at least one metric.",
-                            )
-                    except HTTPException:
-                        # Clean up on error
-                        with _rating_lock:
-                            if analysis_lock_key in _rating_locks:
-                                _rating_locks[analysis_lock_key].set()
-                                del _rating_locks[analysis_lock_key]
-                            if analysis_lock_key in _rating_status:
-                                del _rating_status[analysis_lock_key]
-                        raise
-                    except Exception as e:
-                        logger.error(
-                            f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}", exc_info=True
-                        )
-                        logger.error(
-                            f"Error analyzing model content for {id}: {str(e)}", exc_info=True
-                        )
-                        # Clean up on error
-                        with _rating_lock:
-                            if analysis_lock_key in _rating_locks:
-                                _rating_locks[analysis_lock_key].set()
-                                del _rating_locks[analysis_lock_key]
-                            if analysis_lock_key in _rating_status:
-                                del _rating_status[analysis_lock_key]
-                        raise HTTPException(
-                            status_code=500,
-                            detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
-                        )
-                    
-                    # Cache the rating result and signal waiting requests
-                    with _rating_lock:
-                        _rating_results[id] = rating
-                        _rating_status[id] = "completed"
-                        # Clean up start time if it exists
-                        if id in _rating_start_times:
-                            del _rating_start_times[id]
-                        # Signal waiting requests
-                        if analysis_lock_key in _rating_locks:
-                            _rating_locks[analysis_lock_key].set()
-                else:
-                    # Another request is analyzing - wait for it (with 2 minute timeout for test)
-                    analysis_event = _rating_locks.get(analysis_lock_key)
-                    if analysis_event:
-                        logger.info(f"DEBUG: Waiting for concurrent analysis of '{id}'...")
-                        if analysis_event.wait(timeout=120):  # 2 minute timeout per test requirement
-                            # Check cache after waiting
-                            with _rating_lock:
-                                rating = _rating_results.get(id)
-                                if rating:
-                                    logger.info(f"DEBUG: Got cached rating after waiting for '{id}'")
-                                else:
-                                    logger.warning(f"DEBUG: No rating after waiting for '{id}' - may have failed")
-                        else:
-                            logger.warning(f"DEBUG: Timeout waiting for concurrent analysis of '{id}'")
-                            raise HTTPException(
-                                status_code=500,
-                                detail="The artifact rating system encountered an error while computing at least one metric.",
-                            )
-        
-        if not rating:
-            raise HTTPException(
-                status_code=500,
-                detail="The artifact rating system encountered an error while computing at least one metric.",
+            logger.info(
+                f"DEBUG: Analyzing model content for id='{id}', model_name='{model_name or id}'"
             )
-        
-        # Use model_name for the name field to match expected value (should match ingested model name)
-        response_name = model_name if model_name else id
-        return _build_rating_response(response_name, rating)
+            try:
+                # Use model_name if available, otherwise use id
+                analysis_id = model_name if model_name else id
+                logger.info(
+                    f"DEBUG: Calling analyze_model_content with: '{analysis_id}'"
+                )
+                rating = analyze_model_content(analysis_id)
+                logger.info(f"DEBUG: analyze_model_content returned: {rating}")
+                if not rating:
+                    logger.error(
+                        f"DEBUG: analyze_model_content returned None/empty for '{analysis_id}'"
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail="The artifact rating system encountered an error while computing at least one metric.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(
+                    f"DEBUG: Error analyzing model content for {analysis_id}: {str(e)}",
+                    exc_info=True,
+                )
+                logger.error(
+                    f"Error analyzing model content for {id}: {str(e)}", exc_info=True
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"The artifact rating system encountered an error while computing at least one metric: {str(e)}",
+                )
+
+        # Cache the rating result before returning (thread-safe)
+        with _rating_lock:
+            _rating_results[id] = rating
+            _rating_status[id] = "completed"
+            # Clean up start time if it exists
+            if id in _rating_start_times:
+                del _rating_start_times[id]
+
+        return _build_rating_response(id, rating)
     except HTTPException:
         raise
     except Exception as e:
@@ -3892,7 +4518,7 @@ def get_model_lineage(id: str, request: Request):
         if not artifact:
             artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
-                found = True
+            found = True
 
         if not found:
             try:
@@ -3903,7 +4529,7 @@ def get_model_lineage(id: str, request: Request):
                     # Try to get model name from database for S3 lookup
                     model_name = _get_model_name_for_s3(id)
                     if model_name:
-                        common_versions = DEFAULT_MODEL_VERSIONS
+                        common_versions = ["1.0.0", "main", "latest"]
                         for v in common_versions:
                             try:
                                 s3_key = f"models/{model_name}/{v}/model.zip"
@@ -3914,7 +4540,7 @@ def get_model_lineage(id: str, request: Request):
                                 continue
                     # Fallback: try by ID directly (in case it was stored by ID)
                     if not found:
-                        common_versions = DEFAULT_MODEL_VERSIONS
+                        common_versions = ["1.0.0", "main", "latest"]
                         for v in common_versions:
                             try:
                                 s3_key = f"models/{id}/{v}/model.zip"
@@ -3934,18 +4560,20 @@ def get_model_lineage(id: str, request: Request):
         if not model_name:
             # Fallback: use ID directly (in case it was stored by ID)
             model_name = id
-        
+
         # Sanitize model name for S3 (models are stored with sanitized names)
         sanitized_model_name = sanitize_model_id_for_s3(model_name)
-        
+
         # Try to get lineage from config - try multiple versions
         result = None
-        versions_to_try = DEFAULT_MODEL_VERSIONS
-        
+        versions_to_try = ["1.0.0", "main", "latest"]
+
         for version in versions_to_try:
             try:
                 # Try with sanitized name first
-                test_result = get_model_lineage_from_config(sanitized_model_name, version)
+                test_result = get_model_lineage_from_config(
+                    sanitized_model_name, version
+                )
                 if "error" not in test_result:
                     result = test_result
                     break
@@ -3957,31 +4585,18 @@ def get_model_lineage(id: str, request: Request):
                         break
             except Exception:
                 continue
-        
+
         # If all versions failed, return empty lineage instead of error
         if not result or "error" in result:
             error_msg = result.get("error", "").lower() if result else ""
-            # Check for various "not found" patterns (including HTTP status codes)
-            not_found_patterns = [
-                "not found",
-                "does not exist",
-                "no such",
-                "nosuchkey",
-                "aws download failed",
-                "404",
-                "artifact does not exist",
-                "no config.json found in model",  # Config missing is also a "not found" scenario
-            ]
-            if any(pattern in error_msg for pattern in not_found_patterns):
+            if (
+                "not found" in error_msg
+                or "does not exist" in error_msg
+                or "no such" in error_msg
+            ):
                 # Model exists but lineage config not available - return empty lineage
-                logger.debug(f"Lineage config not available for model {id}: {result.get('error', 'unknown error')}")
-                return {
-                    "nodes": [],
-                    "edges": []
-                }
+                return {"nodes": [], "edges": []}
             else:
-                # Other errors (malformed metadata, parsing errors, etc.) - return 400
-                logger.error(f"Lineage computation failed for model {id}: {result.get('error', 'unknown error')}")
                 raise HTTPException(
                     status_code=400,
                     detail="The lineage graph cannot be computed because the artifact metadata is missing or malformed.",
@@ -3991,50 +4606,60 @@ def get_model_lineage(id: str, request: Request):
         # Spec: ArtifactLineageGraph with nodes (ArtifactLineageNode[]) and edges (ArtifactLineageEdge[])
         nodes = []
         edges = []
-        
+
         # Get lineage metadata
         lineage_metadata = result.get("lineage_metadata", {})
         current_model_id = result.get("model_id", id)
-        
+
         # Get model name for current model
         current_model_name = model_name if model_name else current_model_id
         # Try to get artifact name from database
-        current_artifact = get_generic_artifact_metadata("model", id) or get_artifact_from_db(id)
+        current_artifact = get_generic_artifact_metadata(
+            "model", id
+        ) or get_artifact_from_db(id)
         if current_artifact and current_artifact.get("name"):
             current_model_name = current_artifact.get("name")
-        
+
         # Add current model as a node (required by spec)
-        nodes.append({
-            "artifact_id": id,  # Use the artifact ID from the request
-            "name": current_model_name,
-            "source": "config_json"
-        })
-        
+        nodes.append(
+            {
+                "artifact_id": id,  # Use the artifact ID from the request
+                "name": current_model_name,
+                "source": "config_json",
+            }
+        )
+
         # Check if there's a base_model (parent model)
         # IMPORTANT: Only include models that are currently uploaded to the system
         base_model = lineage_metadata.get("base_model")
         if base_model:
             # Try to find the base_model in our system
             # Base model might be a model name (e.g., "bert-base-uncased") or already an artifact ID
-            base_model_name = base_model.split("/")[-1] if "/" in base_model else base_model
+            base_model_name = (
+                base_model.split("/")[-1] if "/" in base_model else base_model
+            )
             base_model_id = None
             base_model_found = False
-            
+
             # First, try to find by artifact ID (if base_model is already an ID)
             try:
-                artifact = get_generic_artifact_metadata("model", base_model) or get_artifact_from_db(base_model)
+                artifact = get_generic_artifact_metadata(
+                    "model", base_model
+                ) or get_artifact_from_db(base_model)
                 if artifact and artifact.get("type") == "model":
                     base_model_id = artifact.get("id", base_model)
                     base_model_name = artifact.get("name", base_model_name)
                     base_model_found = True
             except Exception:
                 pass
-            
+
             # If not found by ID, try to find by name
             if not base_model_found:
                 try:
                     # Search for models with this name in S3
-                    result = list_models(name_regex=f"^{re.escape(base_model_name)}$", limit=1)
+                    result = list_models(
+                        name_regex=f"^{re.escape(base_model_name)}$", limit=1
+                    )
                     if result.get("models"):
                         model_info = result["models"][0]
                         # Try to get artifact_id from database
@@ -4047,7 +4672,7 @@ def get_model_lineage(id: str, request: Request):
                         else:
                             # Model exists in S3 but not in database - check S3 directly
                             sanitized_name = sanitize_model_id_for_s3(model_name)
-                            for v in DEFAULT_MODEL_VERSIONS:
+                            for v in ["1.0.0", "main", "latest"]:
                                 try:
                                     s3_key = f"models/{sanitized_name}/{v}/model.zip"
                                     s3.head_object(Bucket=ap_arn, Key=s3_key)
@@ -4059,25 +4684,29 @@ def get_model_lineage(id: str, request: Request):
                                     continue
                 except Exception:
                     pass
-            
+
             # Only add base_model to graph if it exists in our system
             if base_model_found and base_model_id:
                 # Add base model as a node
-                nodes.append({
-                    "artifact_id": base_model_id,
-                    "name": base_model_name,
-                    "source": "config_json"
-                })
-                
+                nodes.append(
+                    {
+                        "artifact_id": base_model_id,
+                        "name": base_model_name,
+                        "source": "config_json",
+                    }
+                )
+
                 # Add edge from base_model to current model
                 # Relationship type: "base_model" per spec
                 relationship = "base_model"
-                edges.append({
-                    "from_node_artifact_id": base_model_id,
-                    "to_node_artifact_id": id,
-                    "relationship": relationship
-                })
-        
+                edges.append(
+                    {
+                        "from_node_artifact_id": base_model_id,
+                        "to_node_artifact_id": id,
+                        "relationship": relationship,
+                    }
+                )
+
         # Check lineage_map for additional relationships (if any)
         # Only include models that are currently uploaded to the system
         lineage_map = result.get("lineage_map", {})
@@ -4086,9 +4715,11 @@ def get_model_lineage(id: str, request: Request):
             parent_found = False
             parent_artifact_id = None
             parent_name = parent_id.split("/")[-1] if "/" in parent_id else parent_id
-            
+
             # Check if parent is already in nodes (from base_model above)
-            parent_exists_in_nodes = any(node.get("artifact_id") == parent_id for node in nodes)
+            parent_exists_in_nodes = any(
+                node.get("artifact_id") == parent_id for node in nodes
+            )
             if parent_exists_in_nodes:
                 parent_found = True
                 parent_artifact_id = parent_id
@@ -4096,14 +4727,18 @@ def get_model_lineage(id: str, request: Request):
                 # Try to find parent in our system
                 try:
                     # Try by artifact ID
-                    artifact = get_generic_artifact_metadata("model", parent_id) or get_artifact_from_db(parent_id)
+                    artifact = get_generic_artifact_metadata(
+                        "model", parent_id
+                    ) or get_artifact_from_db(parent_id)
                     if artifact and artifact.get("type") == "model":
                         parent_artifact_id = artifact.get("id", parent_id)
                         parent_name = artifact.get("name", parent_name)
                         parent_found = True
                     else:
                         # Try by name
-                        result_check = list_models(name_regex=f"^{re.escape(parent_name)}$", limit=1)
+                        result_check = list_models(
+                            name_regex=f"^{re.escape(parent_name)}$", limit=1
+                        )
                         if result_check.get("models"):
                             model_info = result_check["models"][0]
                             model_name = model_info.get("name", parent_name)
@@ -4115,9 +4750,11 @@ def get_model_lineage(id: str, request: Request):
                             else:
                                 # Check S3 directly
                                 sanitized_name = sanitize_model_id_for_s3(model_name)
-                                for v in DEFAULT_MODEL_VERSIONS:
+                                for v in ["1.0.0", "main", "latest"]:
                                     try:
-                                        s3_key = f"models/{sanitized_name}/{v}/model.zip"
+                                        s3_key = (
+                                            f"models/{sanitized_name}/{v}/model.zip"
+                                        )
                                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                                         parent_artifact_id = model_name
                                         parent_found = True
@@ -4126,25 +4763,29 @@ def get_model_lineage(id: str, request: Request):
                                         continue
                 except Exception:
                     pass
-            
+
             # Only add parent if it exists in our system
             if parent_found and parent_artifact_id:
                 if not parent_exists_in_nodes:
                     # Add parent as a node
-                    nodes.append({
-                        "artifact_id": parent_artifact_id,
-                        "name": parent_name,
-                        "source": "config_json"
-                    })
-                
+                    nodes.append(
+                        {
+                            "artifact_id": parent_artifact_id,
+                            "name": parent_name,
+                            "source": "config_json",
+                        }
+                    )
+
                 # Add edges from parent to each child (only if child is current model)
                 for child_id in children:
                     if child_id == id:  # Current model
-                        edges.append({
-                            "from_node_artifact_id": parent_artifact_id,
-                            "to_node_artifact_id": id,
-                            "relationship": "base_model"
-                        })
+                        edges.append(
+                            {
+                                "from_node_artifact_id": parent_artifact_id,
+                                "to_node_artifact_id": id,
+                                "relationship": "base_model",
+                            }
+                        )
 
         # Return lineage graph matching spec format
         return {"nodes": nodes, "edges": edges}
@@ -4180,7 +4821,7 @@ async def check_model_license(id: str, request: Request):
         if not artifact:
             artifact = get_artifact_from_db(id)
         if artifact and artifact.get("type") == "model":
-                found = True
+            found = True
 
         if not found:
             try:
@@ -4189,7 +4830,7 @@ async def check_model_license(id: str, request: Request):
                     found = True
                 else:
                     # Try common versions
-                    common_versions = DEFAULT_MODEL_VERSIONS
+                    common_versions = ["1.0.0", "main", "latest"]
                     for v in common_versions:
                         try:
                             s3_key = f"models/{id}/{v}/model.zip"
@@ -4301,6 +4942,8 @@ def get_tracks():
             status_code=500,
             detail="The system encountered an error while retrieving the student's track information.",
         )
+
+
 @app.get("/package/{id}/rate")
 def get_package_rate(id: str, request: Request):
     return get_model_rate(id, request)

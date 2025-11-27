@@ -3,11 +3,6 @@ data "aws_secretsmanager_secret" "jwt_secret" {
   name = "acme-jwt-secret"
 }
 
-# Data source for GitHub token secret
-data "aws_secretsmanager_secret" "github_token" {
-  name = "acme-github-token"
-}
-
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
   name                 = "validator-service"
@@ -117,7 +112,7 @@ resource "aws_ecs_task_definition" "validator_task" {
       },
       {
         name      = "GITHUB_TOKEN"
-        valueFrom = "${data.aws_secretsmanager_secret.github_token.arn}:github_token::"
+        valueFrom = "${var.github_token_secret_arn}:github_token::"
       }
     ]
 
@@ -331,7 +326,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
         ]
         Resource = [
           data.aws_secretsmanager_secret.jwt_secret.arn,
-          data.aws_secretsmanager_secret.github_token.arn
+          var.github_token_secret_arn
         ]
       },
       {

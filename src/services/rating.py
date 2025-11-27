@@ -62,18 +62,20 @@ def analyze_model_content(
         # So we need to search using both the original name and sanitized name
         try:
             # Clean the target name first
-            clean_target = target.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
-            
+            clean_target = target.replace("https://huggingface.co/", "").replace(
+                "http://huggingface.co/", ""
+            )
+
             # Try multiple search strategies:
             # 1. Exact match with original name
             # 2. Exact match with sanitized name
             # 3. Partial match (contains) with sanitized name
             # 4. Try direct S3 key lookup with common versions
-            
+
             search_patterns = [
                 f"^{re.escape(clean_target)}$",  # Exact match original
             ]
-            
+
             # Add sanitized version
             sanitized_target = (
                 clean_target.replace("/", "_")
@@ -87,22 +89,31 @@ def analyze_model_content(
                 .replace("|", "_")
             )
             if sanitized_target != clean_target:
-                search_patterns.append(f"^{re.escape(sanitized_target)}$")  # Exact match sanitized
-                search_patterns.append(re.escape(sanitized_target))  # Partial match sanitized
-            
+                search_patterns.append(
+                    f"^{re.escape(sanitized_target)}$"
+                )  # Exact match sanitized
+                search_patterns.append(
+                    re.escape(sanitized_target)
+                )  # Partial match sanitized
+
             result = None
             for pattern in search_patterns:
                 try:
-                    result = list_models(name_regex=pattern, limit=1000)  # Increase limit to find more models
+                    result = list_models(
+                        name_regex=pattern, limit=1000
+                    )  # Increase limit to find more models
                     if result.get("models"):
                         break
                 except Exception as pattern_error:
-                    print(f"[RATE] Pattern search failed for '{pattern}': {pattern_error}")
+                    print(
+                        f"[RATE] Pattern search failed for '{pattern}': {pattern_error}"
+                    )
                     continue
-            
+
             # If still not found, try direct S3 key lookup with common versions
             if not result or not result.get("models"):
                 from botocore.exceptions import ClientError
+
                 common_versions = ["1.0.0", "main", "latest", "v1.0.0"]
                 for version in common_versions:
                     for model_name_variant in [sanitized_target, clean_target]:
@@ -110,9 +121,14 @@ def analyze_model_content(
                             s3_key = f"models/{model_name_variant}/{version}/model.zip"
                             # Try to check if the file exists
                             from ..services.s3_service import s3, ap_arn
+
                             s3.head_object(Bucket=ap_arn, Key=s3_key)
                             # File exists, create a result structure
-                            result = {"models": [{"name": model_name_variant, "version": version}]}
+                            result = {
+                                "models": [
+                                    {"name": model_name_variant, "version": version}
+                                ]
+                            }
                             print(f"[RATE] Found model via direct S3 lookup: {s3_key}")
                             break
                         except ClientError:
@@ -122,31 +138,41 @@ def analyze_model_content(
                             continue
                     if result and result.get("models"):
                         break
-            
+
             if result and result.get("models"):
                 found_model = result["models"][0]
                 found_version = found_model["version"]
                 # Use the sanitized model name from S3 (this is how it's actually stored)
                 found_model_name = found_model["name"]
                 try:
-                    model_content = download_model(found_model_name, found_version, "full")
+                    model_content = download_model(
+                        found_model_name, found_version, "full"
+                    )
                     if model_content:
                         clean_model_id = target  # Keep original target for display
-                        logger.debug(f"[RATE] Successfully downloaded model from S3: {found_model_name} v{found_version}")
+                        logger.debug(
+                            f"[RATE] Successfully downloaded model from S3: {found_model_name} v{found_version}"
+                        )
                 except HTTPException as s3_error:
                     # HTTPException with 404 means model not found - this is expected, will fallback to HuggingFace
                     # Don't log as error - this is normal behavior
                     if s3_error.status_code != 404:
                         # Only log non-404 errors (actual problems)
-                        logger.warning(f"[RATE] S3 download error for {found_model_name}: {s3_error.detail}")
+                        logger.warning(
+                            f"[RATE] S3 download error for {found_model_name}: {s3_error.detail}"
+                        )
                     pass
                 except Exception as s3_error:
                     # Other unexpected errors should be logged
-                    logger.debug(f"[RATE] S3 download failed for {found_model_name}, will try HuggingFace: {s3_error}")
+                    logger.debug(
+                        f"[RATE] S3 download failed for {found_model_name}, will try HuggingFace: {s3_error}"
+                    )
                     pass
         except Exception as s3_check_error:
             # If S3 check fails, continue to try HuggingFace (this is expected behavior)
-            logger.debug(f"[RATE] S3 check failed, will try HuggingFace: {s3_check_error}")
+            logger.debug(
+                f"[RATE] S3 check failed, will try HuggingFace: {s3_check_error}"
+            )
             pass
 
         # If not found in S3, try HuggingFace
@@ -172,10 +198,14 @@ def analyze_model_content(
                     elif target.startswith("http://huggingface.co/"):
                         clean_model_id = target.replace("http://huggingface.co/", "")
                     if clean_model_id != target:
-                        model_content = download_from_huggingface(clean_model_id, "main")
+                        model_content = download_from_huggingface(
+                            clean_model_id, "main"
+                        )
                     elif not target.startswith("http"):
                         # Try to download if it looks like a HuggingFace model ID
-                        model_content = download_from_huggingface(clean_model_id, "main")
+                        model_content = download_from_huggingface(
+                            clean_model_id, "main"
+                        )
                 except (HTTPException, ValueError) as hf_error:
                     if suppress_errors:
                         return None
@@ -195,7 +225,7 @@ def analyze_model_content(
                 raise ValueError(
                     f"Invalid model ID format: {target}. Expected HuggingFace model ID (e.g., 'username/model-name') or HTTP URL, not a file path."
                 )
-        
+
         effective_model_id = clean_model_id if clean_model_id != target else target
 
         # Check if we have model content before proceeding
@@ -270,10 +300,11 @@ def analyze_model_content(
                             meta["readme_text"] = (
                                 description + "\n\n" + meta.get("readme_text", "")
                             )
-                    
+
                     # Check description for GitHub URL early
                     if description and not repo_url:
                         from ..services.s3_service import extract_github_url_from_text
+
                         repo_url = extract_github_url_from_text(description)
                         if repo_url:
                             print(f"[RATE] Found GitHub URL in description: {repo_url}")
@@ -303,7 +334,7 @@ def analyze_model_content(
                                 repo_url = github_field.get("url") or github_field.get(
                                     "repo"
                                 )
-                        
+
                         if not repo_url:
                             card_data = hf_meta.get("cardData", {})
                             if isinstance(card_data, dict):
@@ -327,22 +358,28 @@ def analyze_model_content(
                                         if github_match:
                                             repo_url = github_match.group(0)
                                             break
-                                        elif "/" in value and len(value.split("/")) == 2:
+                                        elif (
+                                            "/" in value and len(value.split("/")) == 2
+                                        ):
                                             potential_repo = value.strip()
                                             if not potential_repo.startswith("http"):
-                                                repo_url = (
-                                                    f"https://github.com/{potential_repo}"
-                                                )
+                                                repo_url = f"https://github.com/{potential_repo}"
                                                 break
-                        
+
                         if not repo_url:
                             import json
+
                             hf_meta_str = json.dumps(hf_meta)
-                            from ..services.s3_service import extract_github_url_from_text
+                            from ..services.s3_service import (
+                                extract_github_url_from_text,
+                            )
+
                             repo_url = extract_github_url_from_text(hf_meta_str)
                             if repo_url:
-                                print(f"[RATE] Found GitHub URL in HuggingFace metadata: {repo_url}")
-                        
+                                print(
+                                    f"[RATE] Found GitHub URL in HuggingFace metadata: {repo_url}"
+                                )
+
                         if not repo_url:
                             tags = hf_meta.get("tags", []) or []
                             for tag in tags:
@@ -354,27 +391,42 @@ def analyze_model_content(
                                     if github_match:
                                         repo_url = github_match.group(0)
                                         break
-                        
+
                         if not repo_url:
                             model_index = hf_meta.get("model_index", "")
                             if isinstance(model_index, str):
-                                from ..services.s3_service import extract_github_url_from_text
+                                from ..services.s3_service import (
+                                    extract_github_url_from_text,
+                                )
+
                                 repo_url = extract_github_url_from_text(model_index)
                                 if repo_url:
-                                    print(f"[RATE] Found GitHub URL in model_index: {repo_url}")
+                                    print(
+                                        f"[RATE] Found GitHub URL in model_index: {repo_url}"
+                                    )
                         if not repo_url:
                             print(f"[RATE] Searching entire zip file for GitHub URL...")
-                            from ..services.s3_service import extract_github_url_from_zip
+                            from ..services.s3_service import (
+                                extract_github_url_from_zip,
+                            )
+
                             repo_url = extract_github_url_from_zip(model_content)
                             if repo_url:
-                                print(f"[RATE] Found GitHub URL in zip file: {repo_url}")
+                                print(
+                                    f"[RATE] Found GitHub URL in zip file: {repo_url}"
+                                )
                             else:
                                 print(f"[RATE] No GitHub URL found in zip file")
-                        
+
                         if not repo_url and meta.get("readme_text"):
                             readme = meta.get("readme_text", "")
-                            print(f"[RATE] Extracting GitHub URL from README text (length: {len(readme)})")
-                            from ..services.s3_service import extract_github_url_from_text
+                            print(
+                                f"[RATE] Extracting GitHub URL from README text (length: {len(readme)})"
+                            )
+                            from ..services.s3_service import (
+                                extract_github_url_from_text,
+                            )
+
                             repo_url = extract_github_url_from_text(readme)
                             if repo_url:
                                 print(f"[RATE] Found GitHub URL in README: {repo_url}")
@@ -563,7 +615,10 @@ def run_acme_metrics(
             print(f"Error running metric {metric_name}: {e}")
             results[metric_name] = MetricValue(metric_name, 0.0, 0)
     net_score, net_score_latency = compute_net_score(results)
-    scores = {"net_score": round(float(net_score), 2), "aggregation_latency": round(net_score_latency / 1000.0, 2)}
+    scores = {
+        "net_score": round(float(net_score), 2),
+        "aggregation_latency": round(net_score_latency / 1000.0, 2),
+    }
     metric_mapping = {
         "ramp_up_time": "ramp_up",
         "license": "license",
@@ -587,30 +642,35 @@ def run_acme_metrics(
                 if isinstance(val, dict) and len(val) > 0:
                     scores[output_name] = round(float(sum(val.values()) / len(val)), 2)
                 else:
-                    scores[output_name] = round(float(val) if val is not None else 0.0, 2)
+                    scores[output_name] = round(
+                        float(val) if val is not None else 0.0, 2
+                    )
                 if hasattr(metric_value, "latency_ms"):
                     scores[f"{output_name}_latency"] = int(metric_value.latency_ms)
             elif isinstance(metric_value, dict) and len(metric_value) > 0:
-                scores[output_name] = round(float(
-                    sum(metric_value.values()) / len(metric_value)
-                ), 2)
+                scores[output_name] = round(
+                    float(sum(metric_value.values()) / len(metric_value)), 2
+                )
             elif isinstance(metric_value, (int, float)):
                 scores[output_name] = round(float(metric_value), 2)
             else:
                 scores[output_name] = round(0.0, 2)
         else:
             scores[output_name] = round(0.0, 2)
-    
+
     if "size_score" in results:
         size_result = results["size_score"]
         if hasattr(size_result, "value") and isinstance(size_result.value, dict):
-            scores["size_score"] = {platform: round(float(score), 2) for platform, score in size_result.value.items()}
+            scores["size_score"] = {
+                platform: round(float(score), 2)
+                for platform, score in size_result.value.items()
+            }
         if hasattr(size_result, "latency_ms"):
             scores["size_score_latency"] = int(size_result.latency_ms)
-    
+
     if "net_score_latency" not in scores:
         scores["net_score_latency"] = int(net_score_latency)
-    
+
     return scores
 
 
@@ -715,7 +775,9 @@ def rate_model(modelId: str, body: RateRequest, enforce: bool = Query(False)):
     )
     if enforce:
         failures = [
-            (k, v) for k, v in subscores.items() if v is not None and float(v) <= INGESTIBILITY_THRESHOLD
+            (k, v)
+            for k, v in subscores.items()
+            if v is not None and float(v) <= INGESTIBILITY_THRESHOLD
         ]
         if failures:
             raise HTTPException(
