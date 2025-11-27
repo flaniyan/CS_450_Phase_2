@@ -67,11 +67,7 @@ async def _authenticate(request: Request):
     normalized_password = _normalize_password(password)
 
     if name == EXPECTED_USERNAME and normalized_password in EXPECTED_PASSWORDS:
-        # Per spec: Return application/json with a JSON string value (wrapped in quotes)
-        # Example: '"bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."'
-        from fastapi.responses import JSONResponse
-        token_string = "bearer " + STATIC_TOKEN
-        return JSONResponse(content=token_string)
+        return PlainTextResponse("bearer " + STATIC_TOKEN, media_type="text/plain")
 
     raise HTTPException(status_code=401, detail="The user or password is invalid.")
 
@@ -113,6 +109,7 @@ def _normalize_password(password: str) -> str:
     methods=["PUT", "GET", "POST"],
     dependencies=[],
     openapi_extra={"security": []},
+    response_class=PlainTextResponse,
 )
 async def authenticate(request: Request):
     """Main autograder authentication endpoint."""
