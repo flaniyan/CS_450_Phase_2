@@ -38,6 +38,6 @@ resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
       }
     ]
   })
-  
+
   depends_on = [module.ecs]
 }
