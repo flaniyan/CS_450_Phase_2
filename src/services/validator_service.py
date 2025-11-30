@@ -12,22 +12,25 @@ from multiprocessing.queues import Queue
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 # AWS clients
 dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
 s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-cloudwatch = boto3.client("cloudwatch", region_name=os.getenv("AWS_REGION", "us-east-1"))
+cloudwatch = boto3.client(
+    "cloudwatch", region_name=os.getenv("AWS_REGION", "us-east-1")
+)
 
 # Environment variables
 ARTIFACTS_BUCKET = os.getenv("ARTIFACTS_BUCKET", "pkg-artifacts")
 PACKAGES_TABLE = os.getenv("DDB_TABLE_PACKAGES", "packages")
 DOWNLOADS_TABLE = os.getenv("DDB_TABLE_DOWNLOADS", "downloads")
 METRIC_NAMESPACE = os.getenv("VALIDATOR_METRIC_NAMESPACE", "ValidatorService")
-METRIC_NAME_TIMEOUT = os.getenv("VALIDATOR_TIMEOUT_METRIC_NAME", "validator.timeout.count")
+METRIC_NAME_TIMEOUT = os.getenv(
+    "VALIDATOR_TIMEOUT_METRIC_NAME", "validator.timeout.count"
+)
 
 app = FastAPI(title="Package Validator Service", version="1.0.0")
 security = HTTPBearer()
@@ -76,7 +79,9 @@ def get_validator_script(pkg_name: str, version: str) -> Optional[str]:
         return None
 
 
-def _run_validator_script(script_content: str, package_data: Dict[str, Any]) -> Dict[str, Any]:
+def _run_validator_script(
+    script_content: str, package_data: Dict[str, Any]
+) -> Dict[str, Any]:
     safe_globals = {
         "__builtins__": {
             "len": len,
@@ -132,7 +137,9 @@ def execute_validator(
     timeout = int(os.getenv("VALIDATOR_TIMEOUT_SEC", "5"))
     ctx = get_context("spawn")
     queue: Queue = ctx.Queue()
-    process = ctx.Process(target=_validator_worker, args=(script_content, package_data, queue))
+    process = ctx.Process(
+        target=_validator_worker, args=(script_content, package_data, queue)
+    )
     process.start()
     process.join(timeout)
 
@@ -163,7 +170,10 @@ def execute_validator(
         message = queue.get()
         if message.get("status") == "ok":
             return message["result"]
-        return {"valid": False, "error": message.get("error", "Unknown validator error")}
+        return {
+            "valid": False,
+            "error": message.get("error", "Unknown validator error"),
+        }
 
     return {"valid": False, "error": "Validator returned no result"}
 

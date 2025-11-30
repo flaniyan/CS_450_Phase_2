@@ -1,6 +1,12 @@
 variable "artifacts_bucket" { type = string }
 variable "ddb_tables_arnmap" { type = map(string) }
 variable "validator_service_url" { type = string }
+variable "github_token" {
+  type        = string
+  description = "GitHub Personal Access Token for API requests"
+  default     = "ghp_test_token_placeholder"
+  sensitive   = true
+}
 
 # KMS Key for encryption
 resource "aws_kms_key" "main_key" {
@@ -44,6 +50,34 @@ resource "aws_secretsmanager_secret_version" "jwt_secret" {
     jwt_expiration_hours = 10
     jwt_max_uses         = 1000
   })
+}
+
+# Secrets Manager for GitHub token
+resource "aws_secretsmanager_secret" "github_token" {
+  name = "acme-github-token"
+
+  kms_key_id = aws_kms_key.main_key.arn
+
+  tags = {
+    Name        = "acme-github-token"
+    Environment = "dev"
+    Project     = "CS_450_Phase_2"
+  }
+
+  lifecycle {
+    ignore_changes = [kms_key_id]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "github_token" {
+  secret_id = aws_secretsmanager_secret.github_token.id
+  secret_string = jsonencode({
+    github_token = var.github_token
+  })
+  
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 # CloudWatch Alarms
@@ -191,12 +225,21 @@ output "kms_key_arn" {
   value = aws_kms_key.main_key.arn
 }
 
+output "kms_key_id" {
+  value = aws_kms_key.main_key.key_id
+  description = "The globally unique identifier for the KMS key"
+}
+
 output "kms_key_alias" {
   value = aws_kms_alias.main_key_alias.name
 }
 
 output "jwt_secret_arn" {
   value = aws_secretsmanager_secret.jwt_secret.arn
+}
+
+output "github_token_secret_arn" {
+  value = aws_secretsmanager_secret.github_token.arn
 }
 
 output "dashboard_url" {

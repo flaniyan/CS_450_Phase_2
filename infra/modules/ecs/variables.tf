@@ -9,3 +9,11 @@ variable "image_tag" {
   default     = "latest"
   description = "Docker image tag for the validator service"
 }
+variable "github_token_secret_arn" {
+  type        = string
+  description = "ARN of the GitHub token secret in Secrets Manager"
+}
+variable "jwt_secret_arn" {
+  type        = string
+  description = "ARN of the JWT secret in Secrets Manager"
+}

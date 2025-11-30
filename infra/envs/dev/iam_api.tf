@@ -25,20 +25,64 @@ resource "aws_iam_policy" "api_ddb_rw_managed" {
 
 # API Service - S3 Policy
 data "aws_iam_policy_document" "api_s3_packages_rw" {
-  # List only within packages/ prefix
+  # S3 Access Point permissions - required when using access points
+  statement {
+    sid    = "AccessPointPermissions"
+    effect = "Allow"
+    actions = [
+      "s3:GetAccessPoint",
+      "s3:ListAccessPoint"
+    ]
+    resources = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
+  }
+
+  # List bucket (must use bucket ARN, not access point ARN)
+  statement {
+    sid     = "ListAccessPoint"
+    effect  = "Allow"
+    actions = ["s3:ListBucket"]
+    resources = [
+      "arn:aws:s3:::pkg-artifacts-team"
+    ]
+  }
+
+  # List bucket with prefix conditions for direct bucket access
   statement {
     sid       = "ListPackagesPrefix"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::pkg-artifacts"]
+    resources = ["arn:aws:s3:::pkg-artifacts-team"]
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["packages/*"]
+      values   = ["packages/*", "models/*"]
     }
   }
 
-  # Read/Write only under packages/
+  # Read/Write objects through access point (models and packages)
+  statement {
+    sid    = "RWAccessPointObjects"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectTagging",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
+      "s3:DeleteObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts",
+      "s3:CreateMultipartUpload",
+      "s3:CompleteMultipartUpload",
+      "s3:UploadPart"
+    ]
+    resources = [
+      "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*",
+      "arn:aws:s3:::pkg-artifacts-team/models/*",
+      "arn:aws:s3:::pkg-artifacts-team/packages/*"
+    ]
+  }
+
+  # Fallback: Read/Write only under packages/ (for backward compatibility)
   statement {
     sid    = "RWPackagesWithKMS"
     effect = "Allow"
@@ -47,7 +91,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
       "s3:PutObject", "s3:PutObjectTagging",
       "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:DeleteObject"
     ]
-    resources = ["arn:aws:s3:::pkg-artifacts/packages/*"]
+    resources = ["arn:aws:s3:::pkg-artifacts-team/packages/*"]
     condition {
       test     = "StringEquals"
       variable = "s3:x-amz-server-side-encryption"
@@ -66,22 +110,43 @@ resource "aws_iam_policy" "api_kms_s3_managed" {
   name = "api-kms-s3-dev"
   policy = jsonencode({
     Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Action = [
-        "kms:Encrypt",
-        "kms:Decrypt",
-        "kms:ReEncrypt*",
-        "kms:GenerateDataKey*",
-        "kms:DescribeKey"
-      ],
-      Resource = module.monitoring.kms_key_arn,
-      Condition = {
-        StringEquals = {
-          "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+    Statement = [
+      {
+        Sid    = "KMSViaS3Service"
+        Effect = "Allow",
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = [
+          module.monitoring.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ],
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.us-east-1.amazonaws.com"
+          }
         }
+      },
+      {
+        Sid    = "KMSDirectAccess"
+        Effect = "Allow",
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = [
+          module.monitoring.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
       }
-    }]
+    ]
   })
 }
 

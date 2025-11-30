@@ -1,7 +1,4 @@
-# Data source for JWT secret
-data "aws_secretsmanager_secret" "jwt_secret" {
-  name = "acme-jwt-secret"
-}
+# JWT secret ARN is now passed as a variable instead of using a data source
 
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
@@ -37,7 +34,7 @@ resource "aws_ecs_task_definition" "validator_task" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = 1024
-  memory                   = 4096  # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
+  memory                   = 4096 # Increased from 2048 to handle memory-intensive operations and prevent OOM kills
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
 
@@ -45,15 +42,15 @@ resource "aws_ecs_task_definition" "validator_task" {
     name  = "validator-service"
     image = "838693051036.dkr.ecr.us-east-1.amazonaws.com/validator-service:${var.image_tag}"
 
-    memoryReservation = 3072  # Increased from 1536
-    memory             = 4096  # Increased from 2048 to handle memory-intensive operations
-    
+    memoryReservation = 3072 # Increased from 1536
+    memory            = 4096 # Increased from 2048 to handle memory-intensive operations
+
     portMappings = [{
       containerPort = 3000
       hostPort      = 3000
       protocol      = "tcp"
     }]
-    
+
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30
@@ -108,7 +105,11 @@ resource "aws_ecs_task_definition" "validator_task" {
     secrets = [
       {
         name      = "JWT_SECRET"
-        valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
+        valueFrom = "${var.jwt_secret_arn}:jwt_secret::"
+      },
+      {
+        name      = "GITHUB_TOKEN"
+        valueFrom = "${var.github_token_secret_arn}:github_token::"
       }
     ]
 
@@ -320,7 +321,10 @@ resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = data.aws_secretsmanager_secret.jwt_secret.arn
+        Resource = [
+          var.jwt_secret_arn,
+          var.github_token_secret_arn
+        ]
       },
       {
         Effect = "Allow"
@@ -363,18 +367,40 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "S3AccessPointPermissions"
+        Effect = "Allow"
+        Action = [
+          "s3:GetAccessPoint",
+          "s3:ListAccessPoint"
+        ]
+        Resource = ["arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"]
+      },
+      {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:ListBucket",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:GetObjectTagging",
+          "s3:PutObjectTagging",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:CreateMultipartUpload",
+          "s3:CompleteMultipartUpload",
+          "s3:UploadPart"
         ]
         Resource = [
-          "arn:aws:s3:::${var.artifacts_bucket}",
           "arn:aws:s3:::${var.artifacts_bucket}/*",
-          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3",
           "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*"
+        ]
+      },
+      {
+        Sid    = "S3ListBucketViaAccessPoint"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:::${var.artifacts_bucket}",
+          "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3"
         ]
       },
       {
@@ -392,6 +418,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         Resource = values(var.ddb_tables_arnmap)
       },
       {
+        Sid    = "KMSViaS3Service"
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
@@ -400,12 +427,30 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey"
         ]
-        Resource = [var.kms_key_arn]
+        Resource = [
+          var.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
         Condition = {
           StringEquals = {
             "kms:ViaService" = "s3.us-east-1.amazonaws.com"
           }
         }
+      },
+      {
+        Sid    = "KMSDirectAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [
+          var.kms_key_arn,
+          "arn:aws:kms:us-east-1:838693051036:key/ffc50d00-4db1-4676-a63a-c7c1e286abfc"
+        ]
       },
       {
         Effect = "Allow"
@@ -419,6 +464,18 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "arn:aws:logs:*:*:log-group:/acme-api/*",
           "arn:aws:logs:*:*:log-group:/ecs/validator-service"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "ACME/Performance"
+          }
+        }
       }
     ]
   })
@@ -453,4 +510,8 @@ output "validator_cluster_arn" {
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.validator_repo.repository_url
+}
+
+output "ecs_task_role_arn" {
+  value = aws_iam_role.ecs_task_role.arn
 }

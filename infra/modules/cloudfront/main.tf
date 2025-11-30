@@ -14,7 +14,7 @@ resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   is_ipv6_enabled     = true
   comment             = "ACME Registry Frontend and API Distribution"
-  default_root_object = ""  # FastAPI handles root routing, not a static file
+  default_root_object = ""               # FastAPI handles root routing, not a static file
   price_class         = "PriceClass_100" # Use only North America and Europe
 
   # Custom error responses for SPA-like behavior
@@ -98,7 +98,7 @@ resource "aws_cloudfront_distribution" "main" {
 
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
-    default_ttl            = 86400  # 1 day
+    default_ttl            = 86400    # 1 day
     max_ttl                = 31536000 # 1 year
   }
 
@@ -186,7 +186,7 @@ resource "aws_cloudfront_distribution" "main" {
 
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
-    default_ttl            = 60  # Cache health checks for 1 minute
+    default_ttl            = 60 # Cache health checks for 1 minute
     max_ttl                = 300
   }
 

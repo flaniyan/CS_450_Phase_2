@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, performance_track]
   workflow_dispatch:
 
 permissions:
@@ -132,34 +132,6 @@ jobs:
             echo "Backend bucket ${BACKEND_BUCKET} already exists"
           fi
 
-      - name: Ensure S3 access point exists
-        shell: bash
-        continue-on-error: true
-        run: |
-          ACCESS_POINT_NAME="cs450-s3"
-          BUCKET_NAME="pkg-artifacts"
-          ACCOUNT_ID="838693051036"
-          
-          # Check if access point exists
-          if ! aws s3control get-access-point \
-            --account-id "${ACCOUNT_ID}" \
-            --name "${ACCESS_POINT_NAME}" \
-            --region "${{ env.AWS_REGION }}" >/dev/null 2>&1; then
-            echo "S3 access point ${ACCESS_POINT_NAME} does not exist. Creating it..."
-            
-            # Create access point
-            aws s3control create-access-point \
-              --account-id "${ACCOUNT_ID}" \
-              --name "${ACCESS_POINT_NAME}" \
-              --bucket "${BUCKET_NAME}" \
-              --region "${{ env.AWS_REGION }}" \
-              --public-access-block-configuration \
-              "BlockPublicAcls=true,BlockPublicPolicy=true,IgnorePublicAcls=true,RestrictPublicBuckets=true" || \
-            echo "Failed to create access point (may already exist or bucket doesn't exist)"
-          else
-            echo "S3 access point ${ACCESS_POINT_NAME} already exists"
-          fi
-
       - name: Terraform init
         shell: bash
         working-directory: ${{ env.TF_DIR }}
@@ -211,7 +183,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
-      - name: Import existing DynamoDB tables
+      - name: Import S3 bucket if not in state
         shell: bash
         working-directory: ${{ env.TF_DIR }}
         continue-on-error: true
@@ -219,65 +191,34 @@ jobs:
           TF_VAR_aws_region: us-east-1
           TF_VAR_artifacts_bucket: pkg-artifacts
         run: |
-          # Import existing tables only if not already in state
-          # Check if resource exists in state before importing
-          import_table() {
-            local resource_address=$1
-            local table_name=$2
-            if terraform state show "${resource_address}" >/dev/null 2>&1; then
-              echo "Table ${table_name} already in state, skipping import"
+          # Import S3 bucket if it exists but is not in state
+          if ! terraform state show module.s3.aws_s3_bucket.artifacts >/dev/null 2>&1; then
+            echo "S3 bucket not in state, importing..."
+            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_bucket.artifacts pkg-artifacts || echo "Failed to import bucket (may not exist)"
+          else
+            echo "S3 bucket already in state, skipping import"
+          fi
+          
+          # Import encryption configuration if not in state
+          if ! terraform state show module.s3.aws_s3_bucket_server_side_encryption_configuration.this >/dev/null 2>&1; then
+            echo "S3 encryption configuration not in state, importing..."
+            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_bucket_server_side_encryption_configuration.this pkg-artifacts || echo "Failed to import encryption config"
+          else
+            echo "S3 encryption configuration already in state, skipping import"
+          fi
+          
+          # Import access point if not in state and exists in AWS
+          if ! terraform state show module.s3.aws_s3_access_point.main >/dev/null 2>&1; then
+            # Check if access point exists in AWS before importing
+            if aws s3control get-access-point --account-id 838693051036 --name cs450-s3 --region us-east-1 >/dev/null 2>&1; then
+              echo "S3 access point not in state, importing..."
+              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_access_point.main 838693051036:cs450-s3 || echo "Failed to import access point"
             else
-              echo "Importing ${table_name}..."
-              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" "${resource_address}" "${table_name}" || echo "Failed to import ${table_name} (may not exist or already imported)"
+              echo "S3 access point does not exist in AWS, will be created by Terraform"
             fi
-          }
-          
-          import_table 'module.ddb.aws_dynamodb_table.this["artifacts"]' artifacts
-          import_table 'module.ddb.aws_dynamodb_table.this["users"]' users
-          import_table 'module.ddb.aws_dynamodb_table.this["uploads"]' uploads
-          import_table 'module.ddb.aws_dynamodb_table.this["tokens"]' tokens
-          import_table 'module.ddb.aws_dynamodb_table.this["packages"]' packages
-          import_table 'module.ddb.aws_dynamodb_table.this["downloads"]' downloads
-
-      - name: Cleanup orphaned Terraform state resources
-        shell: bash
-        working-directory: ${{ env.TF_DIR }}
-        continue-on-error: true
-        run: |
-          echo "Cleaning up orphaned resources from Terraform state..."
-          
-          # Function to safely remove from state
-          remove_from_state() {
-            local resource=$1
-            if terraform state list | grep -q "^${resource}$"; then
-              echo "Removing ${resource} from state..."
-              terraform state rm "${resource}" || echo "Failed to remove ${resource} (may not exist)"
-            else
-              echo "${resource} not in state, skipping"
-            fi
-          }
-          
-          # Remove Config resources
-          echo "Removing Config resources..."
-          remove_from_state "module.config.aws_config_configuration_recorder.config_recorder"
-          remove_from_state "module.config.aws_config_configuration_recorder_status.config_recorder"
-          remove_from_state "module.config.aws_config_delivery_channel.config_delivery"
-          remove_from_state "module.config.aws_iam_role.config_role"
-          remove_from_state "module.config.aws_s3_bucket.config_snapshots"
-          
-          # Remove CloudTrail resources
-          echo "Removing CloudTrail resources..."
-          remove_from_state "module.monitoring.aws_cloudtrail.audit_trail"
-          remove_from_state "module.monitoring.aws_s3_bucket.cloudtrail_logs"
-          remove_from_state "module.monitoring.aws_s3_bucket_policy.cloudtrail_logs"
-          
-          # Remove S3 bucket from state (it's used as Terraform backend, so shouldn't be managed by Terraform)
-          echo "Removing S3 backend bucket from state (bucket is used as Terraform backend)..."
-          remove_from_state "module.s3.aws_s3_bucket.artifacts"
-          remove_from_state "module.s3.aws_s3_bucket_server_side_encryption_configuration.this"
-          remove_from_state "module.s3.aws_s3_bucket_versioning.this"
-          
-          echo "Cleanup complete"
+          else
+            echo "S3 access point already in state, skipping import"
+          fi
 
       - name: Terraform plan
         shell: bash

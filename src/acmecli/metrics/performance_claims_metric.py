@@ -149,9 +149,21 @@ class PerformanceClaimsMetric:
 
             # Look for evaluation datasets - expanded
             eval_datasets = [
-                "glue", "superglue", "glue benchmark", "superglue benchmark",
-                "squad", "squad1", "squad2", "squad 1.1", "squad 2.0", "squad dataset",
-                "coco", "ms coco", "coco dataset", "coco 2017", "coco 2014",
+                "glue",
+                "superglue",
+                "glue benchmark",
+                "superglue benchmark",
+                "squad",
+                "squad1",
+                "squad2",
+                "squad 1.1",
+                "squad 2.0",
+                "squad dataset",
+                "coco",
+                "ms coco",
+                "coco dataset",
+                "coco 2017",
+                "coco 2014",
                 "imagenet",
                 "imagenet-1k",
                 "imagenet-21k",
@@ -251,7 +263,7 @@ class PerformanceClaimsMetric:
 
         if readme_text:
             score = max(score, 0.5)
-        
+
         if meta:
             score = max(score, 0.5)
 

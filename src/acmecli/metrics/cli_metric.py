@@ -18,10 +18,10 @@ class CLIMetric:
             score += 0.2
         if "automation" in readme_text or "script" in readme_text:
             score += 0.3
-        
+
         if readme_text:
             score = max(score, 0.5)
-        
+
         value = round(float(min(1.0, max(0.5, score))), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
