@@ -6,6 +6,7 @@
 ### Issues
 - Extra Chars Handling for ReGex endpoint
 - Some of the GET calls still aren't working
+init
 
 
 

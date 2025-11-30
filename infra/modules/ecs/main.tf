@@ -1,7 +1,4 @@
-# Data source for JWT secret
-data "aws_secretsmanager_secret" "jwt_secret" {
-  name = "acme-jwt-secret"
-}
+# JWT secret ARN is now passed as a variable instead of using a data source
 
 # ECR Repository
 resource "aws_ecr_repository" "validator_repo" {
@@ -108,7 +105,7 @@ resource "aws_ecs_task_definition" "validator_task" {
     secrets = [
       {
         name      = "JWT_SECRET"
-        valueFrom = "${data.aws_secretsmanager_secret.jwt_secret.arn}:jwt_secret::"
+        valueFrom = "${var.jwt_secret_arn}:jwt_secret::"
       },
       {
         name      = "GITHUB_TOKEN"
@@ -325,7 +322,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets_policy" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          data.aws_secretsmanager_secret.jwt_secret.arn,
+          var.jwt_secret_arn,
           var.github_token_secret_arn
         ]
       },
@@ -513,4 +510,8 @@ output "validator_cluster_arn" {
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.validator_repo.repository_url
+}
+
+output "ecs_task_role_arn" {
+  value = aws_iam_role.ecs_task_role.arn
 }
