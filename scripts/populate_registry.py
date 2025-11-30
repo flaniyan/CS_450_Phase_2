@@ -6,9 +6,16 @@ This script populates the ACME Model Registry with 500 real models from HuggingF
 including the required Tiny-LLM model for performance testing.
 
 Usage:
+    # Use remote API (default):
     python scripts/populate_registry.py
     
-    # Or with custom API URL:
+    # Use local server:
+    python scripts/populate_registry.py --local
+    
+    # Use custom URL:
+    python scripts/populate_registry.py --url http://localhost:8000
+    
+    # Or with environment variable:
     API_BASE_URL=http://localhost:3000 python scripts/populate_registry.py
 """
 import sys
@@ -16,14 +23,17 @@ import os
 import time
 import requests
 import json
+import argparse
 from pathlib import Path
 from typing import List, Dict, Optional
 
 # Add parent directory to path to import from src
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "https://pc1plkgnbd.execute-api.us-east-1.amazonaws.com/prod")
+# Default URLs
+DEFAULT_API_URL = "https://pwuvrbcdu3.execute-api.us-east-1.amazonaws.com/prod"
+DEFAULT_LOCAL_URL = "http://localhost:8000"
+
 HF_API_BASE = "https://huggingface.co/api"
 MAX_RETRIES = 3
 RETRY_DELAY = 2
@@ -140,17 +150,71 @@ def ingest_model(api_base_url: str, model_id: str, auth_token: Optional[str], re
         return False
 
 
+def parse_arguments():
+    """Parse command-line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Populate ACME Model Registry with 500 HuggingFace models",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/populate_registry.py              # Use remote API (default)
+  python scripts/populate_registry.py --local      # Use local server (localhost:8000)
+  python scripts/populate_registry.py --url http://localhost:3000  # Use custom URL
+        """
+    )
+    
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--local",
+        action="store_true",
+        help=f"Use local server at {DEFAULT_LOCAL_URL}"
+    )
+    group.add_argument(
+        "--url",
+        type=str,
+        metavar="URL",
+        help="Custom API base URL (e.g., http://localhost:8000)"
+    )
+    
+    return parser.parse_args()
+
+
+def get_api_base_url(args: argparse.Namespace) -> str:
+    """Determine the API base URL from arguments or environment"""
+    # Priority: CLI args > environment variable > default
+    if args.url:
+        return args.url.rstrip("/")
+    elif args.local:
+        return DEFAULT_LOCAL_URL
+    elif os.getenv("API_BASE_URL"):
+        return os.getenv("API_BASE_URL").rstrip("/")
+    else:
+        return DEFAULT_API_URL
+
+
 def main():
     """Main function to populate registry with 500 models"""
+    # Parse command-line arguments
+    args = parse_arguments()
+    api_base_url = get_api_base_url(args)
+    
     print("=" * 80)
     print("ACME Model Registry Population Script")
     print("=" * 80)
-    print(f"API Base URL: {API_BASE_URL}")
+    print(f"API Base URL: {api_base_url}")
+    if args.local:
+        print("Mode: Local")
+    elif args.url:
+        print(f"Mode: Custom URL")
+    elif os.getenv("API_BASE_URL"):
+        print("Mode: Environment Variable")
+    else:
+        print("Mode: Remote API (default)")
     print()
     
     # Get authentication token
     print("Authenticating...")
-    auth_token = get_authentication_token(API_BASE_URL)
+    auth_token = get_authentication_token(api_base_url)
     if auth_token:
         print("✓ Authentication successful")
     else:
@@ -182,7 +246,7 @@ def main():
     for i, model_id in enumerate(models, 1):
         print(f"[{i}/{len(models)}] Ingesting: {model_id}")
         
-        result = ingest_model(API_BASE_URL, model_id, auth_token)
+        result = ingest_model(api_base_url, model_id, auth_token)
         if result:
             successful += 1
         else:
