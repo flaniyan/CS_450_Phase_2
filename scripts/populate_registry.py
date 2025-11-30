@@ -162,13 +162,14 @@ def get_dynamodb_table():
         return None
 
 
-def download_from_huggingface(model_id: str, version: str = "main", download_all: bool = True) -> bytes:
+def download_from_huggingface(model_id: str, version: str = "main", download_all: bool = False) -> bytes:
     """Download model files from HuggingFace and create ZIP
     
     Args:
         model_id: HuggingFace model identifier
         version: Model version/branch (default: "main")
         download_all: If True, download all files including model weights. If False, only essential/config files.
+                      WARNING: download_all=True can be very slow for large models (several GB).
     """
     try:
         clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
@@ -185,8 +186,54 @@ def download_from_huggingface(model_id: str, version: str = "main", download_all
                 all_files.append(sibling["rfilename"])
         
         if download_all:
-            # Download ALL files (including model weights: .bin, .safetensors, .pt, .pth, etc.)
-            files_to_download = all_files
+            # Smart download: essential files + ONE main weight file + tokenizer files
+            # This matches what the original API does but includes the actual model binary
+            
+            # 1. Essential files (config, README, etc.)
+            essential_files = []
+            for filename in all_files:
+                if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
+                    essential_files.append(filename)
+                elif filename.startswith("README") or filename.startswith("readme"):
+                    essential_files.append(filename)
+                elif filename in ["config.json", "LICENSE", "license", "LICENCE", "licence"]:
+                    essential_files.append(filename)
+            
+            # 2. Find ONE main weight file (prefer .safetensors, then pytorch_model.bin, skip CoreML/others)
+            weight_files = [f for f in all_files if any(f.endswith(ext) for ext in [".safetensors", ".bin", ".pt", ".pth"]) 
+                          and not any(exclude in f.lower() for exclude in ["coreml", "onnx", "tf", "tflite", "mlpackage"])]
+            main_weight_file = None
+            if weight_files:
+                # Prefer model.safetensors or pytorch_model.bin in root
+                for preferred in ["model.safetensors", "pytorch_model.bin"]:
+                    if preferred in weight_files:
+                        main_weight_file = preferred
+                        break
+                # If no preferred found, take the first one (smallest path usually)
+                if not main_weight_file:
+                    # Prefer files in root directory (shorter paths)
+                    root_files = [f for f in weight_files if "/" not in f]
+                    main_weight_file = root_files[0] if root_files else weight_files[0]
+            
+            # 3. Tokenizer files (needed for model to work)
+            tokenizer_files = [f for f in all_files if "tokenizer" in f.lower() and 
+                              (f.endswith(".json") or f.endswith(".model") or "vocab" in f.lower())]
+            
+            # Combine: essential + one weight file + tokenizer files
+            files_to_download = essential_files.copy()
+            if main_weight_file:
+                files_to_download.append(main_weight_file)
+            files_to_download.extend(tokenizer_files)
+            
+            # Remove duplicates
+            files_to_download = list(dict.fromkeys(files_to_download))  # Preserves order
+            
+            print(f"    Downloading {len(files_to_download)} files", end="")
+            if main_weight_file:
+                print(f" (1 weight file: {main_weight_file.split('/')[-1]})", end="")
+            if tokenizer_files:
+                print(f", {len(tokenizer_files)} tokenizer file(s)", end="")
+            print("...")
         else:
             # Get essential files only (same logic as s3_service.py)
             essential_files = []
@@ -202,16 +249,51 @@ def download_from_huggingface(model_id: str, version: str = "main", download_all
         if not files_to_download:
             raise Exception(f"No files found for model {clean_model_id}")
         
+        if not download_all:
+            print(f"    Downloading {len(files_to_download)} essential file(s)...")
+        
         # Download files and create ZIP
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zip_file:
             def download_file(url: str, filename: str) -> tuple:
                 try:
-                    file_response = requests.get(url, timeout=300)  # Increased timeout for large model files
+                    is_large_file = any(filename.endswith(ext) for ext in [".bin", ".safetensors", ".pt", ".pth", ".ckpt"])
+                    if is_large_file:
+                        print(f"      Downloading {filename} (model weights, may take a moment)...")
+                    else:
+                        print(f"      Downloading {filename}...")
+                    
+                    # Use streaming for large files, regular for small ones
+                    if is_large_file:
+                        file_response = requests.get(url, timeout=600, stream=True)
+                    else:
+                        file_response = requests.get(url, timeout=120)
+                    
                     if file_response.status_code == 200:
-                        return (filename, file_response.content)
+                        if is_large_file and hasattr(file_response, 'iter_content'):
+                            # Stream large files to avoid memory issues
+                            content = b""
+                            for chunk in file_response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    content += chunk
+                        else:
+                            content = file_response.content
+                        
+                        size_mb = len(content) / (1024 * 1024)
+                        if size_mb > 1:
+                            print(f"      ✓ Downloaded {filename} ({size_mb:.2f} MB)")
+                        else:
+                            size_kb = len(content) / 1024
+                            print(f"      ✓ Downloaded {filename} ({size_kb:.1f} KB)")
+                        return (filename, content)
+                    else:
+                        print(f"      ✗ Failed to download {filename}: HTTP {file_response.status_code}")
+                        return (filename, None)
+                except requests.exceptions.Timeout:
+                    print(f"      ✗ Timeout downloading {filename} (file may be too large)")
                     return (filename, None)
-                except Exception:
+                except Exception as e:
+                    print(f"      ✗ Error downloading {filename}: {str(e)}")
                     return (filename, None)
             
             urls = [
@@ -219,21 +301,32 @@ def download_from_huggingface(model_id: str, version: str = "main", download_all
                 for filename in files_to_download
             ]
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = {
-                    executor.submit(download_file, url, filename): filename
-                    for url, filename in urls
-                }
-                
-                downloaded_count = 0
-                for future in as_completed(futures):
-                    filename, content = future.result()
-                    if content:
-                        zip_file.writestr(filename, content)
-                        downloaded_count += 1
-                
-                if downloaded_count == 0:
-                    raise Exception(f"Failed to download any files for model {clean_model_id}")
+            # Download sequentially to avoid overwhelming memory and network
+            # This also gives better progress visibility
+            downloaded_count = 0
+            failed_count = 0
+            total_size = 0
+            
+            for i, (url, filename) in enumerate(urls, 1):
+                filename_result, content = download_file(url, filename)
+                if content:
+                    zip_file.writestr(filename_result, content)
+                    downloaded_count += 1
+                    total_size += len(content)
+                else:
+                    failed_count += 1
+                    # Don't fail completely if a non-critical file fails
+                    if filename in ["config.json"]:
+                        raise Exception(f"Failed to download critical file: {filename}")
+            
+            if downloaded_count == 0:
+                raise Exception(f"Failed to download any files for model {clean_model_id}")
+            
+            if failed_count > 0:
+                print(f"    ⚠ {failed_count} file(s) failed to download (continuing with {downloaded_count} successful)")
+            
+            total_mb = total_size / (1024 * 1024)
+            print(f"    Total downloaded: {total_mb:.2f} MB ({downloaded_count} files)")
         
         return output.getvalue()
     except Exception as e:
@@ -300,7 +393,8 @@ def create_dummy_model_metadata(table, model_id: str, version: str = "main") -> 
 def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main", skip_missing: bool = True) -> tuple:
     """
     Ingest model in performance mode: download from HF and upload to S3 at performance/ path.
-    Actually downloads and uploads all models (not just metadata).
+    - Tiny-LLM: Downloads full model including binary (needed for performance testing)
+    - Other models: Downloads only essential files (config, README, etc.) for speed
     
     Returns:
         (success: bool, status: Optional[str]) where status can be:
@@ -316,9 +410,21 @@ def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version
     
     # Full ingestion: download and upload to S3
     try:
-        print(f"  Downloading all files from HuggingFace (including model weights)...")
-        zip_content = download_from_huggingface(model_id, version, download_all=True)
-        print(f"  Downloaded {len(zip_content)} bytes")
+        # Tiny-LLM needs the full model (including binary) for performance testing
+        # Other models only need essential files for registry population
+        is_tiny_llm = (model_id == REQUIRED_MODEL)
+        
+        if is_tiny_llm:
+            print(f"  Downloading full model from HuggingFace (including model weights for performance testing)...")
+            # Download essential files + ONE main weight file + tokenizer files
+            zip_content = download_from_huggingface(model_id, version, download_all=True)
+        else:
+            print(f"  Downloading essential files from HuggingFace (config, README, etc.)...")
+            # Download only essential files (no model weights - faster!)
+            zip_content = download_from_huggingface(model_id, version, download_all=False)
+        
+        zip_size_mb = len(zip_content) / (1024 * 1024)
+        print(f"  ✓ Downloaded {len(zip_content):,} bytes ({zip_size_mb:.2f} MB) total")
         
         print(f"  Uploading to S3 at performance/ path...")
         s3_key = upload_model_to_performance_s3(s3, ap_arn, model_id, version, zip_content)
@@ -622,7 +728,9 @@ def main_performance_mode():
     models = models[:500]
     
     print(f"Will populate registry with {len(models)} models")
-    print(f"  - All models will be downloaded from HuggingFace and uploaded to performance/ S3 path")
+    print(f"  - Tiny-LLM: Full model download (including binary - needed for performance testing)")
+    print(f"  - Other {len(models) - 1} models: Essential files only (config, README, etc. - for speed)")
+    print(f"  - All files will be uploaded to performance/ S3 path")
     print()
     
     # Start processing

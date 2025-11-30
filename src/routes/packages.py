@@ -156,7 +156,7 @@ def download_model_file(
     ),
 ):
     try:
-        file_content = download_model(model_id, version, component)
+        file_content = download_model(model_id, version, component, use_performance_path=False)
         return StreamingResponse(
             io.BytesIO(file_content),
             media_type="application/zip",
@@ -171,6 +171,44 @@ def download_model_file(
         if error_code == "NoSuchKey":
             raise HTTPException(
                 status_code=404, detail=f"Model {model_id} version {version} not found"
+            )
+        elif error_code == "NoSuchBucket":
+            raise HTTPException(status_code=500, detail="S3 bucket not found")
+        elif error_code == "AccessDenied":
+            raise HTTPException(status_code=500, detail="Access denied to S3 bucket")
+        else:
+            raise HTTPException(status_code=500, detail=f"S3 error: {error_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@router.get("/performance/{model_id}/{version}/model.zip")
+def download_performance_model_file(
+    model_id: str,
+    version: str,
+    component: str = Query(
+        "full", description="Component to download: 'full', 'weights', or 'datasets'"
+    ),
+):
+    """
+    Download model from performance/ S3 path for performance testing.
+    """
+    try:
+        file_content = download_model(model_id, version, component, use_performance_path=True)
+        return StreamingResponse(
+            io.BytesIO(file_content),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip"
+            },
+        )
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code == "NoSuchKey":
+            raise HTTPException(
+                status_code=404, detail=f"Model {model_id} version {version} not found in performance/ path"
             )
         elif error_code == "NoSuchBucket":
             raise HTTPException(status_code=500, detail="S3 bucket not found")

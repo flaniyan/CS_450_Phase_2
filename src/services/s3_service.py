@@ -291,7 +291,7 @@ def upload_model(
             )
 
 
-def download_model(model_id: str, version: str, component: str = "full") -> bytes:
+def download_model(model_id: str, version: str, component: str = "full", use_performance_path: bool = False) -> bytes:
     if not aws_available:
         raise HTTPException(
             status_code=503,
@@ -302,7 +302,9 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
     from .performance.instrumentation import measure_operation, publish_metric
 
     try:
-        s3_key = f"models/{model_id}/{version}/model.zip"
+        # Use performance/ path if specified, otherwise models/
+        path_prefix = "performance" if use_performance_path else "models"
+        s3_key = f"{path_prefix}/{model_id}/{version}/model.zip"
 
         # Measure S3 download latency
         with measure_operation("S3DownloadLatency", {"Component": "S3"}):
@@ -322,12 +324,12 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             try:
                 result = extract_model_component(zip_content, component)
                 print(
-                    f"AWS S3 download successful: {model_id} v{version} ({component})"
+                    f"AWS S3 download successful: {model_id} v{version} ({component}) from {path_prefix}/"
                 )
                 return result
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-        print(f"AWS S3 download successful: {model_id} v{version} (full)")
+        print(f"AWS S3 download successful: {model_id} v{version} (full) from {path_prefix}/")
         return zip_content
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
