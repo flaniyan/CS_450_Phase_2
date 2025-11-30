@@ -347,14 +347,14 @@ async def startup_event():
     logger.info("=== END REGISTERED ROUTES ===")
     ensure_default_admin()
 
-    # Initialize _artifact_storage from DynamoDB (for datasets and code)
+    # Initialize _artifact_storage from DynamoDB (for models, datasets, and code)
     # This ensures immediate consistency for queries
     try:
         global _artifact_storage
         all_artifacts = list_all_artifacts()
         for artifact in all_artifacts:
             artifact_type = artifact.get("type", "")
-            if artifact_type in ["dataset", "code"]:
+            if artifact_type in ["model", "dataset", "code"]:
                 artifact_id = artifact.get("id", "")
                 if artifact_id:
                     _artifact_storage[artifact_id] = {
@@ -365,7 +365,7 @@ async def startup_event():
                         "url": artifact.get("url", ""),
                     }
         logger.info(
-            f"Initialized _artifact_storage with {len(_artifact_storage)} dataset/code artifacts"
+            f"Initialized _artifact_storage with {len(_artifact_storage)} artifacts (models, datasets, and code)"
         )
     except Exception as e:
         logger.warning(
@@ -382,7 +382,7 @@ _rating_results = {}  # Store rating results by artifact_id
 _rating_start_times = {}  # Track when ratings started to detect stuck ratings
 _rating_lock = threading.Lock()  # Lock for thread-safe access to rating data structures
 
-# In-memory storage for dataset and code artifacts (for immediate consistency in queries)
+# In-memory storage for models, datasets, and code artifacts (for immediate consistency in queries)
 # Key: artifact_id, Value: dict with name, type, version, id, url
 # This provides immediate consistency like the reference code's _artifact_storage
 _artifact_storage = {}
@@ -2951,6 +2951,16 @@ async def post_artifact_ingest(request: Request):
                 if code_name:
                     artifact_data["code_name"] = code_name
                 save_artifact(artifact_id, artifact_data)
+                
+                # Store in _artifact_storage for immediate consistency
+                global _artifact_storage
+                _artifact_storage[artifact_id] = {
+                    "name": name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                }
 
                 # Link to existing datasets/code if found
                 if readme_text:
@@ -3313,6 +3323,16 @@ async def create_artifact_by_type(artifact_type: str, request: Request):
                 if code_name:
                     artifact_data["code_name"] = code_name
                 save_artifact(artifact_id, artifact_data)
+                
+                # Store in _artifact_storage for immediate consistency
+                global _artifact_storage
+                _artifact_storage[artifact_id] = {
+                    "name": artifact_name,
+                    "type": artifact_type,
+                    "version": version,
+                    "id": artifact_id,
+                    "url": url,
+                }
 
                 # Link to existing datasets/code if found
                 if readme_text:
