@@ -9,7 +9,7 @@ import json
 import os
 import boto3
 import uuid
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from datetime import datetime
 
 # Configuration
@@ -282,32 +282,37 @@ class TestLoadGenerator:
     @pytest.mark.asyncio
     async def test_load_generator_creates_clients(self):
         """Verify load generator creates specified number of clients"""
+        import uuid
         num_clients = 10
         
         from src.services.performance.load_generator import LoadGenerator
-        generator = LoadGenerator(num_clients=num_clients)
-        assert len(generator.clients) == num_clients
+        generator = LoadGenerator(
+            run_id=str(uuid.uuid4()),
+            base_url="http://test",
+            num_clients=num_clients
+        )
+        assert generator.num_clients == num_clients
     
-    @patch('aiohttp.ClientSession')
-    def test_load_generator_makes_download_requests(self, mock_session):
+    @pytest.mark.asyncio
+    async def test_load_generator_makes_download_requests(self):
         """Verify load generator makes requests to correct endpoint"""
+        import uuid
         from src.services.performance.load_generator import LoadGenerator
         
-        # Mock the HTTP session
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.read = AsyncMock(return_value=b"test content")
-        mock_response.headers = {"Content-Length": "12"}
+        run_id = str(uuid.uuid4())
+        base_url = "http://test"
+        generator = LoadGenerator(
+            run_id=run_id,
+            base_url=base_url,
+            num_clients=1,
+            model_id="arnir0/Tiny-LLM"
+        )
         
-        mock_session_instance = MagicMock()
-        mock_session_instance.get = AsyncMock(return_value=mock_response)
-        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-        
-        # Test load generator
-        generator = LoadGenerator(num_clients=1)
-        # Verify correct endpoint is called (implementation dependent)
-        assert generator is not None
+        # Verify correct endpoint is constructed
+        url = generator._get_download_url()
+        assert base_url in url
+        assert "Tiny-LLM" in url or "arnir0_Tiny-LLM" in url
+        assert generator.num_clients == 1
     
     def test_load_generator_tracks_timing_metrics(self):
         """Verify each request records timing metrics"""

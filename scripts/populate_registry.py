@@ -15,6 +15,9 @@ Usage:
     # Use custom URL:
     python scripts/populate_registry.py --url http://localhost:8000
     
+    # Performance mode (stores in performance/ S3 path, bypasses API):
+    python scripts/populate_registry.py --performance
+    
     # Or with environment variable:
     API_BASE_URL=http://localhost:3000 python scripts/populate_registry.py
 """
@@ -24,8 +27,15 @@ import time
 import requests
 import json
 import argparse
+import boto3
+import uuid
+import zipfile
+import io
 from pathlib import Path
 from typing import List, Dict, Optional
+from datetime import datetime, timezone
+from botocore.exceptions import ClientError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path to import from src
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -37,6 +47,11 @@ DEFAULT_LOCAL_URL = "http://localhost:8000"
 HF_API_BASE = "https://huggingface.co/api"
 MAX_RETRIES = 3
 RETRY_DELAY = 2
+
+# AWS Configuration (for performance mode)
+REGION = os.getenv("AWS_REGION", "us-east-1")
+ACCESS_POINT_NAME = os.getenv("S3_ACCESS_POINT_NAME", "cs450-s3")
+ARTIFACTS_TABLE = os.getenv("DDB_TABLE_ARTIFACTS", "artifacts")
 
 # Required model (must be included)
 REQUIRED_MODEL = "arnir0/Tiny-LLM"
@@ -107,8 +122,234 @@ def get_hardcoded_models(count: int = 500) -> List[str]:
 # Removed check_model_exists - we'll skip existence checks and just ingest
 
 
-def ingest_model(api_base_url: str, model_id: str, auth_token: Optional[str], retry: int = 0) -> bool:
-    """Ingest a single model into the registry"""
+def check_model_exists_on_hf(model_id: str) -> bool:
+    """Check if a model exists on HuggingFace before attempting ingestion"""
+    try:
+        clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+        api_url = f"https://huggingface.co/api/models/{clean_model_id}"
+        response = requests.get(api_url, timeout=10)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def get_s3_client_and_arn():
+    """Get S3 client and access point ARN for performance mode"""
+    try:
+        sts = boto3.client("sts", region_name=REGION)
+        account_id = sts.get_caller_identity()["Account"]
+        ap_arn = f"arn:aws:s3:{REGION}:{account_id}:accesspoint/{ACCESS_POINT_NAME}"
+        s3 = boto3.client("s3", region_name=REGION)
+        # Test connection
+        s3.list_objects_v2(Bucket=ap_arn, Prefix="performance/", MaxKeys=1)
+        return s3, ap_arn
+    except Exception as e:
+        print(f"Error initializing S3: {e}")
+        print("Make sure AWS credentials are configured and S3 access point exists")
+        return None, None
+
+
+def get_dynamodb_table():
+    """Get DynamoDB artifacts table for performance mode"""
+    try:
+        dynamodb = boto3.resource("dynamodb", region_name=REGION)
+        table = dynamodb.Table(ARTIFACTS_TABLE)
+        # Test access
+        table.scan(Limit=1)
+        return table
+    except Exception as e:
+        print(f"Error accessing DynamoDB: {e}")
+        return None
+
+
+def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
+    """Download model files from HuggingFace and create ZIP"""
+    try:
+        clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
+        api_url = f"https://huggingface.co/api/models/{clean_model_id}"
+        
+        response = requests.get(api_url, timeout=30)
+        if response.status_code != 200:
+            raise Exception(f"Model {clean_model_id} not found on HuggingFace")
+        
+        model_info = response.json()
+        all_files = []
+        for sibling in model_info.get("siblings", []):
+            if sibling.get("rfilename"):
+                all_files.append(sibling["rfilename"])
+        
+        # Get essential files (same logic as s3_service.py)
+        essential_files = []
+        for filename in all_files:
+            if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
+                essential_files.append(filename)
+            elif filename.startswith("README") or filename.startswith("readme"):
+                essential_files.append(filename)
+            elif filename in ["config.json", "LICENSE", "license", "LICENCE", "licence"]:
+                essential_files.append(filename)
+        
+        if not essential_files:
+            raise Exception(f"No essential files found for model {clean_model_id}")
+        
+        # Download files and create ZIP
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            def download_file(url: str, filename: str) -> tuple:
+                try:
+                    file_response = requests.get(url, timeout=120)
+                    if file_response.status_code == 200:
+                        return (filename, file_response.content)
+                    return (filename, None)
+                except Exception:
+                    return (filename, None)
+            
+            urls = [
+                (f"https://huggingface.co/{clean_model_id}/resolve/{version}/{filename}", filename)
+                for filename in essential_files
+            ]
+            
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {
+                    executor.submit(download_file, url, filename): filename
+                    for url, filename in urls
+                }
+                
+                for future in as_completed(futures):
+                    filename, content = future.result()
+                    if content:
+                        zip_file.writestr(filename, content)
+        
+        return output.getvalue()
+    except Exception as e:
+        raise Exception(f"Failed to download from HuggingFace: {str(e)}")
+
+
+def upload_model_to_performance_s3(s3, ap_arn: str, model_id: str, version: str, zip_content: bytes) -> str:
+    """Upload model ZIP directly to S3 at performance/ path"""
+    # Sanitize model_id for S3 key (same logic as s3_service.py)
+    safe_model_id = (
+        model_id.replace("https://huggingface.co/", "")
+        .replace("http://huggingface.co/", "")
+        .replace("/", "_")
+        .replace(":", "_")
+        .replace("\\", "_")
+        .replace("?", "_")
+        .replace("*", "_")
+        .replace('"', "_")
+        .replace("<", "_")
+        .replace(">", "_")
+        .replace("|", "_")
+    )
+    safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+    
+    # Use performance/ prefix instead of models/
+    s3_key = f"performance/{safe_model_id}/{safe_version}/model.zip"
+    
+    s3.put_object(
+        Bucket=ap_arn,
+        Key=s3_key,
+        Body=zip_content,
+        ContentType="application/zip"
+    )
+    
+    return s3_key
+
+
+def create_dummy_model_metadata(table, model_id: str, version: str = "main") -> bool:
+    """Create a dummy model entry in DynamoDB (metadata-only, no actual file)"""
+    try:
+        artifact_id = str(uuid.uuid4())
+        safe_model_id = (
+            model_id.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+        )
+        
+        item = {
+            "artifact_id": artifact_id,
+            "name": model_id,  # Original name
+            "type": "model",
+            "version": version,
+            "url": f"https://huggingface.co/{model_id}",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        
+        table.put_item(Item=item)
+        return True
+    except Exception as e:
+        print(f"  Error creating metadata for {model_id}: {str(e)}")
+        return False
+
+
+def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main") -> tuple:
+    """
+    Ingest model in performance mode: download from HF and upload to S3 at performance/ path.
+    Only does full ingestion for Tiny-LLM, creates dummy metadata for others.
+    
+    Returns:
+        (success: bool, status: Optional[str])
+    """
+    # Only fully ingest Tiny-LLM, others are just metadata
+    if model_id != REQUIRED_MODEL:
+        # Create dummy metadata entry
+        if create_dummy_model_metadata(table, model_id, version):
+            return (True, None)
+        else:
+            return (False, "error")
+    
+    # Full ingestion for Tiny-LLM
+    try:
+        print(f"  Downloading from HuggingFace...")
+        zip_content = download_from_huggingface(model_id, version)
+        print(f"  Downloaded {len(zip_content)} bytes")
+        
+        print(f"  Uploading to S3 at performance/ path...")
+        s3_key = upload_model_to_performance_s3(s3, ap_arn, model_id, version, zip_content)
+        print(f"  ✓ Uploaded to: {s3_key}")
+        
+        # Create metadata in DynamoDB
+        artifact_id = str(uuid.uuid4())
+        safe_model_id = (
+            model_id.replace("https://huggingface.co/", "")
+            .replace("http://huggingface.co/", "")
+            .replace("/", "_")
+        )
+        
+        item = {
+            "artifact_id": artifact_id,
+            "name": model_id,
+            "type": "model",
+            "version": version,
+            "url": f"https://huggingface.co/{model_id}",
+            "s3_path": s3_key,  # Store the performance/ path
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        
+        table.put_item(Item=item)
+        print(f"  ✓ Metadata created in DynamoDB")
+        
+        return (True, None)
+    except Exception as e:
+        print(f"  ✗ Failed: {str(e)}")
+        return (False, "error")
+
+
+def ingest_model(api_base_url: str, model_id: str, auth_token: Optional[str], retry: int = 0, skip_missing: bool = True) -> tuple:
+    """
+    Ingest a single model into the registry.
+    
+    Returns:
+        (success: bool, status: Optional[str]) where status can be:
+        - None: success
+        - "not_found": model doesn't exist on HuggingFace (404)
+        - "error": other error occurred
+    """
+    # Quick check if model exists on HuggingFace (avoid unnecessary API calls)
+    if skip_missing:
+        if not check_model_exists_on_hf(model_id):
+            print(f"⊘ Model not found on HuggingFace: {model_id} (skipping)")
+            return (False, "not_found")
+    
     try:
         headers = {"Content-Type": "application/json"}
         if auth_token:
@@ -124,30 +365,39 @@ def ingest_model(api_base_url: str, model_id: str, auth_token: Optional[str], re
         
         if response.status_code in [200, 201, 202]:
             print(f"✓ Successfully ingested: {model_id}")
-            return True
+            return (True, None)
         elif response.status_code == 409:
             print(f"⊘ Already exists: {model_id} (skipping)")
-            return True  # Consider existing models as success
+            return (True, None)  # Consider existing models as success
+        elif response.status_code == 404:
+            # Model doesn't exist - don't retry
+            error_text = response.text[:200]
+            if "not found on HuggingFace" in error_text or "not found" in error_text.lower():
+                print(f"⊘ Model not found: {model_id} (skipping)")
+                return (False, "not_found")
+            else:
+                print(f"✗ Failed to ingest {model_id}: HTTP {response.status_code} - {error_text}")
+                return (False, "error")
         else:
             print(f"✗ Failed to ingest {model_id}: HTTP {response.status_code} - {response.text[:200]}")
             if retry < MAX_RETRIES:
                 print(f"  Retrying in {RETRY_DELAY}s... (attempt {retry + 1}/{MAX_RETRIES})")
                 time.sleep(RETRY_DELAY)
-                return ingest_model(api_base_url, model_id, auth_token, retry + 1)
-            return False
+                return ingest_model(api_base_url, model_id, auth_token, retry + 1, skip_missing=False)
+            return (False, "error")
             
     except requests.exceptions.Timeout:
         print(f"✗ Timeout ingesting {model_id}")
         if retry < MAX_RETRIES:
             time.sleep(RETRY_DELAY)
-            return ingest_model(api_base_url, model_id, auth_token, retry + 1)
-        return False
+            return ingest_model(api_base_url, model_id, auth_token, retry + 1, skip_missing=False)
+        return (False, "error")
     except Exception as e:
         print(f"✗ Error ingesting {model_id}: {str(e)}")
         if retry < MAX_RETRIES:
             time.sleep(RETRY_DELAY)
-            return ingest_model(api_base_url, model_id, auth_token, retry + 1)
-        return False
+            return ingest_model(api_base_url, model_id, auth_token, retry + 1, skip_missing=False)
+        return (False, "error")
 
 
 def parse_arguments():
@@ -160,20 +410,30 @@ Examples:
   python scripts/populate_registry.py              # Use remote API (default)
   python scripts/populate_registry.py --local      # Use local server (localhost:8000)
   python scripts/populate_registry.py --url http://localhost:3000  # Use custom URL
+  python scripts/populate_registry.py --performance  # Performance mode (stores in performance/ S3 path)
+  python scripts/populate_registry.py --local --performance  # Performance mode (bypasses API, --local ignored)
         """
     )
     
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
+    # --local and --url are mutually exclusive
+    url_group = parser.add_mutually_exclusive_group()
+    url_group.add_argument(
         "--local",
         action="store_true",
-        help=f"Use local server at {DEFAULT_LOCAL_URL}"
+        help=f"Use local server at {DEFAULT_LOCAL_URL} (ignored in --performance mode)"
     )
-    group.add_argument(
+    url_group.add_argument(
         "--url",
         type=str,
         metavar="URL",
-        help="Custom API base URL (e.g., http://localhost:8000)"
+        help="Custom API base URL (e.g., http://localhost:8000). Ignored in --performance mode."
+    )
+    
+    # --performance is independent (bypasses API, so --local/--url are ignored)
+    parser.add_argument(
+        "--performance",
+        action="store_true",
+        help="Performance mode: directly upload to S3 at performance/ path (bypasses API, --local/--url ignored)"
     )
     
     return parser.parse_args()
@@ -196,6 +456,14 @@ def main():
     """Main function to populate registry with 500 models"""
     # Parse command-line arguments
     args = parse_arguments()
+    
+    # Performance mode: direct S3/DynamoDB writes (bypasses API, ignores --local/--url)
+    if args.performance:
+        if args.local or args.url:
+            print("Note: --performance mode bypasses API, so --local/--url flags are ignored")
+        return main_performance_mode()
+    
+    # Normal mode: use API
     api_base_url = get_api_base_url(args)
     
     print("=" * 80)
@@ -235,20 +503,24 @@ def main():
     print(f"Will ingest {len(models)} models (starting with {REQUIRED_MODEL})")
     print()
     
-    # Start ingesting models (skip existence check - just ingest, API will handle duplicates)
+    # Start ingesting models (check existence first to avoid wasting time)
     print("Starting model ingestion...")
     print("=" * 80)
     
     successful = 0
     failed = 0
-    skipped = 0
+    not_found = 0
+    not_found_models = []
     
     for i, model_id in enumerate(models, 1):
         print(f"[{i}/{len(models)}] Ingesting: {model_id}")
         
-        result = ingest_model(api_base_url, model_id, auth_token)
+        result, status = ingest_model(api_base_url, model_id, auth_token, skip_missing=True)
         if result:
             successful += 1
+        elif status == "not_found":
+            not_found += 1
+            not_found_models.append(model_id)
         else:
             failed += 1
         
@@ -259,7 +531,7 @@ def main():
         # Progress update every 50 models
         if i % 50 == 0:
             print()
-            print(f"Progress: {i}/{len(models)} ({successful} successful, {failed} failed)")
+            print(f"Progress: {i}/{len(models)} ({successful} successful, {failed} failed, {not_found} not found)")
             print()
     
     # Final summary
@@ -269,9 +541,20 @@ def main():
     print("=" * 80)
     print(f"Total models processed: {len(models)}")
     print(f"  - Successfully ingested: {successful}")
-    print(f"  - Failed: {failed}")
+    print(f"  - Not found on HuggingFace: {not_found}")
+    print(f"  - Failed (other errors): {failed}")
     print(f"Total successful: {successful}")
     print()
+    
+    # Report models that don't exist
+    if not_found_models:
+        print(f"⚠ {len(not_found_models)} models not found on HuggingFace:")
+        print("   These models should be removed from the list:")
+        for model in not_found_models[:20]:  # Show first 20
+            print(f"     - {model}")
+        if len(not_found_models) > 20:
+            print(f"     ... and {len(not_found_models) - 20} more")
+        print()
     
     # Verify Tiny-LLM was in the list
     if REQUIRED_MODEL in models:
@@ -282,6 +565,114 @@ def main():
         return 0
     else:
         print(f"⚠ Successfully ingested {successful} models (target: 500)")
+        return 1 if failed > successful else 0
+
+
+def main_performance_mode():
+    """Main function for performance mode: direct S3/DynamoDB writes"""
+    print("=" * 80)
+    print("ACME Model Registry Population Script")
+    print("PERFORMANCE MODE (stores in performance/ S3 path)")
+    print("=" * 80)
+    print()
+    
+    # Initialize AWS clients
+    print("Initializing AWS clients...")
+    s3, ap_arn = get_s3_client_and_arn()
+    if not s3 or not ap_arn:
+        print("✗ Failed to initialize S3 client")
+        return 1
+    
+    table = get_dynamodb_table()
+    if not table:
+        print("✗ Failed to access DynamoDB table")
+        return 1
+    
+    print(f"✓ S3 Access Point: {ap_arn}")
+    print(f"✓ DynamoDB Table: {ARTIFACTS_TABLE}")
+    print()
+    
+    # Get model list
+    models = get_hardcoded_models(count=500)
+    if REQUIRED_MODEL in models:
+        models.remove(REQUIRED_MODEL)
+    models.insert(0, REQUIRED_MODEL)
+    models = models[:500]
+    
+    print(f"Will populate registry with {len(models)} models")
+    print(f"  - 1 real model (Tiny-LLM) stored in performance/ S3 path")
+    print(f"  - {len(models) - 1} dummy models (metadata-only in DynamoDB)")
+    print()
+    
+    # Start processing
+    print("Starting model processing...")
+    print("=" * 80)
+    
+    successful = 0
+    failed = 0
+    not_found = 0
+    not_found_models = []
+    tiny_llm_ingested = False
+    
+    for i, model_id in enumerate(models, 1):
+        print(f"[{i}/{len(models)}] Processing: {model_id}")
+        
+        # Check if model exists on HuggingFace (only matters for Tiny-LLM)
+        if model_id == REQUIRED_MODEL:
+            if not check_model_exists_on_hf(model_id):
+                print(f"⊘ Model not found on HuggingFace: {model_id} (skipping)")
+                not_found += 1
+                not_found_models.append(model_id)
+                continue
+        
+        result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main")
+        if result:
+            successful += 1
+            if model_id == REQUIRED_MODEL:
+                tiny_llm_ingested = True
+                print(f"✓ Successfully ingested {model_id} to performance/ S3 path")
+            else:
+                print(f"✓ Created metadata entry for {model_id}")
+        else:
+            failed += 1
+        
+        # Small delay
+        if i < len(models):
+            time.sleep(0.1)
+        
+        # Progress update
+        if i % 50 == 0:
+            print()
+            print(f"Progress: {i}/{len(models)} ({successful} successful, {failed} failed, {not_found} not found)")
+            print()
+    
+    # Final summary
+    print()
+    print("=" * 80)
+    print("Ingestion Summary")
+    print("=" * 80)
+    print(f"Total models processed: {len(models)}")
+    print(f"  - Tiny-LLM ingested to performance/ S3 path: {'✓' if tiny_llm_ingested else '✗'}")
+    print(f"  - Dummy metadata entries created: {successful - (1 if tiny_llm_ingested else 0)}")
+    print(f"  - Not found on HuggingFace: {not_found}")
+    print(f"  - Failed (other errors): {failed}")
+    print(f"Total successful: {successful}")
+    print()
+    
+    if not_found_models:
+        print(f"⚠ {len(not_found_models)} models not found on HuggingFace:")
+        for model in not_found_models[:10]:
+            print(f"     - {model}")
+        if len(not_found_models) > 10:
+            print(f"     ... and {len(not_found_models) - 10} more")
+        print()
+    
+    if successful >= 500:
+        print("✓ Registry populated with 500 models for performance testing")
+        print("  Note: Models stored in performance/ S3 path (not models/)")
+        return 0
+    else:
+        print(f"⚠ Only {successful} models processed (target: 500)")
         return 1 if failed > successful else 0
 
 

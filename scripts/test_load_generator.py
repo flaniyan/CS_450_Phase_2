@@ -8,8 +8,8 @@ import sys
 import uuid
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to allow imports from src
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.services.performance.load_generator import LoadGenerator
 
