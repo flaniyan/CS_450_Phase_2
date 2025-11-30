@@ -207,10 +207,15 @@ jobs:
             echo "S3 encryption configuration already in state, skipping import"
           fi
           
-          # Import access point if not in state
+          # Import access point if not in state and exists in AWS
           if ! terraform state show module.s3.aws_s3_access_point.main >/dev/null 2>&1; then
-            echo "S3 access point not in state, importing..."
-            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_access_point.main 838693051036:cs450-s3 || echo "Failed to import access point"
+            # Check if access point exists in AWS before importing
+            if aws s3control get-access-point --account-id 838693051036 --name cs450-s3 --region us-east-1 >/dev/null 2>&1; then
+              echo "S3 access point not in state, importing..."
+              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_access_point.main 838693051036:cs450-s3 || echo "Failed to import access point"
+            else
+              echo "S3 access point does not exist in AWS, will be created by Terraform"
+            fi
           else
             echo "S3 access point already in state, skipping import"
           fi
