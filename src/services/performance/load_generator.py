@@ -52,6 +52,7 @@ class LoadGenerator:
         model_id: str = "arnir0/Tiny-LLM",
         version: str = "main",
         duration_seconds: Optional[int] = None,
+        use_performance_path: bool = False,
     ):
         """
         Initialize load generator.
@@ -63,6 +64,7 @@ class LoadGenerator:
             model_id: Model ID to download
             version: Model version (default: "main")
             duration_seconds: Optional duration limit in seconds
+            use_performance_path: If True, use performance/ path instead of models/ path
         """
         self.run_id = run_id
         self.base_url = base_url.rstrip("/")
@@ -70,6 +72,7 @@ class LoadGenerator:
         self.model_id = model_id
         self.version = version
         self.duration_seconds = duration_seconds
+        self.use_performance_path = use_performance_path
 
         # Store metrics
         self.metrics: List[Metric] = []
@@ -91,7 +94,9 @@ class LoadGenerator:
             .replace(">", "_")
             .replace("|", "_")
         )
-        return f"{self.base_url}/models/{sanitized_model_id}/{self.version}/model.zip"
+        # Use performance/ path if specified, otherwise models/
+        path_prefix = "performance" if self.use_performance_path else "models"
+        return f"{self.base_url}/{path_prefix}/{sanitized_model_id}/{self.version}/model.zip"
 
     async def _make_request(
         self, client_id: int, session: aiohttp.ClientSession

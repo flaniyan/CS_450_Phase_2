@@ -45,6 +45,7 @@ def _run_load_generator_async(
         asyncio.set_event_loop(loop)
 
         # Create and run load generator
+        # Use performance path for performance testing
         generator = LoadGenerator(
             run_id=run_id,
             base_url=base_url,
@@ -52,6 +53,7 @@ def _run_load_generator_async(
             model_id=model_id,
             version=version,
             duration_seconds=duration_seconds,
+            use_performance_path=True,  # Use performance/ path for performance testing
         )
 
         _load_generators[run_id] = generator

@@ -162,8 +162,14 @@ def get_dynamodb_table():
         return None
 
 
-def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
-    """Download model files from HuggingFace and create ZIP"""
+def download_from_huggingface(model_id: str, version: str = "main", download_all: bool = True) -> bytes:
+    """Download model files from HuggingFace and create ZIP
+    
+    Args:
+        model_id: HuggingFace model identifier
+        version: Model version/branch (default: "main")
+        download_all: If True, download all files including model weights. If False, only essential/config files.
+    """
     try:
         clean_model_id = model_id.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "")
         api_url = f"https://huggingface.co/api/models/{clean_model_id}"
@@ -178,25 +184,30 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
             if sibling.get("rfilename"):
                 all_files.append(sibling["rfilename"])
         
-        # Get essential files (same logic as s3_service.py)
-        essential_files = []
-        for filename in all_files:
-            if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
-                essential_files.append(filename)
-            elif filename.startswith("README") or filename.startswith("readme"):
-                essential_files.append(filename)
-            elif filename in ["config.json", "LICENSE", "license", "LICENCE", "licence"]:
-                essential_files.append(filename)
+        if download_all:
+            # Download ALL files (including model weights: .bin, .safetensors, .pt, .pth, etc.)
+            files_to_download = all_files
+        else:
+            # Get essential files only (same logic as s3_service.py)
+            essential_files = []
+            for filename in all_files:
+                if filename.endswith((".json", ".md", ".txt", ".yml", ".yaml")):
+                    essential_files.append(filename)
+                elif filename.startswith("README") or filename.startswith("readme"):
+                    essential_files.append(filename)
+                elif filename in ["config.json", "LICENSE", "license", "LICENCE", "licence"]:
+                    essential_files.append(filename)
+            files_to_download = essential_files
         
-        if not essential_files:
-            raise Exception(f"No essential files found for model {clean_model_id}")
+        if not files_to_download:
+            raise Exception(f"No files found for model {clean_model_id}")
         
         # Download files and create ZIP
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zip_file:
             def download_file(url: str, filename: str) -> tuple:
                 try:
-                    file_response = requests.get(url, timeout=120)
+                    file_response = requests.get(url, timeout=300)  # Increased timeout for large model files
                     if file_response.status_code == 200:
                         return (filename, file_response.content)
                     return (filename, None)
@@ -205,7 +216,7 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
             
             urls = [
                 (f"https://huggingface.co/{clean_model_id}/resolve/{version}/{filename}", filename)
-                for filename in essential_files
+                for filename in files_to_download
             ]
             
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -214,10 +225,15 @@ def download_from_huggingface(model_id: str, version: str = "main") -> bytes:
                     for url, filename in urls
                 }
                 
+                downloaded_count = 0
                 for future in as_completed(futures):
                     filename, content = future.result()
                     if content:
                         zip_file.writestr(filename, content)
+                        downloaded_count += 1
+                
+                if downloaded_count == 0:
+                    raise Exception(f"Failed to download any files for model {clean_model_id}")
         
         return output.getvalue()
     except Exception as e:
@@ -281,26 +297,27 @@ def create_dummy_model_metadata(table, model_id: str, version: str = "main") -> 
         return False
 
 
-def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main") -> tuple:
+def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main", skip_missing: bool = True) -> tuple:
     """
     Ingest model in performance mode: download from HF and upload to S3 at performance/ path.
-    Only does full ingestion for Tiny-LLM, creates dummy metadata for others.
+    Actually downloads and uploads all models (not just metadata).
     
     Returns:
-        (success: bool, status: Optional[str])
+        (success: bool, status: Optional[str]) where status can be:
+        - None: success
+        - "not_found": model doesn't exist on HuggingFace (404)
+        - "error": other error occurred
     """
-    # Only fully ingest Tiny-LLM, others are just metadata
-    if model_id != REQUIRED_MODEL:
-        # Create dummy metadata entry
-        if create_dummy_model_metadata(table, model_id, version):
-            return (True, None)
-        else:
-            return (False, "error")
+    # Check if model exists on HuggingFace first
+    if skip_missing:
+        if not check_model_exists_on_hf(model_id):
+            print(f"  ⊘ Model not found on HuggingFace: {model_id} (skipping)")
+            return (False, "not_found")
     
-    # Full ingestion for Tiny-LLM
+    # Full ingestion: download and upload to S3
     try:
-        print(f"  Downloading from HuggingFace...")
-        zip_content = download_from_huggingface(model_id, version)
+        print(f"  Downloading all files from HuggingFace (including model weights)...")
+        zip_content = download_from_huggingface(model_id, version, download_all=True)
         print(f"  Downloaded {len(zip_content)} bytes")
         
         print(f"  Uploading to S3 at performance/ path...")
@@ -330,8 +347,13 @@ def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version
         
         return (True, None)
     except Exception as e:
-        print(f"  ✗ Failed: {str(e)}")
-        return (False, "error")
+        error_msg = str(e)
+        if "not found" in error_msg.lower() or "404" in error_msg:
+            print(f"  ⊘ Model not found: {model_id} (skipping)")
+            return (False, "not_found")
+        else:
+            print(f"  ✗ Failed: {error_msg}")
+            return (False, "error")
 
 
 def ingest_model(api_base_url: str, model_id: str, auth_token: Optional[str], retry: int = 0, skip_missing: bool = True) -> tuple:
@@ -600,12 +622,11 @@ def main_performance_mode():
     models = models[:500]
     
     print(f"Will populate registry with {len(models)} models")
-    print(f"  - 1 real model (Tiny-LLM) stored in performance/ S3 path")
-    print(f"  - {len(models) - 1} dummy models (metadata-only in DynamoDB)")
+    print(f"  - All models will be downloaded from HuggingFace and uploaded to performance/ S3 path")
     print()
     
     # Start processing
-    print("Starting model processing...")
+    print("Starting model ingestion (this will take a while - downloading and uploading 500 models)...")
     print("=" * 80)
     
     successful = 0
@@ -615,30 +636,23 @@ def main_performance_mode():
     tiny_llm_ingested = False
     
     for i, model_id in enumerate(models, 1):
-        print(f"[{i}/{len(models)}] Processing: {model_id}")
+        print(f"[{i}/{len(models)}] Ingesting: {model_id}")
         
-        # Check if model exists on HuggingFace (only matters for Tiny-LLM)
-        if model_id == REQUIRED_MODEL:
-            if not check_model_exists_on_hf(model_id):
-                print(f"⊘ Model not found on HuggingFace: {model_id} (skipping)")
-                not_found += 1
-                not_found_models.append(model_id)
-                continue
-        
-        result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main")
+        result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main", skip_missing=True)
         if result:
             successful += 1
             if model_id == REQUIRED_MODEL:
                 tiny_llm_ingested = True
-                print(f"✓ Successfully ingested {model_id} to performance/ S3 path")
-            else:
-                print(f"✓ Created metadata entry for {model_id}")
+            print(f"✓ Successfully ingested {model_id} to performance/ S3 path")
+        elif status == "not_found":
+            not_found += 1
+            not_found_models.append(model_id)
         else:
             failed += 1
         
-        # Small delay
+        # Small delay to avoid rate limiting
         if i < len(models):
-            time.sleep(0.1)
+            time.sleep(0.5)
         
         # Progress update
         if i % 50 == 0:
@@ -652,8 +666,8 @@ def main_performance_mode():
     print("Ingestion Summary")
     print("=" * 80)
     print(f"Total models processed: {len(models)}")
-    print(f"  - Tiny-LLM ingested to performance/ S3 path: {'✓' if tiny_llm_ingested else '✗'}")
-    print(f"  - Dummy metadata entries created: {successful - (1 if tiny_llm_ingested else 0)}")
+    print(f"  - Successfully ingested to performance/ S3 path: {successful}")
+    print(f"  - Tiny-LLM ingested: {'✓' if tiny_llm_ingested else '✗'}")
     print(f"  - Not found on HuggingFace: {not_found}")
     print(f"  - Failed (other errors): {failed}")
     print(f"Total successful: {successful}")

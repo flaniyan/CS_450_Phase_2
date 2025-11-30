@@ -34,6 +34,7 @@ async def test_load_generator():
     print()
     
     # Create load generator
+    # Set use_performance_path=True to use performance/ S3 path instead of models/
     generator = LoadGenerator(
         run_id=run_id,
         base_url=base_url,
@@ -41,6 +42,7 @@ async def test_load_generator():
         model_id=model_id,
         version="main",
         duration_seconds=None,  # Single request per client
+        use_performance_path=True,  # Use performance/ path for performance testing
     )
     
     print("Starting load generation...")
