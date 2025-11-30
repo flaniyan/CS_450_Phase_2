@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
 import re
+import asyncio
 from botocore.exceptions import ClientError
 from ..services.s3_service import (
     upload_model,
@@ -183,7 +184,7 @@ def download_model_file(
 
 
 @router.get("/performance/{model_id}/{version}/model.zip")
-def download_performance_model_file(
+async def download_performance_model_file(
     model_id: str,
     version: str,
     component: str = Query(
@@ -192,9 +193,13 @@ def download_performance_model_file(
 ):
     """
     Download model from performance/ S3 path for performance testing.
+    Async endpoint to handle concurrent requests efficiently.
     """
     try:
-        file_content = download_model(model_id, version, component, use_performance_path=True)
+        # Run the blocking S3 download in a thread pool to avoid blocking the event loop
+        file_content = await asyncio.to_thread(
+            download_model, model_id, version, component, True  # use_performance_path=True
+        )
         return StreamingResponse(
             io.BytesIO(file_content),
             media_type="application/zip",
