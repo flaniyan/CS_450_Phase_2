@@ -1,7 +1,4 @@
-# Data source to get the ECS task role ARN
-data "aws_iam_role" "ecs_task_role" {
-  name = "ecs-task-role"
-}
+# ECS task role ARN is now obtained from the ECS module output
 
 # Access point policy (MUST be separate)
 resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
@@ -15,7 +12,7 @@ resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
         Sid    = "AllowEcsTaskRoleListBucket"
         Effect = "Allow"
         Principal = {
-          AWS = data.aws_iam_role.ecs_task_role.arn
+          AWS = module.ecs.ecs_task_role_arn
         }
         Action = [
           "s3:ListBucket"
@@ -28,7 +25,7 @@ resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
         Sid    = "AllowEcsTaskRoleObjectAccess"
         Effect = "Allow"
         Principal = {
-          AWS = data.aws_iam_role.ecs_task_role.arn
+          AWS = module.ecs.ecs_task_role_arn
         }
         Action = [
           "s3:GetObject",
@@ -41,4 +38,6 @@ resource "aws_s3control_access_point_policy" "cs450_s3_policy" {
       }
     ]
   })
+  
+  depends_on = [module.ecs]
 }

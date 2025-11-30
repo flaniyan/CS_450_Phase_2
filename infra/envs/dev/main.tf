@@ -8,7 +8,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "pkg-artifacts"
+    bucket         = "acme-terraform-state-dev-es"
     key            = "terraform/state"
     region         = "us-east-1"
     dynamodb_table = "terraform-state-lock"
@@ -64,6 +64,7 @@ module "ecs" {
   ddb_tables_arnmap       = local.ddb_tables_arnmap
   kms_key_arn             = module.monitoring.kms_key_arn
   github_token_secret_arn = module.monitoring.github_token_secret_arn
+  jwt_secret_arn          = module.monitoring.jwt_secret_arn
 }
 
 module "api_gateway" {
@@ -87,6 +88,8 @@ output "ddb_tables" { value = local.ddb_tables_arnmap }
 output "validator_service_url" { value = module.ecs.validator_service_url }
 output "validator_cluster_arn" { value = module.ecs.validator_cluster_arn }
 output "ecr_repository_url" { value = module.ecs.ecr_repository_url }
+output "api_gateway_url" { value = module.api_gateway.api_gateway_invoke_url }
+output "api_gateway_endpoints" { value = module.api_gateway.api_endpoints }
 output "cloudfront_url" { value = module.cloudfront.cloudfront_url }
 output "cloudfront_domain_name" { value = module.cloudfront.cloudfront_domain_name }
 output "cloudfront_distribution_id" { value = module.cloudfront.cloudfront_distribution_id }

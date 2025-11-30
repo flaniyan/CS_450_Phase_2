@@ -113,6 +113,11 @@ resource "aws_iam_role_policy_attachment" "validator_attach_kms" {
 # Validator — Secrets Manager (JWT secret)
 resource "aws_iam_policy" "validator_secrets_jwt_ro_managed" {
   name = "validator-secrets-jwt-ro"
+  
+  lifecycle {
+    create_before_destroy = true
+  }
+  
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
