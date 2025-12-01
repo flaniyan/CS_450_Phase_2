@@ -344,9 +344,8 @@ def download_from_huggingface(model_id: str, version: str = "main", download_all
         raise Exception(f"Failed to download from HuggingFace: {str(e)}")
 
 
-def upload_model_to_performance_s3(s3, ap_arn: str, model_id: str, version: str, zip_content: bytes) -> str:
-    """Upload model ZIP directly to S3 at performance/ path"""
-    # Sanitize model_id for S3 key (same logic as s3_service.py)
+def get_performance_s3_key(model_id: str, version: str = "main") -> str:
+    """Get the S3 key for a model in performance/ path (without uploading)"""
     safe_model_id = (
         model_id.replace("https://huggingface.co/", "")
         .replace("http://huggingface.co/", "")
@@ -361,9 +360,28 @@ def upload_model_to_performance_s3(s3, ap_arn: str, model_id: str, version: str,
         .replace("|", "_")
     )
     safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
-    
-    # Use performance/ prefix instead of models/
-    s3_key = f"performance/{safe_model_id}/{safe_version}/model.zip"
+    return f"performance/{safe_model_id}/{safe_version}/model.zip"
+
+
+def check_model_exists_in_s3(s3, ap_arn: str, model_id: str, version: str = "main") -> bool:
+    """Check if a model already exists in S3 at performance/ path"""
+    try:
+        s3_key = get_performance_s3_key(model_id, version)
+        s3.head_object(Bucket=ap_arn, Key=s3_key)
+        return True
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "404" or error_code == "NoSuchKey":
+            return False
+        # For other errors, assume it doesn't exist and let the upload handle it
+        return False
+    except Exception:
+        return False
+
+
+def upload_model_to_performance_s3(s3, ap_arn: str, model_id: str, version: str, zip_content: bytes) -> str:
+    """Upload model ZIP directly to S3 at performance/ path"""
+    s3_key = get_performance_s3_key(model_id, version)
     
     s3.put_object(
         Bucket=ap_arn,
@@ -401,18 +419,28 @@ def create_dummy_model_metadata(table, model_id: str, version: str = "main") -> 
         return False
 
 
-def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main", skip_missing: bool = True) -> tuple:
+def ingest_model_performance_mode(s3, ap_arn: str, table, model_id: str, version: str = "main", skip_missing: bool = True, skip_existing: bool = True) -> tuple:
     """
     Ingest model in performance mode: download from HF and upload to S3 at performance/ path.
     - Tiny-LLM: Downloads full model including binary (needed for performance testing)
     - Other models: Downloads only essential files (config, README, etc.) for speed
     
+    Args:
+        skip_existing: If True, skip models that already exist in S3 (avoids re-uploading)
+    
     Returns:
         (success: bool, status: Optional[str]) where status can be:
         - None: success
+        - "already_exists": model already exists in S3 (skipped)
         - "not_found": model doesn't exist on HuggingFace (404)
         - "error": other error occurred
     """
+    # Check if model already exists in S3 (skip to avoid re-uploading)
+    if skip_existing:
+        if check_model_exists_in_s3(s3, ap_arn, model_id, version):
+            print(f"  ⊘ Model already exists in S3: {model_id} (skipping)")
+            return (True, "already_exists")  # Count as success since it's already there
+    
     # Check if model exists on HuggingFace first
     if skip_missing:
         if not check_model_exists_on_hf(model_id):
@@ -768,12 +796,15 @@ def main_performance_mode():
         models_processed += 1
         print(f"[{models_processed}] Ingesting: {model_id} (Success: {successful}/{target_successful})")
         
-        result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main", skip_missing=True)
+        result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main", skip_missing=True, skip_existing=True)
         if result:
             successful += 1
             if model_id == REQUIRED_MODEL:
                 tiny_llm_ingested = True
-            print(f"✓ Successfully ingested {model_id} to performance/ S3 path ({successful}/{target_successful})")
+            if status == "already_exists":
+                print(f"⊘ Already exists (skipped): {model_id} ({successful}/{target_successful})")
+            else:
+                print(f"✓ Successfully ingested {model_id} to performance/ S3 path ({successful}/{target_successful})")
         elif status == "not_found":
             not_found += 1
             not_found_models.append(model_id)
