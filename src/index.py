@@ -917,25 +917,56 @@ async def list_artifacts(request: Request, offset: str = None):
                 )
             types_filter = query.get("types", [])
             if name == "*":
-                # Search _artifact_storage first for all artifact types (immediate consistency)
-                for artifact_id, artifact_data in _artifact_storage.items():
-                    artifact_type_stored = artifact_data.get("type", "")
-                    if not types_filter or artifact_type_stored in types_filter:
+                # Priority order: Database (source of truth) -> _artifact_storage (immediate consistency) -> S3 (for models)
+                # First, get all artifacts from database (this is the authoritative source)
+                all_artifacts = list_all_artifacts()
+                seen_ids = set()
+                seen_model_names = set()
+                
+                # Add all matching artifacts from database first
+                for artifact in all_artifacts:
+                    artifact_type_stored = artifact.get("type", "")
+                    artifact_id = artifact.get("id", "")
+                    artifact_name = artifact.get("name", "")
+                    
+                    # Only add if matches filter
+                    if artifact_id and (not types_filter or artifact_type_stored in types_filter):
                         results.append(
                             {
-                                "name": artifact_data.get("name", ""),
+                                "name": artifact_name or artifact_id,
                                 "id": artifact_id,
                                 "type": artifact_type_stored,
                             }
                         )
+                        seen_ids.add(artifact_id)
+                        if artifact_type_stored == "model" and artifact_name:
+                            seen_model_names.add(artifact_name)
                 
-                # Also search S3 for models (to catch any models not in _artifact_storage)
+                # Then add from _artifact_storage (for immediate consistency - catches newly ingested items)
+                for artifact_id, artifact_data in _artifact_storage.items():
+                    artifact_type_stored = artifact_data.get("type", "")
+                    artifact_name = artifact_data.get("name", "")
+                    
+                    # Only add if not already in results and matches filter
+                    if artifact_id not in seen_ids and (
+                        not types_filter or artifact_type_stored in types_filter
+                    ):
+                        results.append(
+                            {
+                                "name": artifact_name or artifact_id,
+                                "id": artifact_id,
+                                "type": artifact_type_stored,
+                            }
+                        )
+                        seen_ids.add(artifact_id)
+                        if artifact_type_stored == "model" and artifact_name:
+                            seen_model_names.add(artifact_name)
+                
+                # Finally, search S3 for models (to catch any models not in database or _artifact_storage)
                 # Use pagination to get ALL models, not just the first 1000
                 if not types_filter or "model" in types_filter:
-                    # Get all artifacts from database to map model names to artifact_ids
-                    all_artifacts = list_all_artifacts()
+                    # Build artifact_map from database for name-to-id mapping
                     artifact_map = {}
-                    seen_model_names = {r.get("name") for r in results if r.get("type") == "model"}
                     for artifact in all_artifacts:
                         if artifact.get("type") == "model":
                             artifact_name = artifact.get("name")
@@ -960,38 +991,23 @@ async def list_artifacts(request: Request, offset: str = None):
                     for model in all_s3_models:
                         if isinstance(model, dict):
                             model_name = model.get("name", "")
-                            # Skip if already in results from _artifact_storage
+                            # Skip if already in results
                             if model_name in seen_model_names:
                                 continue
                             # Look up artifact_id from database, fallback to model id/name
                             artifact_id = artifact_map.get(model_name, model.get("id", model_name))
-                            results.append(
-                                {
-                                    "name": model_name,
-                                    "id": artifact_id,
-                                    "type": "model",
-                                }
-                            )
-                            seen_model_names.add(model_name)
-
-                # Also get artifacts from database (for models and any missing datasets/code)
-                all_artifacts = list_all_artifacts()
-                seen_ids = {r.get("id") for r in results}  # Avoid duplicates
-                for artifact in all_artifacts:
-                    artifact_type_stored = artifact.get("type", "")
-                    artifact_id = artifact.get("id", "")
-                    # Only add if not already in results and matches filter
-                    if artifact_id not in seen_ids and (
-                        not types_filter or artifact_type_stored in types_filter
-                    ):
-                        results.append(
-                            {
-                                "name": artifact.get("name", artifact_id),
-                                "id": artifact_id,
-                                "type": artifact_type_stored,
-                            }
-                        )
-                        seen_ids.add(artifact_id)
+                            # Only add if not already in results (by id)
+                            if artifact_id not in seen_ids:
+                                results.append(
+                                    {
+                                        "name": model_name or artifact_id,
+                                        "id": artifact_id,
+                                        "type": "model",
+                                    }
+                                )
+                                seen_ids.add(artifact_id)
+                                if model_name:
+                                    seen_model_names.add(model_name)
             else:
                 # Exact name match - need to return only a single package per spec requirement
                 # Check all sources but return only the first exact match found
