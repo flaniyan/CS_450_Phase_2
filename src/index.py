@@ -837,45 +837,95 @@ def get_performance_results(run_id: str):
 
 @app.get("/health/components")
 def health_components(windowMinutes: int = 60, includeTimeline: bool = False):
+    """
+    Get component health details per OpenAPI spec.
+    Returns per-component health diagnostics including performance component.
+    """
     # Validate windowMinutes parameter
     if windowMinutes < 5 or windowMinutes > 1440:
         raise HTTPException(
             status_code=400, detail="windowMinutes must be between 5 and 1440"
         )
 
-    # Build component with required fields
     observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    component = {
+    components = []
+
+    # Validator Service Component
+    validator_component = {
         "id": "validator-service",
         "status": "ok",  # Required: must be one of: ok, degraded, critical, unknown
         "observed_at": observed_at,  # Required: datetime string in UTC
+        "display_name": "Validator Service",
+        "description": (
+            "Main API validator service handling artifact ingestion and validation"
+        ),
+        "metrics": {
+            "uptime_seconds": 3600,  # Example metric
+            "requests_processed": 0,
+        },
+        "issues": [],
+        "logs": [],
     }
-
-    # Add optional fields
-    component["display_name"] = "Validator Service"
-    component["description"] = (
-        "Main API validator service handling artifact ingestion and validation"
-    )
-
-    # Add metrics (optional)
-    component["metrics"] = {
-        "uptime_seconds": 3600,  # Example metric
-        "requests_processed": 0,
-    }
-
-    # Add issues (optional) - empty array if no issues
-    component["issues"] = []
-
-    # Add timeline if requested (optional)
+    
     if includeTimeline:
-        component["timeline"] = []  # Array of HealthTimelineEntry objects
+        validator_component["timeline"] = []
+    
+    components.append(validator_component)
 
-    # Add logs (optional) - empty array if no logs
-    component["logs"] = []
+    # Performance Component (per assignment requirements - workload triggerable from health dashboard)
+    try:
+        from .services.performance.workload_trigger import get_latest_workload_metrics
+        
+        # Get latest performance metrics if available
+        perf_metrics = get_latest_workload_metrics()
+        
+        performance_component = {
+            "id": "performance",
+            "status": "ok" if perf_metrics else "unknown",
+            "observed_at": observed_at,
+            "display_name": "Performance Testing",
+            "description": (
+                "Performance testing component for measuring system throughput and latency. "
+                "Workload can be triggered via POST /health/performance/workload. "
+                "Results retrieved via GET /health/performance/results/{run_id}."
+            ),
+            "metrics": perf_metrics if perf_metrics else {
+                "status": "no_runs_yet",
+                "message": "Trigger workload via POST /health/performance/workload to begin testing"
+            },
+            "issues": [],
+            "logs": [],
+        }
+        
+        if includeTimeline:
+            performance_component["timeline"] = []
+        
+        components.append(performance_component)
+    except Exception as e:
+        # If performance module not available, still add component with unknown status
+        logger.warning(f"Could not load performance metrics: {str(e)}")
+        performance_component = {
+            "id": "performance",
+            "status": "unknown",
+            "observed_at": observed_at,
+            "display_name": "Performance Testing",
+            "description": (
+                "Performance testing component for measuring system throughput and latency. "
+                "Workload triggerable from health dashboard."
+            ),
+            "metrics": {},
+            "issues": [{
+                "code": "PERF_MODULE_UNAVAILABLE",
+                "severity": "warning",
+                "summary": "Performance module not available",
+            }],
+            "logs": [],
+        }
+        components.append(performance_component)
 
-    # Build response with required fields
+    # Build response with required fields per OpenAPI spec
     response = {
-        "components": [component],  # Required: array of HealthComponentDetail
+        "components": components,  # Required: array of HealthComponentDetail
         "generated_at": datetime.now(timezone.utc)
         .isoformat()
         .replace("+00:00", "Z"),  # Required: datetime string in UTC
