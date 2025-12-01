@@ -917,7 +917,19 @@ async def list_artifacts(request: Request, offset: str = None):
                 )
             types_filter = query.get("types", [])
             if name == "*":
-                # Search S3 for models
+                # Search _artifact_storage first for all artifact types (immediate consistency)
+                for artifact_id, artifact_data in _artifact_storage.items():
+                    artifact_type_stored = artifact_data.get("type", "")
+                    if not types_filter or artifact_type_stored in types_filter:
+                        results.append(
+                            {
+                                "name": artifact_data.get("name", ""),
+                                "id": artifact_id,
+                                "type": artifact_type_stored,
+                            }
+                        )
+                
+                # Also search S3 for models (to catch any models not in _artifact_storage)
                 if not types_filter or "model" in types_filter:
                     result = list_models(limit=1000)
                     if result is None:
@@ -926,6 +938,7 @@ async def list_artifacts(request: Request, offset: str = None):
                     # Get all artifacts from database to map model names to artifact_ids
                     all_artifacts = list_all_artifacts()
                     artifact_map = {}
+                    seen_model_names = {r.get("name") for r in results if r.get("type") == "model"}
                     for artifact in all_artifacts:
                         if artifact.get("type") == "model":
                             artifact_name = artifact.get("name")
@@ -936,6 +949,9 @@ async def list_artifacts(request: Request, offset: str = None):
                     for model in models:
                         if isinstance(model, dict):
                             model_name = model.get("name", "")
+                            # Skip if already in results from _artifact_storage
+                            if model_name in seen_model_names:
+                                continue
                             # Look up artifact_id from database, fallback to model id/name
                             artifact_id = artifact_map.get(model_name, model.get("id", model_name))
                             results.append(
@@ -945,23 +961,7 @@ async def list_artifacts(request: Request, offset: str = None):
                                     "type": "model",
                                 }
                             )
-
-                # Search _artifact_storage for datasets and code (immediate consistency)
-                if (
-                    not types_filter
-                    or "dataset" in types_filter
-                    or "code" in types_filter
-                ):
-                    for artifact_id, artifact_data in _artifact_storage.items():
-                        artifact_type_stored = artifact_data.get("type", "")
-                        if not types_filter or artifact_type_stored in types_filter:
-                            results.append(
-                                {
-                                    "name": artifact_data.get("name", ""),
-                                    "id": artifact_id,
-                                    "type": artifact_type_stored,
-                                }
-                            )
+                            seen_model_names.add(model_name)
 
                 # Also get artifacts from database (for models and any missing datasets/code)
                 all_artifacts = list_all_artifacts()
@@ -986,7 +986,7 @@ async def list_artifacts(request: Request, offset: str = None):
                 # Check all sources but return only the first exact match found
                 seen_ids = set()
 
-                # Priority order: Database -> S3 -> In-memory storage
+                # Priority order: Database -> In-memory storage -> S3
                 # Check database first (most authoritative)
                 all_artifacts = list_all_artifacts()
                 for artifact in all_artifacts:
@@ -1012,7 +1012,31 @@ async def list_artifacts(request: Request, offset: str = None):
                         # Return only the first match - single package requirement
                         break
 
-                # If not found in database, search S3 for models
+                # If not found in database, search _artifact_storage for all types (models, datasets, code)
+                if not results:
+                    for artifact_id, artifact_data in _artifact_storage.items():
+                        artifact_name = artifact_data.get("name", "")
+                        artifact_type_stored = artifact_data.get("type", "")
+                        # Exact name match (case-sensitive)
+                        if (
+                            artifact_name == name
+                            and (
+                                not types_filter or artifact_type_stored in types_filter
+                            )
+                            and artifact_id not in seen_ids
+                        ):
+                            results.append(
+                                {
+                                    "name": artifact_name,
+                                    "id": artifact_id,
+                                    "type": artifact_type_stored,
+                                }
+                            )
+                            seen_ids.add(artifact_id)
+                            # Return only first match for exact name
+                            break
+
+                # If still not found, search S3 for models (fallback)
                 if not results and (not types_filter or "model" in types_filter):
                     escaped_name = re.escape(name)
                     name_pattern = f"^{escaped_name}$"
@@ -1052,34 +1076,6 @@ async def list_artifacts(request: Request, offset: str = None):
                                     seen_ids.add(artifact_id)
                                     # Return only first match for exact name
                                     break
-
-                # If still not found, search _artifact_storage for datasets and code
-                if not results and (
-                    not types_filter
-                    or "dataset" in types_filter
-                    or "code" in types_filter
-                ):
-                    for artifact_id, artifact_data in _artifact_storage.items():
-                        artifact_name = artifact_data.get("name", "")
-                        artifact_type_stored = artifact_data.get("type", "")
-                        # Exact name match (case-sensitive)
-                        if (
-                            artifact_name == name
-                            and (
-                                not types_filter or artifact_type_stored in types_filter
-                            )
-                            and artifact_id not in seen_ids
-                        ):
-                            results.append(
-                                {
-                                    "name": artifact_name,
-                                    "id": artifact_id,
-                                    "type": artifact_type_stored,
-                                }
-                            )
-                            seen_ids.add(artifact_id)
-                            # Return only first match for exact name
-                            break
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
