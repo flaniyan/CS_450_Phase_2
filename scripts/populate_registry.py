@@ -101,10 +101,11 @@ def get_authentication_token(api_base_url: str) -> Optional[str]:
         return None
 
 
-def get_hardcoded_models(count: int = 500) -> List[str]:
+def get_hardcoded_models(count: int = None) -> List[str]:
     """
-    Get hardcoded list of 500 real HuggingFace models.
+    Get hardcoded list of HuggingFace models.
     No API calls - just returns the pre-defined list.
+    If count is None, returns all available models.
     """
     models = POPULAR_MODELS.copy()
     
@@ -113,8 +114,18 @@ def get_hardcoded_models(count: int = 500) -> List[str]:
         models.remove(REQUIRED_MODEL)
         models.insert(0, REQUIRED_MODEL)
     
-    # Limit to exactly count
-    models = models[:count]
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_models = []
+    for model in models:
+        if model not in seen:
+            seen.add(model)
+            unique_models.append(model)
+    models = unique_models
+    
+    # Limit to count if specified
+    if count is not None:
+        models = models[:count]
     
     return models
 
@@ -720,21 +731,23 @@ def main_performance_mode():
     print(f"✓ DynamoDB Table: {ARTIFACTS_TABLE}")
     print()
     
-    # Get model list
-    models = get_hardcoded_models(count=500)
-    if REQUIRED_MODEL in models:
-        models.remove(REQUIRED_MODEL)
-    models.insert(0, REQUIRED_MODEL)
-    models = models[:500]
+    # Get all available models (no limit - we'll continue until 500 successful)
+    all_models = get_hardcoded_models(count=None)
     
-    print(f"Will populate registry with {len(models)} models")
+    # Ensure REQUIRED_MODEL is first
+    if REQUIRED_MODEL in all_models:
+        all_models.remove(REQUIRED_MODEL)
+    all_models.insert(0, REQUIRED_MODEL)
+    
+    print(f"Loaded {len(all_models)} models from hardcoded list")
     print(f"  - Tiny-LLM: Full model download (including binary - needed for performance testing)")
-    print(f"  - Other {len(models) - 1} models: Essential files only (config, README, etc. - for speed)")
+    print(f"  - Other models: Essential files only (config, README, etc. - for speed)")
     print(f"  - All files will be uploaded to performance/ S3 path")
+    print(f"  - Will continue until 500 successful submissions")
     print()
     
     # Start processing
-    print("Starting model ingestion (this will take a while - downloading and uploading 500 models)...")
+    print("Starting model ingestion (will continue until 500 successful submissions)...")
     print("=" * 80)
     
     successful = 0
@@ -742,30 +755,40 @@ def main_performance_mode():
     not_found = 0
     not_found_models = []
     tiny_llm_ingested = False
+    target_successful = 500
+    models_processed = 0
     
-    for i, model_id in enumerate(models, 1):
-        print(f"[{i}/{len(models)}] Ingesting: {model_id}")
+    for model_id in all_models:
+        # Stop if we've reached the target
+        if successful >= target_successful:
+            print()
+            print(f"✓ Reached target of {target_successful} successful submissions!")
+            break
+        
+        models_processed += 1
+        print(f"[{models_processed}] Ingesting: {model_id} (Success: {successful}/{target_successful})")
         
         result, status = ingest_model_performance_mode(s3, ap_arn, table, model_id, "main", skip_missing=True)
         if result:
             successful += 1
             if model_id == REQUIRED_MODEL:
                 tiny_llm_ingested = True
-            print(f"✓ Successfully ingested {model_id} to performance/ S3 path")
+            print(f"✓ Successfully ingested {model_id} to performance/ S3 path ({successful}/{target_successful})")
         elif status == "not_found":
             not_found += 1
             not_found_models.append(model_id)
+            print(f"  ⊘ Model not found on HuggingFace: {model_id} (skipping)")
         else:
             failed += 1
+            print(f"  ✗ Failed to ingest {model_id}")
         
         # Small delay to avoid rate limiting
-        if i < len(models):
-            time.sleep(0.5)
+        time.sleep(0.5)
         
-        # Progress update
-        if i % 50 == 0:
+        # Progress update every 50 models
+        if models_processed % 50 == 0:
             print()
-            print(f"Progress: {i}/{len(models)} ({successful} successful, {failed} failed, {not_found} not found)")
+            print(f"Progress: {models_processed} processed, {successful} successful/{target_successful} target ({failed} failed, {not_found} not found)")
             print()
     
     # Final summary
@@ -773,12 +796,12 @@ def main_performance_mode():
     print("=" * 80)
     print("Ingestion Summary")
     print("=" * 80)
-    print(f"Total models processed: {len(models)}")
+    print(f"Total models processed: {models_processed}")
     print(f"  - Successfully ingested to performance/ S3 path: {successful}")
     print(f"  - Tiny-LLM ingested: {'✓' if tiny_llm_ingested else '✗'}")
     print(f"  - Not found on HuggingFace: {not_found}")
     print(f"  - Failed (other errors): {failed}")
-    print(f"Total successful: {successful}")
+    print(f"Target: {target_successful} successful submissions")
     print()
     
     if not_found_models:
@@ -789,13 +812,15 @@ def main_performance_mode():
             print(f"     ... and {len(not_found_models) - 10} more")
         print()
     
-    if successful >= 500:
-        print("✓ Registry populated with 500 models for performance testing")
+    if successful >= target_successful:
+        print(f"✓ Registry populated with {successful} models for performance testing")
         print("  Note: Models stored in performance/ S3 path (not models/)")
         return 0
     else:
-        print(f"⚠ Only {successful} models processed (target: 500)")
-        return 1 if failed > successful else 0
+        print(f"⚠ Only {successful} models successfully ingested (target: {target_successful})")
+        print(f"⚠ Processed {models_processed} models but ran out of models in the list")
+        print(f"⚠ Consider adding more models to the hardcoded list")
+        return 1
 
 
 if __name__ == "__main__":
