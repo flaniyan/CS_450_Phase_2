@@ -991,23 +991,55 @@ async def list_artifacts(request: Request, offset: str = None):
                     for model in all_s3_models:
                         if isinstance(model, dict):
                             model_name = model.get("name", "")
-                            # Skip if already in results
+                            # Skip if already in results (by name)
                             if model_name in seen_model_names:
                                 continue
-                            # Look up artifact_id from database, fallback to model id/name
-                            artifact_id = artifact_map.get(model_name, model.get("id", model_name))
-                            # Only add if not already in results (by id)
-                            if artifact_id not in seen_ids:
-                                results.append(
-                                    {
-                                        "name": model_name or artifact_id,
-                                        "id": artifact_id,
-                                        "type": "model",
-                                    }
-                                )
-                                seen_ids.add(artifact_id)
-                                if model_name:
-                                    seen_model_names.add(model_name)
+                            
+                            # Try to find the original model name by checking if sanitized name matches
+                            # S3 stores models with sanitized names (e.g., "google-bert/bert-base-uncased" -> "google-bert_bert-base-uncased")
+                            # But database stores original names. Check if this sanitized name corresponds to a database model
+                            original_name = None
+                            for db_artifact in all_artifacts:
+                                if db_artifact.get("type") == "model":
+                                    db_name = db_artifact.get("name", "")
+                                    # Check if sanitizing the db_name would match the S3 model_name
+                                    sanitized_db_name = (
+                                        db_name.replace("/", "_")
+                                        .replace(":", "_")
+                                        .replace("\\", "_")
+                                    )
+                                    if sanitized_db_name == model_name:
+                                        original_name = db_name
+                                        # Use the database artifact_id and name (original name)
+                                        artifact_id = db_artifact.get("id")
+                                        if artifact_id and artifact_id not in seen_ids:
+                                            results.append(
+                                                {
+                                                    "name": original_name,
+                                                    "id": artifact_id,
+                                                    "type": "model",
+                                                }
+                                            )
+                                            seen_ids.add(artifact_id)
+                                            seen_model_names.add(original_name)
+                                            seen_model_names.add(model_name)  # Also mark sanitized name as seen
+                                        break
+                            
+                            # If no database match found, this is a model only in S3 (shouldn't happen, but handle it)
+                            if not original_name:
+                                artifact_id = artifact_map.get(model_name, model.get("id", model_name))
+                                # Only add if not already in results (by id) and if it's a valid artifact_id (not just the name)
+                                if artifact_id not in seen_ids and artifact_id != model_name:
+                                    results.append(
+                                        {
+                                            "name": model_name or artifact_id,
+                                            "id": artifact_id,
+                                            "type": "model",
+                                        }
+                                    )
+                                    seen_ids.add(artifact_id)
+                                    if model_name:
+                                        seen_model_names.add(model_name)
             else:
                 # Exact name match - need to return only a single package per spec requirement
                 # Check all sources but return only the first exact match found
@@ -1064,45 +1096,57 @@ async def list_artifacts(request: Request, offset: str = None):
                             break
 
                 # If still not found, search S3 for models (fallback)
+                # But first check if any model in database matches the name (to avoid duplicates)
                 if not results and (not types_filter or "model" in types_filter):
-                    escaped_name = re.escape(name)
-                    name_pattern = f"^{escaped_name}$"
-                    result = list_models(name_regex=name_pattern, limit=1000)
-                    if result is None:
-                        result = {"models": []}
-                    models = result.get("models") or []
-                    for model in models:
-                        if isinstance(model, dict):
-                            model_name = model.get("name", "")
-                            # Exact name match (not regex, direct comparison)
-                            if model_name == name:
-                                # Look up artifact_id from database by matching model name
-                                artifact_id = None
-                                all_artifacts = list_all_artifacts()
-                                for artifact in all_artifacts:
-                                    if (
-                                        artifact.get("name") == model_name
-                                        and artifact.get("type") == "model"
-                                    ):
-                                        artifact_id = artifact.get("id")
-                                        if artifact_id:
-                                            break
-                                
-                                # Fallback to model id/name if not found in database
-                                if not artifact_id:
-                                    artifact_id = model.get("id", model.get("name", ""))
-                                
-                                if artifact_id not in seen_ids:
-                                    results.append(
-                                        {
-                                            "name": model_name,
-                                            "id": artifact_id,
-                                            "type": "model",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
-                                    # Return only first match for exact name
-                                    break
+                    # Check database first to see if a model with this name already exists
+                    # This prevents returning S3 models that are duplicates of database models
+                    all_artifacts = list_all_artifacts()
+                    model_exists_in_db = False
+                    for artifact in all_artifacts:
+                        if artifact.get("type") == "model" and artifact.get("name") == name:
+                            model_exists_in_db = True
+                            break
+                    
+                    # Only search S3 if model doesn't exist in database
+                    # This prevents duplicate entries when the same model is stored with different name formats
+                    if not model_exists_in_db:
+                        escaped_name = re.escape(name)
+                        name_pattern = f"^{escaped_name}$"
+                        result = list_models(name_regex=name_pattern, limit=1000)
+                        if result is None:
+                            result = {"models": []}
+                        models = result.get("models") or []
+                        for model in models:
+                            if isinstance(model, dict):
+                                model_name = model.get("name", "")
+                                # Exact name match (not regex, direct comparison)
+                                if model_name == name:
+                                    # Look up artifact_id from database by matching model name
+                                    artifact_id = None
+                                    for artifact in all_artifacts:
+                                        if (
+                                            artifact.get("name") == model_name
+                                            and artifact.get("type") == "model"
+                                        ):
+                                            artifact_id = artifact.get("id")
+                                            if artifact_id:
+                                                break
+                                    
+                                    # Fallback to model id/name if not found in database
+                                    if not artifact_id:
+                                        artifact_id = model.get("id", model.get("name", ""))
+                                    
+                                    if artifact_id not in seen_ids:
+                                        results.append(
+                                            {
+                                                "name": model_name,
+                                                "id": artifact_id,
+                                                "type": "model",
+                                            }
+                                        )
+                                        seen_ids.add(artifact_id)
+                                        # Return only first match for exact name
+                                        break
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
