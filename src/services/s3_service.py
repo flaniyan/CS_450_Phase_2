@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config
 import zipfile
 import io
 import re
@@ -33,8 +34,14 @@ try:
     account_id = sts.get_caller_identity()["Account"]
     # Use the correct access point ARN format
     ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    # Configure S3 client with larger connection pool for high concurrency
+    # Default is 10 connections, increase to 100+ to handle concurrent load testing
+    s3_config = Config(
+        max_pool_connections=150,  # Allow up to 150 concurrent connections
+        retries={'max_attempts': 3, 'mode': 'standard'}
+    )
     # Use regular S3 client - boto3 handles access points automatically
-    s3 = boto3.client("s3", region_name=region)
+    s3 = boto3.client("s3", region_name=region, config=s3_config)
     # Test if S3 client actually works with access point
     s3.list_objects_v2(Bucket=ap_arn, Prefix="models/", MaxKeys=1)
     aws_available = True

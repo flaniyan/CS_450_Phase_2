@@ -1,6 +1,6 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import Optional
 import io
 import re
@@ -214,11 +214,15 @@ async def download_performance_model_file(
             True  # use_performance_path=True
         )
         print(f"[PERF] Download successful: model_id={model_id}, size={len(file_content)} bytes")
-        return StreamingResponse(
-            io.BytesIO(file_content),
+        # Return Response directly since we already have the full content in memory
+        # This avoids streaming issues and improves compatibility with load generators
+        from fastapi.responses import Response
+        return Response(
+            content=file_content,
             media_type="application/zip",
             headers={
-                "Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip"
+                "Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip",
+                "Content-Length": str(len(file_content))
             },
         )
     except HTTPException:

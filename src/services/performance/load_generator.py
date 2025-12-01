@@ -208,7 +208,15 @@ class LoadGenerator:
         self.start_time = time.time()
 
         # Create aiohttp session with timeout
-        timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout per request
+        # Set timeout to allow for large file downloads (24MB model file)
+        # total: total timeout for the entire operation
+        # connect: timeout for establishing connection
+        # sock_read: timeout for reading data from socket
+        timeout = aiohttp.ClientTimeout(
+            total=600,  # 10 minute total timeout per request (for large downloads)
+            connect=60,  # 1 minute to establish connection
+            sock_read=300  # 5 minute timeout for reading data
+        )
         connector = aiohttp.TCPConnector(limit=self.num_clients)
 
         async with aiohttp.ClientSession(
