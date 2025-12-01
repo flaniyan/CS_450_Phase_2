@@ -90,7 +90,6 @@ resource "aws_lambda_function" "download_handler" {
 
   environment {
     variables = {
-      AWS_REGION           = var.aws_region
       S3_ACCESS_POINT_NAME = "cs450-s3"
     }
   }
