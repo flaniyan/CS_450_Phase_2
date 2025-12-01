@@ -45,6 +45,7 @@ def _run_load_generator_async(
         asyncio.set_event_loop(loop)
 
         # Create and run load generator
+        # Use performance path for performance testing
         generator = LoadGenerator(
             run_id=run_id,
             base_url=base_url,
@@ -52,6 +53,7 @@ def _run_load_generator_async(
             model_id=model_id,
             version=version,
             duration_seconds=duration_seconds,
+            use_performance_path=True,  # Use performance/ path for performance testing
         )
 
         _load_generators[run_id] = generator
@@ -155,3 +157,48 @@ def get_workload_status(run_id: str) -> Optional[Dict[str, Any]]:
 def get_load_generator(run_id: str):
     """Get LoadGenerator instance for a run"""
     return _load_generators.get(run_id)
+
+
+def get_latest_workload_metrics() -> Optional[Dict[str, Any]]:
+    """
+    Get metrics from the most recent completed workload run.
+    Used for health dashboard display.
+    
+    Returns:
+        Dictionary with latest performance metrics, or None if no runs completed
+    """
+    # Find the most recent completed run
+    completed_runs = [
+        (run_id, run_data)
+        for run_id, run_data in _workload_runs.items()
+        if run_data.get("status") == "completed" and "summary" in run_data
+    ]
+    
+    if not completed_runs:
+        return None
+    
+    # Sort by started_at (most recent first)
+    completed_runs.sort(
+        key=lambda x: x[1].get("started_at", ""),
+        reverse=True
+    )
+    
+    # Get the most recent run's summary
+    latest_run_id, latest_run_data = completed_runs[0]
+    summary = latest_run_data.get("summary", {})
+    
+    return {
+        "latest_run_id": latest_run_id,
+        "latest_throughput_mbps": summary.get("throughput_bps", 0) / (1024 * 1024) if summary.get("throughput_bps") else 0,
+        "latest_p99_latency_ms": summary.get("p99_latency_ms", 0),
+        "latest_mean_latency_ms": summary.get("mean_latency_ms", 0),
+        "latest_median_latency_ms": summary.get("median_latency_ms", 0),
+        "latest_success_rate": (
+            summary.get("successful_requests", 0) / summary.get("total_requests", 1) * 100
+            if summary.get("total_requests", 0) > 0
+            else 0
+        ),
+        "total_runs_completed": len(completed_runs),
+        "last_run_started_at": latest_run_data.get("started_at"),
+        "last_run_completed_at": latest_run_data.get("completed_at"),
+    }

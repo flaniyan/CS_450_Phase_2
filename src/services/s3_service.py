@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config
 import zipfile
 import io
 import re
@@ -33,8 +34,14 @@ try:
     account_id = sts.get_caller_identity()["Account"]
     # Use the correct access point ARN format
     ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    # Configure S3 client with larger connection pool for high concurrency
+    # Default is 10 connections, increase to 100+ to handle concurrent load testing
+    s3_config = Config(
+        max_pool_connections=150,  # Allow up to 150 concurrent connections
+        retries={'max_attempts': 3, 'mode': 'standard'}
+    )
     # Use regular S3 client - boto3 handles access points automatically
-    s3 = boto3.client("s3", region_name=region)
+    s3 = boto3.client("s3", region_name=region, config=s3_config)
     # Test if S3 client actually works with access point
     s3.list_objects_v2(Bucket=ap_arn, Prefix="models/", MaxKeys=1)
     aws_available = True
@@ -291,7 +298,7 @@ def upload_model(
             )
 
 
-def download_model(model_id: str, version: str, component: str = "full") -> bytes:
+def download_model(model_id: str, version: str, component: str = "full", use_performance_path: bool = False) -> bytes:
     if not aws_available:
         raise HTTPException(
             status_code=503,
@@ -302,7 +309,11 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
     from .performance.instrumentation import measure_operation, publish_metric
 
     try:
-        s3_key = f"models/{model_id}/{version}/model.zip"
+        # Use performance/ path if specified, otherwise models/
+        path_prefix = "performance" if use_performance_path else "models"
+        # Models are stored in S3 with sanitized IDs (slashes replaced with underscores)
+        # The endpoint receives the sanitized ID directly, so use it as-is
+        s3_key = f"{path_prefix}/{model_id}/{version}/model.zip"
 
         # Measure S3 download latency
         with measure_operation("S3DownloadLatency", {"Component": "S3"}):
@@ -322,12 +333,12 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             try:
                 result = extract_model_component(zip_content, component)
                 print(
-                    f"AWS S3 download successful: {model_id} v{version} ({component})"
+                    f"AWS S3 download successful: {model_id} v{version} ({component}) from {path_prefix}/"
                 )
                 return result
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-        print(f"AWS S3 download successful: {model_id} v{version} (full)")
+        print(f"AWS S3 download successful: {model_id} v{version} (full) from {path_prefix}/")
         return zip_content
     except Exception as e:
         print(f"AWS S3 download failed: {e}")

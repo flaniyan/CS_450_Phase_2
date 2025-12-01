@@ -74,7 +74,7 @@ resource "aws_secretsmanager_secret_version" "github_token" {
   secret_string = jsonencode({
     github_token = var.github_token
   })
-  
+
   lifecycle {
     ignore_changes = [secret_string]
   }
@@ -226,7 +226,7 @@ output "kms_key_arn" {
 }
 
 output "kms_key_id" {
-  value = aws_kms_key.main_key.key_id
+  value       = aws_kms_key.main_key.key_id
   description = "The globally unique identifier for the KMS key"
 }
 
