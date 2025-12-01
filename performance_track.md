@@ -34,10 +34,10 @@ This document tracks remaining tasks for the Performance Track requirements. The
 **Requirement**: Experiment with the effect of different AWS compute components on performance (e.g., Lambdas vs. EC2/ECS).
 
 **Tasks**:
-- [ ] Create Lambda-based download handler function
-  - [ ] Implement Lambda function that handles model downloads
-  - [ ] Store Lambda function code in `src/lambda/download_handler.py` or similar
-  - [ ] Configure Lambda IAM permissions for S3 access
+- [x] Create Lambda-based download handler function
+  - [x] Implement Lambda function that handles model downloads
+  - [x] Store Lambda function code in `src/lambda/download_handler.py` or similar
+  - [x] Configure Lambda IAM permissions for S3 access
 - [ ] Make compute backend configurable
   - [ ] Add environment variable `COMPUTE_BACKEND=ecs|lambda`
   - [ ] Modify routing logic to select compute backend
