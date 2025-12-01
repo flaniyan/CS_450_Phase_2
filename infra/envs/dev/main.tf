@@ -88,9 +88,9 @@ module "cloudfront" {
 
 # Lambda module for performance testing (minimal - just creates function and IAM role)
 module "lambda" {
-  source          = "../../modules/lambda"
+  source           = "../../modules/lambda"
   artifacts_bucket = local.artifacts_bucket
-  aws_region      = var.aws_region
+  aws_region       = var.aws_region
 }
 
 output "artifacts_bucket" { value = local.artifacts_bucket }
