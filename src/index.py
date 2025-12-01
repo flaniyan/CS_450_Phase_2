@@ -2197,12 +2197,10 @@ async def search_artifacts_by_regex(request: Request):
         seen_artifact_ids = set()
 
         # Search models from S3 (with reduced limit to prevent ReDoS)
-        # Search both model names AND model card/README content
-        logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}' (name and README)")
+        logger.info(f"DEBUG: Searching models in S3 with regex: '{regex_pattern}'")
         try:
             # Limit results to prevent excessive processing and ReDoS attacks
-            # Pass both name_regex and model_regex to search names and README content
-            result = list_models(name_regex=regex_pattern, model_regex=regex_pattern, limit=100)
+            result = list_models(name_regex=regex_pattern, limit=100)
             models_found = result.get("models", [])
             logger.info(f"DEBUG: Found {len(models_found)} models in S3 matching regex")
             for model in models_found:
