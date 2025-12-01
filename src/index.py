@@ -1507,14 +1507,9 @@ def get_artifact_by_name(name: str, request: Request):
                 detail="There is missing field(s) in the artifact_name or it is formed improperly, or is invalid.",
             )
 
-        # Search for models with matching name
+        # Search for artifacts with matching name
         escaped_name = re.escape(name)
         name_pattern = f"^{escaped_name}$"
-        logger.info(f"DEBUG: ===== SEARCHING S3 FOR MODELS =====")
-        logger.info(f"DEBUG: Searching S3 for models with name pattern: {name_pattern}")
-        result = list_models(name_regex=name_pattern, limit=1000)
-        models_found = len(result.get("models", []))
-        logger.info(f"DEBUG: list_models returned {models_found} models")
         artifacts = []
 
         # Track which artifact_ids we've already added to avoid duplicates
@@ -1523,6 +1518,61 @@ def get_artifact_by_name(name: str, request: Request):
         all_db_artifacts = list_all_artifacts()
         logger.info(f"DEBUG: ===== CHECKING DATABASE =====")
         logger.info(f"DEBUG: Database artifacts count: {len(all_db_artifacts)}")
+
+        # Priority 1: Search _artifact_storage first for all artifact types (immediate consistency)
+        logger.info(
+            f"DEBUG: Searching _artifact_storage for all artifact types with name='{name}'"
+        )
+        for artifact_id, artifact_data in _artifact_storage.items():
+            artifact_name = artifact_data.get("name", "")
+            artifact_type = artifact_data.get("type", "")
+            if (
+                artifact_name == name
+                and artifact_id
+                and artifact_id not in seen_artifact_ids
+            ):
+                logger.info(
+                    f"DEBUG: Found {artifact_type} in _artifact_storage: id='{artifact_id}', name='{artifact_name}'"
+                )
+                seen_artifact_ids.add(artifact_id)
+                artifacts.append(
+                    {
+                        "name": artifact_name,
+                        "id": artifact_id,
+                        "type": artifact_type,
+                    }
+                )
+
+        # Priority 2: Search database for all artifact types
+        logger.info(f"DEBUG: Searching database for artifacts with name='{name}'")
+        storage_matches = 0
+        for artifact in all_db_artifacts:
+            artifact_id = artifact.get("id", "")
+            if (
+                artifact.get("name") == name
+                and artifact_id
+                and artifact_id not in seen_artifact_ids
+            ):  # Exact match
+                storage_matches += 1
+                logger.info(
+                    f"DEBUG: Found artifact in database: id='{artifact_id}', name='{artifact.get('name')}', type='{artifact.get('type')}'"
+                )
+                seen_artifact_ids.add(artifact_id)
+                artifacts.append(
+                    {
+                        "name": artifact.get("name", artifact_id),
+                        "id": artifact_id,
+                        "type": artifact.get("type", "model"),
+                    }
+                )
+        logger.info(f"DEBUG: Found {storage_matches} additional artifacts in database")
+
+        # Priority 3: Search S3 for models (fallback for models not in _artifact_storage or database)
+        logger.info(f"DEBUG: ===== SEARCHING S3 FOR MODELS =====")
+        logger.info(f"DEBUG: Searching S3 for models with name pattern: {name_pattern}")
+        result = list_models(name_regex=name_pattern, limit=1000)
+        models_found = len(result.get("models", []))
+        logger.info(f"DEBUG: list_models returned {models_found} models")
 
         # Add models from S3 - find their artifact_ids from database
         for model in result.get("models", []):
@@ -1643,9 +1693,9 @@ def get_artifact_by_name(name: str, request: Request):
                             }
                         )
 
-        # Search _artifact_storage for datasets and code (immediate consistency)
+        # Search _artifact_storage for all artifact types (models, datasets, code) - immediate consistency
         logger.info(
-            f"DEBUG: Searching _artifact_storage for datasets and code with name='{name}'"
+            f"DEBUG: Searching _artifact_storage for all artifact types with name='{name}'"
         )
         for artifact_id, artifact_data in _artifact_storage.items():
             artifact_name = artifact_data.get("name", "")
