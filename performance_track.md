@@ -42,10 +42,10 @@ This document tracks remaining tasks for the Performance Track requirements. The
   - [x] Add environment variable `COMPUTE_BACKEND=ecs|lambda`
   - [x] Modify routing logic to select compute backend
   - [x] Ensure same endpoint works with both backends
-- [ ] Deploy Lambda function via Terraform
-  - [ ] Create Lambda module in `infra/modules/lambda/`
-  - [ ] Configure Lambda integration with API Gateway
-  - [ ] Add feature flag/configuration to switch between ECS and Lambda
+- [x] Deploy Lambda function via Terraform
+  - [x] Create Lambda module in `infra/modules/lambda/`
+  - [x] Configure Lambda integration (IAM permissions for ECS to invoke Lambda)
+  - [x] Add feature flag/configuration to switch between ECS and Lambda (via COMPUTE_BACKEND env var)
 - [ ] Run performance tests with Lambda backend
   - [ ] Run same workload (100 concurrent clients, Tiny-LLM download)
   - [ ] Measure latency (mean, median, P99)

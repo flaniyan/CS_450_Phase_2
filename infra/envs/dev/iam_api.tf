@@ -165,3 +165,28 @@ resource "aws_iam_role_policy_attachment" "api_attach_kms" {
   role       = aws_iam_role.api_task.name
   policy_arn = aws_iam_policy.api_kms_s3_managed.arn
 }
+
+# API Service - Lambda Invoke Policy (for performance testing compute backend switching)
+resource "aws_iam_policy" "api_lambda_invoke_managed" {
+  name = "api-lambda-invoke-dev"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          module.lambda.lambda_function_arn,
+          "${module.lambda.lambda_function_arn}:*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_attach_lambda" {
+  role       = aws_iam_role.api_task.name
+  policy_arn = aws_iam_policy.api_lambda_invoke_managed.arn
+}
