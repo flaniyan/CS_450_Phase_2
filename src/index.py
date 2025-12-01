@@ -349,29 +349,37 @@ async def startup_event():
 
     # Initialize _artifact_storage from DynamoDB (for models, datasets, and code)
     # This ensures immediate consistency for queries
-    try:
-        global _artifact_storage
-        all_artifacts = list_all_artifacts()
-        for artifact in all_artifacts:
-            artifact_type = artifact.get("type", "")
-            if artifact_type in ["model", "dataset", "code"]:
-                artifact_id = artifact.get("id", "")
-                if artifact_id:
-                    _artifact_storage[artifact_id] = {
-                        "name": artifact.get("name", ""),
-                        "type": artifact_type,
-                        "version": artifact.get("version", "main"),
-                        "id": artifact_id,
-                        "url": artifact.get("url", ""),
-                    }
-        logger.info(
-            f"Initialized _artifact_storage with {len(_artifact_storage)} artifacts (models, datasets, and code)"
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to initialize _artifact_storage from DynamoDB: {str(e)}"
-        )
-        # Continue without initialization - _artifact_storage will be populated as artifacts are created
+    # Run in background thread to avoid blocking startup and health checks
+    def load_artifacts_background():
+        try:
+            global _artifact_storage
+            logger.info("Starting background load of artifacts from DynamoDB...")
+            all_artifacts = list_all_artifacts()
+            for artifact in all_artifacts:
+                artifact_type = artifact.get("type", "")
+                if artifact_type in ["model", "dataset", "code"]:
+                    artifact_id = artifact.get("id", "")
+                    if artifact_id:
+                        _artifact_storage[artifact_id] = {
+                            "name": artifact.get("name", ""),
+                            "type": artifact_type,
+                            "version": artifact.get("version", "main"),
+                            "id": artifact_id,
+                            "url": artifact.get("url", ""),
+                        }
+            logger.info(
+                f"Initialized _artifact_storage with {len(_artifact_storage)} artifacts (models, datasets, and code)"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize _artifact_storage from DynamoDB: {str(e)}"
+            )
+            # Continue without initialization - _artifact_storage will be populated as artifacts are created
+    
+    # Start background thread to load artifacts without blocking startup
+    import threading
+    threading.Thread(target=load_artifacts_background, daemon=True).start()
+    logger.info("Started background thread to load artifacts from DynamoDB")
 
 
 # Rating status tracking for async rating (kept in-memory as it's transient)
