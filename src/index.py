@@ -1013,19 +1013,17 @@ async def list_artifacts(request: Request, offset: str = None):
                 # Check all sources but return only the first exact match found
                 seen_ids = set()
 
-                # Priority order: Database -> In-memory storage -> S3
-                # Check database first (most authoritative)
-                all_artifacts = list_all_artifacts()
-                for artifact in all_artifacts:
-                    artifact_id = artifact.get("id", "")
-                    artifact_name = artifact.get("name", "")
-                    artifact_type_stored = artifact.get("type", "")
-                    # Exact name match (case-sensitive, no regex)
-                    # Ensure artifact_name is not None or empty
+                # Priority order: _artifact_storage (immediate consistency) -> Database -> S3
+                # Check _artifact_storage first (most up-to-date, updated immediately on ingestion)
+                for artifact_id, artifact_data in _artifact_storage.items():
+                    artifact_name = artifact_data.get("name", "")
+                    artifact_type_stored = artifact_data.get("type", "")
+                    # Exact name match (case-sensitive)
                     if (
-                        artifact_name
-                        and artifact_name == name
-                        and (not types_filter or artifact_type_stored in types_filter)
+                        artifact_name == name
+                        and (
+                            not types_filter or artifact_type_stored in types_filter
+                        )
                         and artifact_id not in seen_ids
                     ):
                         results.append(
@@ -1036,20 +1034,22 @@ async def list_artifacts(request: Request, offset: str = None):
                             }
                         )
                         seen_ids.add(artifact_id)
-                        # Return only the first match - single package requirement
+                        # Return only first match for exact name
                         break
 
-                # If not found in database, search _artifact_storage for all types (models, datasets, code)
+                # If not found in _artifact_storage, check database (persistent storage)
                 if not results:
-                    for artifact_id, artifact_data in _artifact_storage.items():
-                        artifact_name = artifact_data.get("name", "")
-                        artifact_type_stored = artifact_data.get("type", "")
-                        # Exact name match (case-sensitive)
+                    all_artifacts = list_all_artifacts()
+                    for artifact in all_artifacts:
+                        artifact_id = artifact.get("id", "")
+                        artifact_name = artifact.get("name", "")
+                        artifact_type_stored = artifact.get("type", "")
+                        # Exact name match (case-sensitive, no regex)
+                        # Ensure artifact_name is not None or empty
                         if (
-                            artifact_name == name
-                            and (
-                                not types_filter or artifact_type_stored in types_filter
-                            )
+                            artifact_name
+                            and artifact_name == name
+                            and (not types_filter or artifact_type_stored in types_filter)
                             and artifact_id not in seen_ids
                         ):
                             results.append(
@@ -1060,7 +1060,7 @@ async def list_artifacts(request: Request, offset: str = None):
                                 }
                             )
                             seen_ids.add(artifact_id)
-                            # Return only first match for exact name
+                            # Return only the first match - single package requirement
                             break
 
                 # If still not found, search S3 for models (fallback)
@@ -1098,11 +1098,11 @@ async def list_artifacts(request: Request, offset: str = None):
                                             "name": model_name,
                                             "id": artifact_id,
                                             "type": "model",
-                                }
-                            )
-                            seen_ids.add(artifact_id)
-                            # Return only first match for exact name
-                            break
+                                        }
+                                    )
+                                    seen_ids.add(artifact_id)
+                                    # Return only first match for exact name
+                                    break
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
