@@ -930,11 +930,8 @@ async def list_artifacts(request: Request, offset: str = None):
                         )
                 
                 # Also search S3 for models (to catch any models not in _artifact_storage)
+                # Use pagination to get ALL models, not just the first 1000
                 if not types_filter or "model" in types_filter:
-                    result = list_models(limit=1000)
-                    if result is None:
-                        result = {"models": []}
-                    models = result.get("models") or []
                     # Get all artifacts from database to map model names to artifact_ids
                     all_artifacts = list_all_artifacts()
                     artifact_map = {}
@@ -946,7 +943,21 @@ async def list_artifacts(request: Request, offset: str = None):
                             if artifact_name and artifact_id:
                                 artifact_map[artifact_name] = artifact_id
                     
-                    for model in models:
+                    # Paginate through all models in S3
+                    continuation_token = None
+                    all_s3_models = []
+                    while True:
+                        result = list_models(limit=1000, continuation_token=continuation_token)
+                        if result is None:
+                            result = {"models": []}
+                        models = result.get("models") or []
+                        all_s3_models.extend(models)
+                        continuation_token = result.get("next_token")
+                        if not continuation_token or len(models) == 0:
+                            break
+                    
+                    # Process all models from S3
+                    for model in all_s3_models:
                         if isinstance(model, dict):
                             model_name = model.get("name", "")
                             # Skip if already in results from _artifact_storage
@@ -1071,11 +1082,11 @@ async def list_artifacts(request: Request, offset: str = None):
                                             "name": model_name,
                                             "id": artifact_id,
                                             "type": "model",
-                                        }
-                                    )
-                                    seen_ids.add(artifact_id)
-                                    # Return only first match for exact name
-                                    break
+                                }
+                            )
+                            seen_ids.add(artifact_id)
+                            # Return only first match for exact name
+                            break
         if len(results) > 10000:
             raise HTTPException(status_code=413, detail="Too many artifacts returned")
 
