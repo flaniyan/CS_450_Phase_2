@@ -3814,18 +3814,56 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
     try:
         deleted = False
         artifact = get_artifact_from_db(id)
+        artifact_name = None
         if artifact and artifact.get("type") == artifact_type:
+            artifact_name = artifact.get("name")
             delete_artifact(id)
-            # Also remove from _artifact_storage if it's a dataset or code
-            if artifact_type in ["dataset", "code"]:
+            # Also remove from _artifact_storage for all artifact types (model, dataset, code)
+            if artifact_type in ["model", "dataset", "code"]:
                 if id in _artifact_storage:
                     del _artifact_storage[id]
+                    logger.info(f"Removed artifact {id} from _artifact_storage cache")
             deleted = True
+        # Delete metadata.json files and S3 files for all artifact types
         if artifact_type == "model":
-            deleted_count = 0
+            # Delete metadata.json files for models
+            model_name = artifact_name or id
+            sanitized_name = sanitize_model_id_for_s3(model_name)
             common_versions = ["1.0.0", "main", "latest"]
             for version in common_versions:
-                s3_key = f"models/{id}/{version}/model.zip"
+                metadata_key = f"models/{sanitized_name}/{version}/metadata.json"
+                try:
+                    s3.head_object(Bucket=ap_arn, Key=metadata_key)
+                    s3.delete_object(Bucket=ap_arn, Key=metadata_key)
+                    logger.info(f"Deleted metadata file: {metadata_key}")
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code not in ["NoSuchKey", "404"]:
+                        logger.warning(f"Error deleting metadata {metadata_key}: {error_code}")
+            
+            # Also try to find and delete metadata files for all versions
+            try:
+                result = list_models(name_regex=f"^{re.escape(model_name)}$", limit=1000)
+                if result.get("models"):
+                    versions_to_try = [model["version"] for model in result["models"]]
+                    for version in versions_to_try:
+                        metadata_key = f"models/{sanitized_name}/{version}/metadata.json"
+                        try:
+                            s3.delete_object(Bucket=ap_arn, Key=metadata_key)
+                            logger.info(f"Deleted metadata file: {metadata_key}")
+                        except ClientError as e:
+                            error_code = e.response.get("Error", {}).get("Code", "")
+                            if error_code not in ["NoSuchKey", "404"]:
+                                logger.warning(f"Error deleting metadata {metadata_key}: {error_code}")
+            except Exception as e:
+                logger.debug(f"Error finding model versions for metadata deletion: {str(e)}")
+            
+            # Delete model.zip files
+            deleted_count = 0
+            common_versions = ["1.0.0", "main", "latest"]
+            # Use sanitized name for S3 key lookup
+            for version in common_versions:
+                s3_key = f"models/{sanitized_name}/{version}/model.zip"
                 try:
                     s3.head_object(Bucket=ap_arn, Key=s3_key)
                     s3.delete_object(Bucket=ap_arn, Key=s3_key)
@@ -3843,7 +3881,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
                             model["version"] for model in result["models"]
                         ]
                         for version in versions_to_try:
-                            s3_key = f"models/{id}/{version}/model.zip"
+                            s3_key = f"models/{sanitized_name}/{version}/model.zip"
                             try:
                                 s3.head_object(Bucket=ap_arn, Key=s3_key)
                                 s3.delete_object(Bucket=ap_arn, Key=s3_key)
@@ -3857,7 +3895,7 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
                     pass
             if deleted_count == 0 and not deleted:
                 for version in ["1.0.0", "main", "latest"]:
-                    s3_key = f"models/{id}/{version}/model.zip"
+                    s3_key = f"models/{sanitized_name}/{version}/model.zip"
                     try:
                         s3.head_object(Bucket=ap_arn, Key=s3_key)
                         s3.delete_object(Bucket=ap_arn, Key=s3_key)
@@ -3867,6 +3905,21 @@ def delete_artifact_endpoint(artifact_type: str, id: str, request: Request):
                         error_code = e.response.get("Error", {}).get("Code", "")
                         if error_code == "NoSuchKey" or error_code == "404":
                             continue
+        elif artifact_type in ["dataset", "code"]:
+            # Delete metadata.json files for datasets and code
+            artifact_name_for_s3 = artifact_name or id
+            sanitized_name = sanitize_model_id_for_s3(artifact_name_for_s3)
+            common_versions = ["1.0.0", "main", "latest"]
+            for version in common_versions:
+                safe_version = version.replace("/", "_").replace(":", "_").replace("\\", "_")
+                metadata_key = f"{artifact_type}s/{sanitized_name}/{safe_version}/metadata.json"
+                try:
+                    s3.delete_object(Bucket=ap_arn, Key=metadata_key)
+                    logger.info(f"Deleted metadata file: {metadata_key}")
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code not in ["NoSuchKey", "404"]:
+                        logger.warning(f"Error deleting metadata {metadata_key}: {error_code}")
         if deleted:
             return Response(status_code=200)
         else:
