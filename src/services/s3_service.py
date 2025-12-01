@@ -304,6 +304,8 @@ def download_model(model_id: str, version: str, component: str = "full", use_per
     try:
         # Use performance/ path if specified, otherwise models/
         path_prefix = "performance" if use_performance_path else "models"
+        # Models are stored in S3 with sanitized IDs (slashes replaced with underscores)
+        # The endpoint receives the sanitized ID directly, so use it as-is
         s3_key = f"{path_prefix}/{model_id}/{version}/model.zip"
 
         # Measure S3 download latency

@@ -5,7 +5,12 @@ from typing import Optional
 import io
 import re
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from botocore.exceptions import ClientError
+
+# Custom thread pool executor for S3 operations to handle high concurrency
+# Use max_workers=100 to match our load test requirements
+_s3_executor = ThreadPoolExecutor(max_workers=100, thread_name_prefix="s3_download")
 from ..services.s3_service import (
     upload_model,
     download_model,
@@ -196,10 +201,19 @@ async def download_performance_model_file(
     Async endpoint to handle concurrent requests efficiently.
     """
     try:
-        # Run the blocking S3 download in a thread pool to avoid blocking the event loop
-        file_content = await asyncio.to_thread(
-            download_model, model_id, version, component, True  # use_performance_path=True
+        print(f"[PERF] Received download request: model_id={model_id}, version={version}")
+        # Run the blocking S3 download in a custom thread pool executor
+        # This allows many concurrent requests (up to 100 workers)
+        loop = asyncio.get_event_loop()
+        file_content = await loop.run_in_executor(
+            _s3_executor,
+            download_model,
+            model_id,
+            version,
+            component,
+            True  # use_performance_path=True
         )
+        print(f"[PERF] Download successful: model_id={model_id}, size={len(file_content)} bytes")
         return StreamingResponse(
             io.BytesIO(file_content),
             media_type="application/zip",
