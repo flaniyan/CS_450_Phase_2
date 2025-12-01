@@ -2,10 +2,21 @@
 """
 Simple script to test the load generator directly
 Useful for quick testing without running the full API server
+
+Usage:
+    # Test with ECS backend (default)
+    python scripts/test_load_generator.py --backend ecs
+    
+    # Test with Lambda backend
+    python scripts/test_load_generator.py --backend lambda
+    
+    # Test with custom base URL
+    python scripts/test_load_generator.py --backend lambda --base-url http://localhost:8000
 """
 import asyncio
 import sys
 import uuid
+import argparse
 from pathlib import Path
 
 # Add parent directory to path to allow imports from src
@@ -14,31 +25,41 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.services.performance.load_generator import LoadGenerator
 
 
-async def test_load_generator():
+async def test_load_generator(backend: str = "ecs", base_url: str = "http://localhost:8000"):
     """
     Test the load generator per ACME Corporation requirements:
     - 100 concurrent clients downloading Tiny-LLM model
     - From a registry containing 500 distinct models
     - Measure throughput, mean, median, and 99th percentile latency
     
+    Args:
+        backend: Compute backend to test ('ecs' or 'lambda')
+        base_url: Base URL of the API server
+    
     Prerequisites:
     1. Ensure 500 models are populated in registry (run populate_registry.py --performance)
     2. Ensure Tiny-LLM model is fully ingested with binary (required for performance testing)
-    3. Start the FastAPI server (run_server.py or uvicorn)
+    3. Start the FastAPI server with COMPUTE_BACKEND environment variable set
     """
+    # Validate backend
+    backend = backend.lower()
+    if backend not in ["ecs", "lambda"]:
+        print(f"✗ Error: Invalid backend '{backend}'. Must be 'ecs' or 'lambda'")
+        return 1
+    
     print("=" * 80)
     print("Performance Load Generator Test")
     print("ACME Corporation Performance Testing")
     print("=" * 80)
     
     # Configuration - matching assignment requirements
-    base_url = "http://localhost:8000"  # Change if your server is on different port
     num_clients = 100  # Assignment requirement: 100 concurrent clients
     model_id = "arnir0/Tiny-LLM"  # Assignment requirement: Tiny-LLM from HuggingFace
     run_id = str(uuid.uuid4())
     
     print(f"Configuration:")
     print(f"  Base URL: {base_url}")
+    print(f"  Compute Backend: {backend.upper()} (feature flag)")
     print(f"  Number of clients: {num_clients} (assignment requirement)")
     print(f"  Model ID: {model_id} (must be fully ingested with binary)")
     print(f"  Expected registry: 500 distinct models")
@@ -48,7 +69,14 @@ async def test_load_generator():
     print("⚠️  Prerequisites:")
     print(f"  1. Run: python scripts/populate_registry.py --performance")
     print(f"  2. Ensure Tiny-LLM has full model binary (for performance testing)")
-    print(f"  3. Start API server: python run_server.py")
+    print(f"  3. Start API server with correct COMPUTE_BACKEND:")
+    if backend == "lambda":
+        print(f"     $env:COMPUTE_BACKEND='lambda'; python run_server.py")
+        print(f"     OR: set COMPUTE_BACKEND=lambda && python run_server.py")
+    else:
+        print(f"     $env:COMPUTE_BACKEND='ecs'; python run_server.py")
+        print(f"     OR: set COMPUTE_BACKEND=ecs && python run_server.py")
+    print(f"  4. Verify server is using {backend.upper()} backend (check server logs)")
     print()
     
     # Create load generator
@@ -78,6 +106,7 @@ async def test_load_generator():
         print()
         print("=" * 80)
         print("Performance Test Results")
+        print(f"Backend: {backend.upper()}")
         print("=" * 80)
         print()
         print("Request Statistics:")
@@ -135,11 +164,16 @@ async def test_load_generator():
         print("   - Review API Gateway latency metrics")
         print()
         print("3. Component Comparison:")
+        print("   - Run this script with --backend ecs and --backend lambda")
+        print("   - Compare Lambda vs ECS performance metrics")
         print("   - Use /health/performance/workload endpoint with different configs")
-        print("   - Compare Lambda vs EC2 performance")
-        print("   - Compare different storage backends")
         print()
-        print("✓ Load generator test completed successfully!")
+        print(f"✓ Load generator test completed successfully for {backend.upper()} backend!")
+        print()
+        print(f"💡 To compare backends, run:")
+        print(f"   python scripts/test_load_generator.py --backend ecs")
+        print(f"   python scripts/test_load_generator.py --backend lambda")
+        print()
         return 0
         
     except Exception as e:
@@ -149,8 +183,54 @@ async def test_load_generator():
         return 1
 
 
-if __name__ == "__main__":
+def main():
+    """Parse command-line arguments and run the load generator test."""
+    parser = argparse.ArgumentParser(
+        description="Test the performance load generator with configurable compute backend",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Test with ECS backend (default)
+  python scripts/test_load_generator.py --backend ecs
+  
+  # Test with Lambda backend
+  python scripts/test_load_generator.py --backend lambda
+  
+  # Test with custom server URL
+  python scripts/test_load_generator.py --backend lambda --base-url http://localhost:8000
+  
+  # Compare both backends (run sequentially)
+  python scripts/test_load_generator.py --backend ecs
+  python scripts/test_load_generator.py --backend lambda
+
+Note: The server must be started with the matching COMPUTE_BACKEND environment variable:
+  - For ECS: set COMPUTE_BACKEND=ecs (or leave unset, defaults to ecs)
+  - For Lambda: set COMPUTE_BACKEND=lambda
+        """
+    )
+    
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["ecs", "lambda"],
+        default="ecs",
+        help="Compute backend to test against: 'ecs' (default) or 'lambda'"
+    )
+    
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        default="http://localhost:8000",
+        help="Base URL of the API server (default: http://localhost:8000)"
+    )
+    
+    args = parser.parse_args()
+    
     # Run the async test
-    exit_code = asyncio.run(test_load_generator())
+    exit_code = asyncio.run(test_load_generator(backend=args.backend, base_url=args.base_url))
     sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
 

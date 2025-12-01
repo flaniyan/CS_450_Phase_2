@@ -1,23 +1,6 @@
 # Minimal Lambda module for performance testing download handler
 # Keeps Terraform changes minimal per user requirements
 
-variable "artifacts_bucket" {
-  type        = string
-  description = "S3 bucket name for artifacts"
-}
-
-variable "aws_region" {
-  type        = string
-  description = "AWS region"
-  default     = "us-east-1"
-}
-
-variable "lambda_function_name" {
-  type        = string
-  description = "Name of the Lambda function"
-  default     = "model-download-handler"
-}
-
 # Lambda IAM Role
 resource "aws_iam_role" "lambda_download_role" {
   name = "${var.lambda_function_name}-role"
