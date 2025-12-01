@@ -5,12 +5,32 @@ from typing import Optional
 import io
 import re
 import asyncio
+import os
+import json
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from botocore.exceptions import ClientError
+import boto3
 
 # Custom thread pool executor for S3 operations to handle high concurrency
 # Use max_workers=100 to match our load test requirements
 _s3_executor = ThreadPoolExecutor(max_workers=100, thread_name_prefix="s3_download")
+
+# Compute backend configuration
+COMPUTE_BACKEND = os.getenv("COMPUTE_BACKEND", "ecs").lower()  # Default to ECS
+LAMBDA_FUNCTION_NAME = os.getenv("LAMBDA_FUNCTION_NAME", "model-download-handler")
+
+# Initialize Lambda client if using Lambda backend
+_lambda_client = None
+if COMPUTE_BACKEND == "lambda":
+    try:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        _lambda_client = boto3.client("lambda", region_name=region)
+        print(f"[PERF] Lambda backend enabled: {LAMBDA_FUNCTION_NAME}")
+    except Exception as e:
+        print(f"[PERF] Warning: Failed to initialize Lambda client: {e}, falling back to ECS")
+        COMPUTE_BACKEND = "ecs"
+
 from ..services.s3_service import (
     upload_model,
     download_model,
@@ -188,6 +208,65 @@ def download_model_file(
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
+def _invoke_lambda_download(model_id: str, version: str, component: str) -> bytes:
+    """
+    Invoke Lambda function to download model from S3.
+    
+    Args:
+        model_id: Model ID
+        version: Model version
+        component: Component to download
+        
+    Returns:
+        File content as bytes
+    """
+    if not _lambda_client:
+        raise HTTPException(status_code=500, detail="Lambda client not initialized")
+    
+    # Prepare Lambda event (API Gateway format)
+    event = {
+        "pathParameters": {
+            "model_id": model_id,
+            "version": version
+        },
+        "queryStringParameters": {
+            "component": component,
+            "path_prefix": "performance"
+        }
+    }
+    
+    try:
+        # Invoke Lambda function
+        response = _lambda_client.invoke(
+            FunctionName=LAMBDA_FUNCTION_NAME,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(event)
+        )
+        
+        # Parse Lambda response
+        lambda_response = json.loads(response["Payload"].read())
+        
+        # Check for errors
+        if lambda_response.get("statusCode") != 200:
+            error_detail = json.loads(lambda_response.get("body", "{}")).get("detail", "Lambda invocation failed")
+            raise HTTPException(
+                status_code=lambda_response.get("statusCode", 500),
+                detail=error_detail
+            )
+        
+        # Decode base64-encoded file content
+        file_content_b64 = lambda_response.get("body", "")
+        file_content = base64.b64decode(file_content_b64)
+        
+        return file_content
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[PERF] Lambda invocation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lambda invocation failed: {str(e)}")
+
+
 @router.get("/performance/{model_id}/{version}/model.zip")
 async def download_performance_model_file(
     model_id: str,
@@ -198,24 +277,39 @@ async def download_performance_model_file(
 ):
     """
     Download model from performance/ S3 path for performance testing.
-    Async endpoint to handle concurrent requests efficiently.
+    Supports both ECS (FastAPI) and Lambda compute backends based on COMPUTE_BACKEND env var.
     """
     try:
-        print(f"[PERF] Received download request: model_id={model_id}, version={version}")
-        # Run the blocking S3 download in a custom thread pool executor
-        # This allows many concurrent requests (up to 100 workers)
-        loop = asyncio.get_event_loop()
-        file_content = await loop.run_in_executor(
-            _s3_executor,
-            download_model,
-            model_id,
-            version,
-            component,
-            True  # use_performance_path=True
-        )
-        print(f"[PERF] Download successful: model_id={model_id}, size={len(file_content)} bytes")
+        print(f"[PERF] Received download request: model_id={model_id}, version={version}, backend={COMPUTE_BACKEND}")
+        
+        # Route to appropriate backend based on configuration
+        if COMPUTE_BACKEND == "lambda":
+            # Use Lambda backend
+            print(f"[PERF] Using Lambda backend: {LAMBDA_FUNCTION_NAME}")
+            loop = asyncio.get_event_loop()
+            file_content = await loop.run_in_executor(
+                _s3_executor,
+                _invoke_lambda_download,
+                model_id,
+                version,
+                component
+            )
+        else:
+            # Use ECS backend (default - existing FastAPI implementation)
+            print(f"[PERF] Using ECS backend")
+            loop = asyncio.get_event_loop()
+            file_content = await loop.run_in_executor(
+                _s3_executor,
+                download_model,
+                model_id,
+                version,
+                component,
+                True  # use_performance_path=True
+            )
+        
+        print(f"[PERF] Download successful: model_id={model_id}, size={len(file_content)} bytes, backend={COMPUTE_BACKEND}")
+        
         # Return Response directly since we already have the full content in memory
-        # This avoids streaming issues and improves compatibility with load generators
         from fastapi.responses import Response
         return Response(
             content=file_content,

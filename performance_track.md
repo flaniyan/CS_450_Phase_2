@@ -38,10 +38,10 @@ This document tracks remaining tasks for the Performance Track requirements. The
   - [x] Implement Lambda function that handles model downloads
   - [x] Store Lambda function code in `src/lambda/download_handler.py` or similar
   - [x] Configure Lambda IAM permissions for S3 access
-- [ ] Make compute backend configurable
-  - [ ] Add environment variable `COMPUTE_BACKEND=ecs|lambda`
-  - [ ] Modify routing logic to select compute backend
-  - [ ] Ensure same endpoint works with both backends
+- [x] Make compute backend configurable
+  - [x] Add environment variable `COMPUTE_BACKEND=ecs|lambda`
+  - [x] Modify routing logic to select compute backend
+  - [x] Ensure same endpoint works with both backends
 - [ ] Deploy Lambda function via Terraform
   - [ ] Create Lambda module in `infra/modules/lambda/`
   - [ ] Configure Lambda integration with API Gateway
