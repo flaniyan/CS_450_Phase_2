@@ -192,9 +192,19 @@ jobs:
           TF_VAR_artifacts_bucket: pkg-artifacts
         run: |
           # Import S3 bucket if it exists but is not in state
+          BUCKET_NAME="pkg-artifacts"
           if ! terraform state show module.s3.aws_s3_bucket.artifacts >/dev/null 2>&1; then
-            echo "S3 bucket not in state, importing..."
-            terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=pkg-artifacts" module.s3.aws_s3_bucket.artifacts pkg-artifacts || echo "Failed to import bucket (may not exist)"
+            echo "S3 bucket not in state, checking if it exists in AWS..."
+            # Check if bucket exists in AWS
+            if aws s3api head-bucket --bucket "${BUCKET_NAME}" 2>/dev/null; then
+              echo "Bucket ${BUCKET_NAME} exists in AWS, importing..."
+              terraform import -var="aws_region=us-east-1" -var="artifacts_bucket=${BUCKET_NAME}" module.s3.aws_s3_bucket.artifacts "${BUCKET_NAME}" || {
+                echo "ERROR: Failed to import bucket ${BUCKET_NAME}"
+                exit 1
+              }
+            else
+              echo "Bucket ${BUCKET_NAME} does not exist in AWS, will be created by Terraform"
+            fi
           else
             echo "S3 bucket already in state, skipping import"
           fi
