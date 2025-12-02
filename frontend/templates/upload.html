@@ -1,16 +1,104 @@
 {% extends 'base.html' %}
+{% block title %}Upload Package - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Upload Package</h1>
+  <p>Upload a ZIP file containing a machine learning model package. The package will be automatically rated and validated.</p>
+  
+  {% if result %}
+    {% if result.error %}
+      <div class="flash error" role="alert" aria-live="assertive">
+        <strong>Error:</strong> {{ result.error }}
+        {% if result.details %}
+          <details style="margin-top: 8px;">
+            <summary>Details</summary>
+            <pre style="margin-top: 8px; white-space: pre-wrap;">{{ result.details|tojson(indent=2) }}</pre>
+          </details>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="flash success" role="alert" aria-live="polite">
+        <strong>Success:</strong> {{ result.message }}
+        {% if result.details %}
+          <p style="margin-top: 8px; margin-bottom: 0;">
+            Package ID: <strong>{{ result.details.id }}</strong><br>
+            Name: {{ result.details.name }}<br>
+            Version: {{ result.details.version }}
+          </p>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+  
   <form method="post" enctype="multipart/form-data" aria-label="Upload package">
-    <label for="file">Select .zip file</label>
-    <input id="file" type="file" name="file" accept=".zip" required />
-    <label>
-      <input type="checkbox" name="debloat" /> Enable debloat
-    </label>
-    <button class="btn" type="submit">Upload</button>
+    <div class="form-group">
+      <label for="file" class="required">Select ZIP file:</label>
+      <input 
+        id="file" 
+        type="file" 
+        name="file" 
+        accept=".zip" 
+        required 
+        aria-label="Select ZIP file to upload"
+        aria-describedby="file-help"
+        aria-invalid="{% if result and result.error %}true{% else %}false{% endif %}"
+      />
+      <span id="file-help" class="help-text">Only ZIP files are accepted. Maximum file size may apply.</span>
+      {% if result and result.error %}
+        <span class="error-message" id="file-error" role="alert">{{ result.error }}</span>
+      {% endif %}
+    </div>
+    
+    <div class="form-group">
+      <label for="name">Package Name (optional):</label>
+      <input 
+        id="name" 
+        type="text" 
+        name="name" 
+        value="{{ name }}" 
+        placeholder="Leave empty to use filename"
+        aria-label="Package name (optional)"
+        aria-describedby="name-help"
+      />
+      <span id="name-help" class="help-text">If not provided, the filename (without .zip) will be used as the package name.</span>
+    </div>
+    
+    <div class="form-group">
+      <label for="version">Version (optional):</label>
+      <input 
+        id="version" 
+        type="text" 
+        name="version" 
+        value="{{ version }}" 
+        placeholder="e.g., 1.0.0 or main"
+        aria-label="Package version (optional)"
+        aria-describedby="version-help"
+      />
+      <span id="version-help" class="help-text">Default version is 'main' if not specified.</span>
+    </div>
+    
+    <button class="btn" type="submit" aria-label="Upload package">Upload</button>
   </form>
 </section>
+
+<style>
+.help-text {
+  display: block;
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.required::after {
+  content: " *";
+  color: #dc2626;
+  font-weight: bold;
+}
+</style>
 {% endblock %}
 
 

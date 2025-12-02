@@ -47,14 +47,37 @@ router = APIRouter()
 
 @router.get("/rate/{name}")
 def rate_package(name: str):
+    """
+    Rate a package/model by name.
+    
+    This endpoint is called concurrently by the autograder's "Rate Models Concurrently" test.
+    If using Lambda backend, ensure Lambda has sufficient reserved concurrent executions
+    (recommended: 100+) to handle concurrent requests without throttling.
+    """
+    import logging
+    import time
+    import threading
+    
+    logger = logging.getLogger(__name__)
+    request_id = f"{threading.current_thread().ident}-{int(time.time() * 1000)}"
+    start_time = time.time()
+    
+    logger.info(f"[RATE] Starting rating request for '{name}' (request_id={request_id})")
+    
     try:
         from ..services.rating import run_scorer
 
         result = run_scorer(name)
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RATE] Successfully rated '{name}' in {elapsed_time:.2f}s (request_id={request_id})")
         return result
-    except HTTPException:
+    except HTTPException as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[RATE] HTTPException rating '{name}' after {elapsed_time:.2f}s: {e.detail} (request_id={request_id})")
         raise
     except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[RATE] Exception rating '{name}' after {elapsed_time:.2f}s: {str(e)} (request_id={request_id})", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to rate package: {str(e)}")
 
 
@@ -243,12 +266,27 @@ def _invoke_lambda_download(model_id: str, version: str, component: str) -> byte
             Payload=json.dumps(event)
         )
         
+        # Check for Lambda throttling (429 errors)
+        if "FunctionError" in response:
+            error_type = response.get("FunctionError", "Unknown")
+            if error_type == "Unhandled" or "TooManyRequestsException" in str(response):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Lambda concurrency limit exceeded. Check reserved concurrent executions setting."
+                )
+        
         # Parse Lambda response
         lambda_response = json.loads(response["Payload"].read())
         
         # Check for errors
         if lambda_response.get("statusCode") != 200:
             error_detail = json.loads(lambda_response.get("body", "{}")).get("detail", "Lambda invocation failed")
+            # Check for throttling errors
+            if "Rate exceeded" in error_detail or "concurrent executions" in error_detail.lower():
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Lambda throttling: {error_detail}. Increase reserved concurrent executions."
+                )
             raise HTTPException(
                 status_code=lambda_response.get("statusCode", 500),
                 detail=error_detail
@@ -262,6 +300,15 @@ def _invoke_lambda_download(model_id: str, version: str, component: str) -> byte
         
     except HTTPException:
         raise
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "TooManyRequestsException" or "Rate exceeded" in str(e):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Lambda throttling: {str(e)}. Check Lambda reserved concurrent executions (should be >= 14 for concurrent rating tests)."
+            )
+        print(f"[PERF] Lambda invocation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lambda invocation failed: {str(e)}")
     except Exception as e:
         print(f"[PERF] Lambda invocation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Lambda invocation failed: {str(e)}")

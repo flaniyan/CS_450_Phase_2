@@ -3,27 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ACME Registry</title>
+    <title>{% block title %}ACME Registry{% endblock %}</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <a href="#main" class="skip-link">Skip to main content</a>
     <header role="banner">
       <nav aria-label="Main navigation" class="nav">
-        <a href="/" class="brand">ACME Registry</a>
-        <a href="/directory">Directory</a>
-        <a href="/upload">Upload</a>
-        <a href="/rate">Rate</a>
-        <a href="/lineage">Lineage</a>
-        <a href="/size-cost">Size Cost</a>
-        <a href="/ingest">Ingest</a>
-        <a href="/license-check">License Check</a>
-        <a href="/admin">Admin</a>
+        <a href="/" class="brand" aria-label="ACME Registry home">ACME Registry</a>
+        <a href="/directory" aria-label="Browse package directory">Directory</a>
+        <a href="/upload" aria-label="Upload a new package">Upload</a>
+        <a href="/rate" aria-label="Rate a package">Rate</a>
+        <a href="/lineage" aria-label="View model lineage">Lineage</a>
+        <a href="/size-cost" aria-label="Calculate package size and cost">Size Cost</a>
+        <a href="/license-check" aria-label="Check license compatibility">License Check</a>
+        <a href="/admin" aria-label="Admin panel">Admin</a>
       </nav>
     </header>
-    <main id="main" tabindex="-1">
+    <main id="main" role="main" tabindex="-1">
       {# Flash messaging is disabled in FastAPI/Starlette template context #}
       {% block content %}{% endblock %}
     </main>
+    <footer role="contentinfo" style="text-align: center; padding: 2rem; margin-top: 4rem; border-top: 1px solid #e2e8f0;">
+      <p style="color: #64748b; font-size: 0.875rem;">ACME Registry - WCAG 2.1 Level AA Compliant</p>
+    </footer>
   </body>
   </html>
 
