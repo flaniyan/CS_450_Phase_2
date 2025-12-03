@@ -105,9 +105,9 @@
           {% endif %}
         </dl>
         <div class="card-actions" role="group" aria-label="Actions for {{ p.name }}">
-          <a href="/download/{{ p.name }}/{{ p.version }}" class="btn" aria-label="Download {{ p.name }} version {{ p.version }}">Download</a>
-          <a href="/rate?name={{ p.name }}{% if p.id %}&id={{ p.id }}{% endif %}" class="btn" aria-label="Rate {{ p.name }}">Rate</a>
-          <a href="/size-cost?name={{ p.name }}{% if p.id %}&id={{ p.id }}{% endif %}" class="btn" aria-label="View size and cost for {{ p.name }}">Size Cost</a>
+          <a href="/download/{{ p.name|pathencode }}/{{ p.version|pathencode }}" class="btn" aria-label="Download {{ p.name }} version {{ p.version }}">Download</a>
+          <a href="/rate?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="Rate {{ p.name }}">Rate</a>
+          <a href="/size-cost?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="View size and cost for {{ p.name }}">Size Cost</a>
         </div>
       </article>
     {% else %}
@@ -272,6 +272,21 @@
   border-width: 0;
 }
 
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.card-actions .btn {
+  flex: 0 1 auto;
+  min-width: fit-content;
+  white-space: nowrap;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 768px) {
   .form-row {
     grid-template-columns: 1fr;
@@ -284,6 +299,14 @@
   
   .search-group label {
     min-width: auto;
+  }
+  
+  .card-actions {
+    flex-direction: column;
+  }
+  
+  .card-actions .btn {
+    width: 100%;
   }
 }
 </style>

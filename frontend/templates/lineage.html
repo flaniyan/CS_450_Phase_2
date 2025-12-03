@@ -158,16 +158,33 @@ input[type="text"] {
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
+  padding: 10px 16px;
   background: #007bff;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  display: inline-block;
+  text-decoration: none;
+  font-weight: 600;
+  transition: background-color 0.2s, transform 0.1s;
+  min-height: 44px; /* WCAG 2.5.5 - Target size */
+  min-width: fit-content;
+  white-space: nowrap;
+  font-size: 0.9rem;
 }
 
 .btn:hover {
   background: #0056b3;
+}
+
+.btn:focus {
+  outline: 3px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 2px;
+}
+
+.btn:active {
+  transform: scale(0.98);
 }
 
 p {

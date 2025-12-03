@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from urllib.parse import quote, quote_plus
 
 import uvicorn
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
@@ -193,11 +194,23 @@ def setup_app(
         static_path = frontend_root / "static"
         if templates_path.exists():
             templates_instance = Jinja2Templates(directory=str(templates_path))
+            # Add urlencode filters for URL encoding in templates
+            if templates_instance.env:
+                # urlencode for query parameters (uses + for spaces)
+                templates_instance.env.filters['urlencode'] = lambda u: quote_plus(str(u)) if u else ''
+                # pathencode for path segments (uses %20 for spaces)
+                templates_instance.env.filters['pathencode'] = lambda u: quote(str(u), safe='') if u else ''
         if static_path.exists():
             app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
     if templates_instance:
         set_templates(templates_instance)
+        # Ensure urlencode filters are available
+        if templates_instance.env:
+            if 'urlencode' not in templates_instance.env.filters:
+                templates_instance.env.filters['urlencode'] = lambda u: quote_plus(str(u)) if u else ''
+            if 'pathencode' not in templates_instance.env.filters:
+                templates_instance.env.filters['pathencode'] = lambda u: quote(str(u), safe='') if u else ''
 
     register_routes(app)
     return app
