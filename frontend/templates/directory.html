@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% block title %}Package Directory - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Package Directory</h1>
@@ -61,7 +62,7 @@
       </div>
       
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Advanced Search</button>
+        <button type="submit" class="btn btn-primary" aria-label="Submit advanced search">Advanced Search</button>
         <button type="button" class="btn btn-secondary" onclick="clearAdvancedForm()" aria-label="Clear advanced search form">Clear</button>
       </div>
     </form>
