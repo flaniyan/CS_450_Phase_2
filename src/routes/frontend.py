@@ -350,7 +350,20 @@ def register_routes(app: FastAPI):
                 # If not cached, compute rating
                 if not rating_raw:
                     logger.info(f"[RATE] Computing rating for {model_name} (cache_key={cache_key})")
-                    rating_raw = analyze_model_content(model_name)
+                    try:
+                        rating_raw = analyze_model_content(model_name, suppress_errors=False)
+                    except RuntimeError as e:
+                        logger.error(f"[RATE] RuntimeError analyzing {model_name}: {str(e)}", exc_info=True)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to analyze model: {str(e)}",
+                        )
+                    except Exception as e:
+                        logger.error(f"[RATE] Exception analyzing {model_name}: {str(e)}", exc_info=True)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"The artifact rating system encountered an error: {str(e)}",
+                        )
                     if not rating_raw:
                         raise HTTPException(
                             status_code=500,
