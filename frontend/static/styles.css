@@ -1,19 +1,276 @@
-:root { --primary: #2563eb; --danger: #dc2626; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 0; background: #f8fafc; color: #0f172a; }
-.nav { display: flex; gap: 16px; align-items: center; padding: 12px 24px; background: var(--primary); color: white; }
-.nav a { color: white; text-decoration: none; font-weight: 600; }
-.brand { margin-right: auto; }
-.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
-.btn { background: var(--primary); color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; display: inline-block; text-decoration: none; }
-.btn-danger { background: var(--danger); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-.card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
-.card-actions { display: flex; gap: 8px; margin-top: 12px; }
-.card-actions .btn { flex: 1; text-align: center; }
-input[type=text], input[type=file] { padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
-form { display: grid; gap: 12px; max-width: 520px; }
-.flash-container { margin: 16px auto; max-width: 1100px; padding: 0 16px; }
-.flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-.flash.success { background: #ecfeff; border: 1px solid #22d3ee; }
-.flash.error { background: #fff1f2; border: 1px solid #fb7185; }
-.flash.warning { background: #fefce8; border: 1px solid #f59e0b; }
+:root { 
+  --primary: #2563eb; 
+  --primary-dark: #1e40af;
+  --danger: #dc2626; 
+  --danger-dark: #b91c1c;
+  --text: #0f172a;
+  --text-light: #475569;
+  --bg: #ffffff;
+  --bg-light: #f8fafc;
+  --border: #e2e8f0;
+  --focus: #2563eb;
+  --focus-ring: rgba(37, 99, 235, 0.5);
+}
+
+/* Skip link for keyboard navigation (WCAG 2.4.1) */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--primary);
+  color: white;
+  padding: 8px 16px;
+  text-decoration: none;
+  z-index: 100;
+  border-radius: 0 0 4px 0;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+body { 
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; 
+  margin: 0; 
+  background: var(--bg-light); 
+  color: var(--text); 
+  line-height: 1.6;
+  position: relative;
+}
+
+.nav { 
+  display: flex; 
+  gap: 16px; 
+  align-items: center; 
+  padding: 12px 24px; 
+  background: var(--primary); 
+  color: white; 
+}
+
+.nav a { 
+  color: white; 
+  text-decoration: none; 
+  font-weight: 600; 
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.nav a:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav a:focus {
+  outline: 3px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.brand { 
+  margin-right: auto; 
+  font-size: 1.25rem;
+}
+
+.container { 
+  max-width: 1100px; 
+  margin: 24px auto; 
+  padding: 0 16px; 
+}
+
+.btn { 
+  background: var(--primary); 
+  color: white; 
+  border: none; 
+  padding: 10px 16px; 
+  border-radius: 6px; 
+  cursor: pointer; 
+  display: inline-block; 
+  text-decoration: none; 
+  font-weight: 600;
+  transition: background-color 0.2s, transform 0.1s;
+  min-height: 44px; /* WCAG 2.5.5 - Target size */
+  min-width: 44px;
+}
+
+.btn:hover {
+  background: var(--primary-dark);
+}
+
+.btn:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-danger { 
+  background: var(--danger); 
+}
+
+.btn-danger:hover {
+  background: var(--danger-dark);
+}
+
+.grid { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); 
+  gap: 16px; 
+}
+
+.card { 
+  background: var(--bg); 
+  border: 1px solid var(--border); 
+  border-radius: 8px; 
+  padding: 16px; 
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.card-actions { 
+  display: flex; 
+  gap: 8px; 
+  margin-top: 12px; 
+}
+
+.card-actions .btn { 
+  flex: 1; 
+  text-align: center; 
+}
+
+/* Form inputs with proper focus indicators (WCAG 2.4.7) */
+input[type=text], 
+input[type=file], 
+input[type=url],
+input[type=email],
+input[type=number],
+select,
+textarea { 
+  padding: 10px 12px; 
+  border-radius: 6px; 
+  border: 2px solid var(--border); 
+  font-size: 1rem;
+  min-height: 44px; /* WCAG 2.5.5 */
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+input:invalid:not(:focus):not(:placeholder-shown),
+select:invalid:not(:focus),
+textarea:invalid:not(:focus):not(:placeholder-shown) {
+  border-color: var(--danger);
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Labels with proper association */
+label {
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: block;
+  color: var(--text);
+}
+
+label.required::after {
+  content: " *";
+  color: var(--danger);
+  font-weight: bold;
+}
+
+/* Form validation messages */
+.error-message {
+  color: var(--danger);
+  font-size: 0.875rem;
+  margin-top: 4px;
+  display: block;
+}
+
+form { 
+  display: grid; 
+  gap: 16px; 
+  max-width: 520px; 
+}
+
+.flash-container { 
+  margin: 16px auto; 
+  max-width: 1100px; 
+  padding: 0 16px; 
+}
+
+.flash { 
+  padding: 12px 16px; 
+  border-radius: 6px; 
+  margin-bottom: 8px; 
+  border-left: 4px solid;
+}
+
+.flash.success { 
+  background: #ecfeff; 
+  border-color: #22d3ee; 
+  color: #0e7490;
+}
+
+.flash.error { 
+  background: #fff1f2; 
+  border-color: #fb7185; 
+  color: #991b1b;
+}
+
+.flash.warning { 
+  background: #fefce8; 
+  border-color: #f59e0b; 
+  color: #92400e;
+}
+
+/* Ensure sufficient color contrast (WCAG 1.4.3) */
+a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: var(--primary-dark);
+}
+
+a:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .nav {
+    flex-wrap: wrap;
+  }
+  
+  .nav a {
+    font-size: 0.875rem;
+    padding: 6px 8px;
+  }
+  
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Print styles */
+@media print {
+  .nav,
+  .skip-link,
+  .btn {
+    display: none;
+  }
+}

@@ -7,6 +7,7 @@ import boto3
 import os
 import uuid
 import logging
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from botocore.exceptions import ClientError
@@ -58,9 +59,10 @@ def store_metrics_in_dynamodb(metrics: List[Dict[str, Any]]) -> int:
                         "timestamp": metric.get(
                             "timestamp", datetime.now(timezone.utc).isoformat()
                         ),
-                        "client_id": metric.get("client_id", 0),
-                        "request_latency_ms": float(
-                            metric.get("request_latency_ms", 0)
+                        "client_id": int(metric.get("client_id", 0)),
+                        # DynamoDB requires Decimal for float values, not float
+                        "request_latency_ms": Decimal(
+                            str(metric.get("request_latency_ms", 0))
                         ),
                         "bytes_transferred": int(metric.get("bytes_transferred", 0)),
                         "status_code": int(metric.get("status_code", 0)),

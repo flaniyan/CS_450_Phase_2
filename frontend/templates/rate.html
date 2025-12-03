@@ -1,29 +1,140 @@
 {% extends 'base.html' %}
+{% block title %}Rate Package - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Rate Package</h1>
   <form method="get" aria-label="Get package rating">
-    <input type="text" name="name" value="{{ name }}" placeholder="Enter package name" aria-label="Package name" />
-    <button class="btn" type="submit">Get Rating</button>
+    <div class="form-group">
+      <label for="package-name-input">Package Name or ID:</label>
+      <input 
+        type="text" 
+        name="name" 
+        id="package-name-input" 
+        value="{{ name }}" 
+        placeholder="Enter package name or ID" 
+        aria-label="Package name or ID"
+        aria-describedby="package-name-help"
+      />
+      <span id="package-name-help" class="sr-only">Enter the package name or artifact ID to rate</span>
+    </div>
+    <div class="form-group">
+      <label for="package-id-input">Package ID (optional):</label>
+      <input 
+        type="text" 
+        name="id" 
+        id="package-id-input" 
+        value="{{ id }}" 
+        placeholder="Enter package ID" 
+        aria-label="Package ID (optional)"
+      />
+    </div>
+    <button class="btn" type="submit" aria-label="Get package rating">Get Rating</button>
   </form>
 
   {% if rating %}
-    <div class="card">
-      <h2>Metrics</h2>
-      <ul>
-        <li>NetScore: {{ '%.2f'|format(rating.NetScore if rating.NetScore is defined else rating['NetScore']) }}</li>
-        <li>RampUp: {{ '%.2f'|format(rating.RampUp if rating.RampUp is defined else rating['RampUp']) }}</li>
-        <li>Correctness: {{ '%.2f'|format(rating.Correctness if rating.Correctness is defined else rating['Correctness']) }}</li>
-        <li>BusFactor: {{ '%.2f'|format(rating.BusFactor if rating.BusFactor is defined else rating['BusFactor']) }}</li>
-        <li>ResponsiveMaintainer: {{ '%.2f'|format(rating.ResponsiveMaintainer if rating.ResponsiveMaintainer is defined else rating['ResponsiveMaintainer']) }}</li>
-        <li>LicenseScore: {{ '%.2f'|format(rating.LicenseScore if rating.LicenseScore is defined else rating['LicenseScore']) }}</li>
-        <li>Reproducibility: {{ '%.2f'|format(rating.Reproducibility if rating.Reproducibility is defined else rating['Reproducibility']) }}</li>
-        <li>Reviewedness: {{ '%.2f'|format(rating.Reviewedness if rating.Reviewedness is defined else rating['Reviewedness']) }}</li>
-        <li>Treescore: {{ '%.2f'|format(rating.Treescore if rating.Treescore is defined else rating['Treescore']) }}</li>
-      </ul>
+    <div class="card" role="region" aria-labelledby="metrics-heading">
+      <h2 id="metrics-heading">Metrics for {{ name }}</h2>
+      <dl class="metrics-list">
+        <div class="metric-item">
+          <dt>Net Score:</dt>
+          <dd aria-label="Net Score">{{ '%.2f'|format(rating.net_score if rating.net_score is defined else (rating.NetScore if rating.NetScore is defined else rating.get('NetScore', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Ramp Up Time:</dt>
+          <dd aria-label="Ramp Up Time">{{ '%.2f'|format(rating.ramp_up_time if rating.ramp_up_time is defined else (rating.RampUp if rating.RampUp is defined else rating.get('RampUp', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Bus Factor:</dt>
+          <dd aria-label="Bus Factor">{{ '%.2f'|format(rating.bus_factor if rating.bus_factor is defined else (rating.BusFactor if rating.BusFactor is defined else rating.get('BusFactor', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Performance Claims:</dt>
+          <dd aria-label="Performance Claims">{{ '%.2f'|format(rating.performance_claims if rating.performance_claims is defined else (rating.PerformanceClaims if rating.PerformanceClaims is defined else rating.get('PerformanceClaims', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>License Score:</dt>
+          <dd aria-label="License Score">{{ '%.2f'|format(rating.license if rating.license is defined else (rating.LicenseScore if rating.LicenseScore is defined else rating.get('LicenseScore', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Code Quality:</dt>
+          <dd aria-label="Code Quality">{{ '%.2f'|format(rating.code_quality if rating.code_quality is defined else (rating.Correctness if rating.Correctness is defined else rating.get('Correctness', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Reproducibility:</dt>
+          <dd aria-label="Reproducibility">{{ '%.2f'|format(rating.reproducibility if rating.reproducibility is defined else (rating.Reproducibility if rating.Reproducibility is defined else rating.get('Reproducibility', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Reviewedness:</dt>
+          <dd aria-label="Reviewedness">{{ '%.2f'|format(rating.reviewedness if rating.reviewedness is defined else (rating.Reviewedness if rating.Reviewedness is defined else rating.get('Reviewedness', 0))) }}</dd>
+        </div>
+        <div class="metric-item">
+          <dt>Treescore:</dt>
+          <dd aria-label="Treescore">{{ '%.2f'|format(rating.treescore if rating.treescore is defined else (rating.Treescore if rating.Treescore is defined else rating.get('Treescore', 0))) }}</dd>
+        </div>
+        {% if rating.dataset_and_code_score is defined or rating.get('DatasetCode') %}
+        <div class="metric-item">
+          <dt>Dataset and Code Score:</dt>
+          <dd aria-label="Dataset and Code Score">{{ '%.2f'|format(rating.dataset_and_code_score if rating.dataset_and_code_score is defined else rating.get('DatasetCode', 0)) }}</dd>
+        </div>
+        {% endif %}
+        {% if rating.dataset_quality is defined or rating.get('DatasetQuality') %}
+        <div class="metric-item">
+          <dt>Dataset Quality:</dt>
+          <dd aria-label="Dataset Quality">{{ '%.2f'|format(rating.dataset_quality if rating.dataset_quality is defined else rating.get('DatasetQuality', 0)) }}</dd>
+        </div>
+        {% endif %}
+      </dl>
     </div>
   {% endif %}
 </section>
+
+<style>
+.metrics-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.metric-item {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.metric-item:last-child {
+  border-bottom: none;
+}
+
+.metric-item dt {
+  font-weight: 600;
+  color: #475569;
+}
+
+.metric-item dd {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+</style>
 {% endblock %}
 
 

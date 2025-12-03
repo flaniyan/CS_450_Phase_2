@@ -1,8 +1,13 @@
 import time
 import re
+import os
+import json
+import logging
 from typing import Optional
 from ..types import MetricValue
 from .base import register
+
+logger = logging.getLogger(__name__)
 
 
 class TreescoreMetric:
@@ -10,6 +15,19 @@ class TreescoreMetric:
 
     def score(self, meta: dict) -> MetricValue:
         t0 = time.perf_counter()
+        
+        # Try to use Purdue LLM GENAI service first
+        try:
+            llm_score = self._get_treescore_from_purdue_llm(meta)
+            if llm_score is not None:
+                value = max(0.0, min(1.0, float(llm_score)))
+                value = round(value, 2)
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                return MetricValue(self.name, value, latency_ms)
+        except Exception as e:
+            logger.warning(f"Failed to get treescore from Purdue LLM GENAI: {str(e)}, falling back to parent score calculation")
+        
+        # Fallback to original parent score calculation
         parents = self._extract_parents(meta)
 
         scores = []
@@ -62,6 +80,242 @@ class TreescoreMetric:
         value = round(float(value), 2)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricValue(self.name, value, latency_ms)
+    
+    def _get_treescore_from_purdue_llm(self, meta: dict) -> Optional[float]:
+        """
+        Get treescore from Purdue LLM GENAI service.
+        
+        Args:
+            meta: Model metadata dictionary
+            
+        Returns:
+            Treescore value (0.0-1.0) or None if service unavailable
+        """
+        try:
+            try:
+                import requests
+            except ImportError:
+                logger.debug("requests library not available, cannot call Purdue LLM GENAI service")
+                return None
+            
+            # Get Purdue LLM GENAI service configuration from environment variables
+            purdue_llm_url = os.environ.get("PURDUE_LLM_GENAI_URL")
+            purdue_llm_api_key = os.environ.get("PURDUE_LLM_GENAI_API_KEY")
+            
+            if not purdue_llm_url:
+                logger.debug("PURDUE_LLM_GENAI_URL not set, skipping LLM service")
+                return None
+            
+            # Prepare request payload with model metadata
+            model_name = meta.get("name", meta.get("model_id", "unknown"))
+            config = meta.get("config", {})
+            readme_text = meta.get("readme_text", "")
+            description = meta.get("description", "")
+            
+            # Get all potential parent models from the system for the LLM to check against
+            # This helps the LLM identify which parents are actually uploaded
+            try:
+                from ...services.s3_service import list_models
+                uploaded_models_result = list_models(limit=1000)
+                uploaded_model_names = [m.get("name", "") for m in uploaded_models_result.get("models", [])]
+            except Exception:
+                uploaded_model_names = []
+            
+            # Pre-extract potential parents and their scores to help the LLM
+            # The LLM will still do its own lineage extraction, but we provide this as reference
+            potential_parents = self._extract_parents(meta)
+            parent_scores_lookup = {}
+            for p in potential_parents[:20]:  # Limit to avoid too many lookups
+                parent_id = p.get("id") if isinstance(p, dict) else str(p)
+                if parent_id:
+                    parent_score = self._lookup_parent_score(parent_id)
+                    if parent_score is not None:
+                        parent_scores_lookup[parent_id] = parent_score
+            
+            # Build comprehensive prompt that asks LLM to extract lineage AND calculate treescore
+            # Following OpenAPI spec requirements for lineage graph and treescore
+            prompt = f"""You are analyzing a machine learning model to extract its lineage graph and calculate its Treescore according to the ECE 461 Fall 2025 OpenAPI specification.
+
+TASK 1: EXTRACT LINEAGE GRAPH FROM CONFIG.JSON STRUCTURED METADATA
+Per the OpenAPI spec, the lineage graph must be extracted from structured metadata (config.json).
+Analyze the config.json to identify all parent models and their relationships.
+
+Look for fields in config.json such as:
+- base_model_name_or_path
+- _name_or_path
+- parent_model
+- pretrained_model_name_or_path
+- base_model
+- parent
+- from_pretrained
+- model_name_or_path
+- source_model
+- original_model
+- foundation_model
+- backbone
+- teacher_model
+- student_model
+- checkpoint
+- checkpoint_path
+- init_checkpoint
+- load_from
+- from_checkpoint
+- resume_from
+- transfer_from
+
+Also check lineage_metadata and lineage fields if present.
+
+For each parent model found, identify:
+- The parent's artifact_id (if it's uploaded to the system) or name
+- The relationship type (e.g., "base_model", "fine_tuning_dataset", "parent_model", etc.)
+- The source should be "config_json" since it's extracted from structured metadata
+
+IMPORTANT: Lineage only includes data available from models currently uploaded to the system (per spec requirement).
+
+TASK 2: IDENTIFY UPLOADED PARENTS
+For each parent model you extract from the lineage graph, check if it exists in the uploaded_models list.
+Only parents that are currently uploaded to the system should be included in the lineage graph nodes.
+External dependencies (not uploaded) should be noted but not included in treescore calculation.
+
+TASK 3: CALCULATE TREESCORE (Supply-chain health score for model dependencies)
+Per the OpenAPI spec, treescore is described as "Supply-chain health score for model dependencies."
+It is calculated as the average of the total model scores (net_score) of all parents according to the lineage graph.
+
+Rules:
+- Use the parent_scores_lookup provided below for parents that are uploaded and have scores
+- Calculate the average of all parent net_scores that are available
+- Only include parents that are currently uploaded to the system
+- If no parents found in the lineage graph → treescore = 0.5
+- If parents found but none are uploaded to the system → treescore = 0.5
+- If parents found and uploaded but no scores available → treescore = 0.5
+- Otherwise → treescore = average of available parent net_scores (must be between 0.0 and 1.0)
+
+MODEL INFORMATION:
+- Model Name: {model_name}
+- Config.json (structured metadata): {json.dumps(config, indent=2)[:3000]}
+- Lineage metadata: {json.dumps(meta.get("lineage_metadata", {}), indent=2)[:1000]}
+- Lineage field: {json.dumps(meta.get("lineage", {}), indent=2)[:1000] if meta.get("lineage") else "None"}
+
+UPLOADED MODELS (check if parents are in this list):
+{json.dumps(uploaded_model_names[:100], indent=2) if uploaded_model_names else "No models uploaded to system"}
+
+PARENT SCORES LOOKUP (net_score for parents that are uploaded):
+{json.dumps(parent_scores_lookup, indent=2) if parent_scores_lookup else "No parent scores available"}
+
+INSTRUCTIONS:
+1. Extract the lineage graph by analyzing config.json structured metadata. Identify ALL parent models and their relationships.
+2. For each parent model, check if it exists in the uploaded_models list.
+3. Build the lineage graph structure with:
+   - nodes: array of parent models (with artifact_id if uploaded, name, source="config_json")
+   - edges: array of relationships (from_node_artifact_id, to_node_artifact_id, relationship type)
+4. For parents that are uploaded AND have scores in parent_scores_lookup, use those scores.
+5. Calculate the average of all parent net_scores that are available.
+6. Apply default rules: no parents → 0.5, parents not uploaded → 0.5, no scores → 0.5
+7. Otherwise → treescore = average of available parent net_scores
+
+Return a JSON object matching the OpenAPI spec format:
+{{
+  "lineage_graph": {{
+    "nodes": [
+      {{
+        "artifact_id": "parent_artifact_id_or_name",
+        "name": "parent_model_name",
+        "source": "config_json"
+      }}
+    ],
+    "edges": [
+      {{
+        "from_node_artifact_id": "parent_artifact_id",
+        "to_node_artifact_id": "current_model_artifact_id",
+        "relationship": "base_model"  // or "parent_model", "fine_tuning_dataset", etc.
+      }}
+    ]
+  }},
+  "uploaded_parents": ["parent1", ...],  // Parents that are in uploaded_models list
+  "parent_scores_used": {{"parent1": 0.85, ...}},  // Parent IDs and their net_scores used in calculation
+  "treescore": 0.75  // Average of parent net_scores (supply-chain health score), or 0.5 if unavailable
+}}
+"""
+            
+            payload = {
+                "prompt": prompt,
+                "model_name": model_name,
+                "config": config,
+                "readme_text": readme_text[:5000] if readme_text else "",  # Limit text length
+                "description": description[:1000] if description else "",
+                "lineage_metadata": meta.get("lineage_metadata", {}),
+                "lineage": meta.get("lineage", {}),
+                "uploaded_models": uploaded_model_names[:100],  # Include uploaded models for reference
+                "parent_scores_lookup": parent_scores_lookup,  # Pre-looked up scores for reference
+                "requirements": {
+                    "treescore_definition": "Average of the total model scores (net_score) of all parents according to the lineage graph",
+                    "lineage_source": "config.json structured metadata analysis",
+                    "lineage_scope": "Only includes models currently uploaded to the system",
+                    "default_value": 0.5,
+                    "value_range": [0.0, 1.0],
+                    "tasks": [
+                        "Extract lineage graph from config.json",
+                        "Identify which parents are uploaded to system",
+                        "Calculate treescore as average of parent net_scores"
+                    ]
+                }
+            }
+            
+            headers = {
+                "Content-Type": "application/json",
+            }
+            
+            if purdue_llm_api_key:
+                headers["Authorization"] = f"Bearer {purdue_llm_api_key}"
+            
+            # Make request to Purdue LLM GENAI service
+            response = requests.post(
+                purdue_llm_url,
+                json=payload,
+                headers=headers,
+                timeout=10,  # 10 second timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Log lineage graph if provided
+                lineage_graph = result.get("lineage_graph") or result.get("lineage")
+                if lineage_graph:
+                    logger.info(f"Purdue LLM GENAI extracted lineage graph for {model_name}: {lineage_graph}")
+                
+                uploaded_parents = result.get("uploaded_parents")
+                if uploaded_parents:
+                    logger.info(f"Purdue LLM GENAI identified uploaded parents for {model_name}: {uploaded_parents}")
+                
+                # Extract treescore from response
+                # Support multiple possible response formats
+                treescore = (
+                    result.get("treescore") or
+                    result.get("tree_score") or
+                    result.get("score") or
+                    result.get("value")
+                )
+                
+                if treescore is not None:
+                    try:
+                        score = float(treescore)
+                        if 0.0 <= score <= 1.0:
+                            logger.info(f"Got treescore {score} from Purdue LLM GENAI for {model_name} (lineage: {len(lineage_graph) if lineage_graph else 0} parents)")
+                            return score
+                        else:
+                            logger.warning(f"Purdue LLM GENAI returned invalid treescore {score} (out of range 0.0-1.0)")
+                    except (TypeError, ValueError):
+                        logger.warning(f"Purdue LLM GENAI returned non-numeric treescore: {treescore}")
+            else:
+                logger.warning(f"Purdue LLM GENAI service returned status {response.status_code}: {response.text[:200]}")
+                
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Error calling Purdue LLM GENAI service: {str(e)}")
+        except Exception as e:
+            logger.warning(f"Unexpected error calling Purdue LLM GENAI service: {str(e)}")
+        
+        return None
 
     def _lookup_parent_score(self, parent_id: str) -> Optional[float]:
         """

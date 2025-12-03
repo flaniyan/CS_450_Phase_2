@@ -42,7 +42,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     effect  = "Allow"
     actions = ["s3:ListBucket"]
     resources = [
-      "arn:aws:s3:::pkg-artifacts-team"
+      "arn:aws:s3:::pkg-artifacts"
     ]
   }
 
@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     sid       = "ListPackagesPrefix"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::pkg-artifacts-team"]
+    resources = ["arn:aws:s3:::pkg-artifacts"]
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
@@ -77,8 +77,8 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
     ]
     resources = [
       "arn:aws:s3:us-east-1:838693051036:accesspoint/cs450-s3/*",
-      "arn:aws:s3:::pkg-artifacts-team/models/*",
-      "arn:aws:s3:::pkg-artifacts-team/packages/*"
+      "arn:aws:s3:::pkg-artifacts/models/*",
+      "arn:aws:s3:::pkg-artifacts/packages/*"
     ]
   }
 
@@ -91,7 +91,7 @@ data "aws_iam_policy_document" "api_s3_packages_rw" {
       "s3:PutObject", "s3:PutObjectTagging",
       "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:DeleteObject"
     ]
-    resources = ["arn:aws:s3:::pkg-artifacts-team/packages/*"]
+    resources = ["arn:aws:s3:::pkg-artifacts/packages/*"]
     condition {
       test     = "StringEquals"
       variable = "s3:x-amz-server-side-encryption"
@@ -164,4 +164,29 @@ resource "aws_iam_role_policy_attachment" "api_attach_s3" {
 resource "aws_iam_role_policy_attachment" "api_attach_kms" {
   role       = aws_iam_role.api_task.name
   policy_arn = aws_iam_policy.api_kms_s3_managed.arn
+}
+
+# API Service - Lambda Invoke Policy (for performance testing compute backend switching)
+resource "aws_iam_policy" "api_lambda_invoke_managed" {
+  name = "api-lambda-invoke-dev"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          module.lambda.lambda_function_arn,
+          "${module.lambda.lambda_function_arn}:*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_attach_lambda" {
+  role       = aws_iam_role.api_task.name
+  policy_arn = aws_iam_policy.api_lambda_invoke_managed.arn
 }

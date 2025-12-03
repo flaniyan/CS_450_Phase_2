@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config
 import zipfile
 import io
 import re
@@ -33,8 +34,14 @@ try:
     account_id = sts.get_caller_identity()["Account"]
     # Use the correct access point ARN format
     ap_arn = f"arn:aws:s3:{region}:{account_id}:accesspoint/{access_point_name}"
+    # Configure S3 client with larger connection pool for high concurrency
+    # Default is 10 connections, increase to 100+ to handle concurrent load testing
+    s3_config = Config(
+        max_pool_connections=150,  # Allow up to 150 concurrent connections
+        retries={'max_attempts': 3, 'mode': 'standard'}
+    )
     # Use regular S3 client - boto3 handles access points automatically
-    s3 = boto3.client("s3", region_name=region)
+    s3 = boto3.client("s3", region_name=region, config=s3_config)
     # Test if S3 client actually works with access point
     s3.list_objects_v2(Bucket=ap_arn, Prefix="models/", MaxKeys=1)
     aws_available = True
@@ -291,7 +298,7 @@ def upload_model(
             )
 
 
-def download_model(model_id: str, version: str, component: str = "full") -> bytes:
+def download_model(model_id: str, version: str, component: str = "full", use_performance_path: bool = False) -> bytes:
     if not aws_available:
         raise HTTPException(
             status_code=503,
@@ -302,7 +309,11 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
     from .performance.instrumentation import measure_operation, publish_metric
 
     try:
-        s3_key = f"models/{model_id}/{version}/model.zip"
+        # Use performance/ path if specified, otherwise models/
+        path_prefix = "performance" if use_performance_path else "models"
+        # Models are stored in S3 with sanitized IDs (slashes replaced with underscores)
+        # The endpoint receives the sanitized ID directly, so use it as-is
+        s3_key = f"{path_prefix}/{model_id}/{version}/model.zip"
 
         # Measure S3 download latency
         with measure_operation("S3DownloadLatency", {"Component": "S3"}):
@@ -322,12 +333,12 @@ def download_model(model_id: str, version: str, component: str = "full") -> byte
             try:
                 result = extract_model_component(zip_content, component)
                 print(
-                    f"AWS S3 download successful: {model_id} v{version} ({component})"
+                    f"AWS S3 download successful: {model_id} v{version} ({component}) from {path_prefix}/"
                 )
                 return result
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-        print(f"AWS S3 download successful: {model_id} v{version} (full)")
+        print(f"AWS S3 download successful: {model_id} v{version} (full) from {path_prefix}/")
         return zip_content
     except Exception as e:
         print(f"AWS S3 download failed: {e}")
@@ -442,8 +453,26 @@ def list_models(
                 key = item["Key"]
                 if key.endswith("/model.zip"):
                     if len(key.split("/")) >= 3:
-                        model_name = key.split("/")[1]
+                        sanitized_model_name = key.split("/")[1]
                         model_version = key.split("/")[2]
+                        
+                        # Try to get original name from metadata.json
+                        # Metadata is stored at: models/{sanitized_name}/{version}/metadata.json
+                        metadata_key = f"models/{sanitized_model_name}/{model_version}/metadata.json"
+                        model_name = sanitized_model_name  # Fallback to sanitized name
+                        
+                        try:
+                            metadata_response = s3.get_object(Bucket=ap_arn, Key=metadata_key)
+                            metadata_json = metadata_response["Body"].read().decode("utf-8")
+                            metadata = json.loads(metadata_json)
+                            # Use original name from metadata if available
+                            if metadata.get("name"):
+                                model_name = metadata.get("name")
+                        except Exception:
+                            # If metadata doesn't exist or can't be read, use sanitized name
+                            # This handles legacy models that don't have metadata.json
+                            pass
+                        
                         if name_pattern and not name_pattern.search(model_name):
                             continue
                         if version_range:
@@ -454,8 +483,9 @@ def list_models(
                                 continue
                         if model_regex:
                             try:
+                                # Use sanitized name for searching model card content (S3 path)
                                 if not search_model_card_content(
-                                    model_name, model_version, model_regex
+                                    sanitized_model_name, model_version, model_regex
                                 ):
                                     continue
                             except re.error as e:
@@ -1806,30 +1836,6 @@ def model_ingestion(model_id: str, version: str) -> Dict[str, Any]:
                     meta["license"] = license_text_lower
             if not meta.get("readme_text"):
                 print(f"[INGEST] Warning: No README text found for {model_id}")
-
-            readme_text = meta.get("readme_text", "")
-            if readme_text:
-                from ..index import _parse_dependencies
-                dependency_info = _parse_dependencies(readme_text, model_id)
-                
-                base_models = dependency_info.get("parent_models", [])
-                if base_models:
-                    if not meta.get("parents"):
-                        meta["parents"] = []
-                    for base_model in base_models:
-                        clean_base = base_model.replace("https://huggingface.co/", "").replace("http://huggingface.co/", "").strip()
-                        if clean_base and clean_base != clean_model_id:
-                            base_exists = any(
-                                p.get("id") == clean_base for p in meta["parents"]
-                            )
-                            if not base_exists:
-                                meta["parents"].append({"id": clean_base, "score": None})
-                
-                if dependency_info.get("parent_models"):
-                    meta["lineage_parents"] = dependency_info["parent_models"]
-                
-                if dependency_info:
-                    meta["lineage"] = dependency_info
 
             print(f"[INGEST] Computing metrics...")
             metrics_start = time.time()

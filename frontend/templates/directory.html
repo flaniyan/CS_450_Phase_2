@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% block title %}Package Directory - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Package Directory</h1>
@@ -7,8 +8,17 @@
   <form method="get" aria-label="Search packages" class="search-form">
     <div class="search-group">
       <label for="q">Quick Search:</label>
-      <input type="text" name="q" id="q" value="{{ q }}" placeholder="Search packages..." aria-label="Search packages" />
-      <button type="submit" class="btn">Search</button>
+      <input 
+        type="text" 
+        name="q" 
+        id="q" 
+        value="{{ q }}" 
+        placeholder="Search packages..." 
+        aria-label="Search packages"
+        aria-describedby="search-help-text"
+      />
+      <span id="search-help-text" class="sr-only">Enter a package name or version to search</span>
+      <button type="submit" class="btn" aria-label="Submit search">Search</button>
     </div>
   </form>
 
@@ -17,7 +27,7 @@
     <summary>Advanced Search Options</summary>
     
     <div class="search-help">
-      <h4>Search Types:</h4>
+      <h2>Search Types</h2>
       <ul>
         <li><strong>Name Regex:</strong> Searches model names (e.g., <code>^gpt-.*</code> finds models starting with "gpt-")</li>
         <li><strong>Model Card Regex:</strong> Searches within model files like README.md, config.json, and code files (e.g., <code>transformer|bert</code> finds models mentioning these terms)</li>
@@ -52,8 +62,8 @@
       </div>
       
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Advanced Search</button>
-        <button type="button" class="btn btn-secondary" onclick="clearAdvancedForm()">Clear</button>
+        <button type="submit" class="btn btn-primary" aria-label="Submit advanced search">Advanced Search</button>
+        <button type="button" class="btn btn-secondary" onclick="clearAdvancedForm()" aria-label="Clear advanced search form">Clear</button>
       </div>
     </form>
   </details>
@@ -75,25 +85,34 @@
   {% endif %}
 
   <!-- Package Grid -->
-  <div class="grid">
+  <div class="grid" role="list" aria-label="Package listings">
     {% for p in packages %}
-      <div class="card">
-        <h3>{{ p.name }}</h3>
-        <p>Version: {{ p.version }}</p>
-        {% if p.size %}
-        <p>Size: {{ p.size }} bytes</p>
-        {% endif %}
-        {% if p.upload_time %}
-        <p>Upload Time: {{ p.upload_time }}</p>
-        {% endif %}
-        <div class="card-actions">
-          <a href="/download/{{ p.name }}/{{ p.version }}" class="btn">Download</a>
-          <a href="/rate?name={{ p.name }}" class="btn">Rate</a>
-          <a href="/size-cost?name={{ p.name }}" class="btn">Size Cost</a>
+      <article class="card" role="listitem" aria-labelledby="package-{{ loop.index }}-name">
+        <h3 id="package-{{ loop.index }}-name">{{ p.name }}</h3>
+        <dl>
+          <dt class="sr-only">Version</dt>
+          <dd>Version: <span aria-label="Package version">{{ p.version }}</span></dd>
+          {% if p.id %}
+          <dt class="sr-only">Package ID</dt>
+          <dd>ID: <span aria-label="Package artifact ID" class="package-id">{{ p.id }}</span></dd>
+          {% endif %}
+          {% if p.size %}
+          <dt class="sr-only">Size</dt>
+          <dd>Size: {{ p.size }} bytes</dd>
+          {% endif %}
+          {% if p.upload_time %}
+          <dt class="sr-only">Upload Time</dt>
+          <dd>Upload Time: {{ p.upload_time }}</dd>
+          {% endif %}
+        </dl>
+        <div class="card-actions" role="group" aria-label="Actions for {{ p.name }}">
+          <a href="/download/{{ p.name|pathencode }}/{{ p.version|pathencode }}" class="btn" aria-label="Download {{ p.name }} version {{ p.version }}">Down<br>load</a>
+          <a href="/rate?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="Rate {{ p.name }}">Rate</a>
+          <a href="/size-cost?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="View size and cost for {{ p.name }}">Size<br>Cost</a>
         </div>
-      </div>
+      </article>
     {% else %}
-      <div class="no-results">
+      <div class="no-results" role="status" aria-live="polite">
         <p>No packages found.</p>
         {% if q or name_regex or model_regex or version_range or version %}
           <p>Try adjusting your search criteria or <a href="/directory">view all packages</a>.</p>
@@ -147,10 +166,11 @@
   border-left: 4px solid #007bff;
 }
 
-.search-help h4 {
+.search-help h2 {
   margin-top: 0;
   margin-bottom: 0.5rem;
   color: #495057;
+  font-size: 1.1rem;
 }
 
 .search-help ul {
@@ -240,6 +260,35 @@
   color: #666;
 }
 
+/* Screen reader only text (WCAG 1.3.1) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.card-actions .btn {
+  flex: 0 1 auto;
+  min-width: fit-content;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   .form-row {
     grid-template-columns: 1fr;
@@ -252,6 +301,14 @@
   
   .search-group label {
     min-width: auto;
+  }
+  
+  .card-actions {
+    flex-direction: column;
+  }
+  
+  .card-actions .btn {
+    width: 100%;
   }
 }
 </style>

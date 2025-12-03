@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.2"
+    }
   }
 
   backend "s3" {
@@ -82,6 +86,13 @@ module "cloudfront" {
   aws_region   = var.aws_region
 }
 
+# Lambda module for performance testing (minimal - just creates function and IAM role)
+module "lambda" {
+  source           = "../../modules/lambda"
+  artifacts_bucket = local.artifacts_bucket
+  aws_region       = var.aws_region
+}
+
 output "artifacts_bucket" { value = local.artifacts_bucket }
 output "group106_policy_arn" { value = module.iam.group106_policy_arn }
 output "ddb_tables" { value = local.ddb_tables_arnmap }
@@ -93,3 +104,5 @@ output "api_gateway_endpoints" { value = module.api_gateway.api_endpoints }
 output "cloudfront_url" { value = module.cloudfront.cloudfront_url }
 output "cloudfront_domain_name" { value = module.cloudfront.cloudfront_domain_name }
 output "cloudfront_distribution_id" { value = module.cloudfront.cloudfront_distribution_id }
+output "lambda_function_arn" { value = module.lambda.lambda_function_arn }
+output "lambda_function_name" { value = module.lambda.lambda_function_name }

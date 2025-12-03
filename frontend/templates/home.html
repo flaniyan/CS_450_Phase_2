@@ -1,18 +1,24 @@
 {% extends 'base.html' %}
+{% block title %}Welcome - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Welcome to ACME Registry</h1>
-  <p>A trustworthy package management system with built-in quality metrics.</p>
-  <div class="actions">
-    <a class="btn" href="/directory">Browse Directory</a>
-    <a class="btn" href="/upload">Upload Package</a>
+  <p>A trustworthy package management system with built-in quality metrics for machine learning models.</p>
+  <div class="actions" role="group" aria-label="Quick actions">
+    <a class="btn" href="/directory" aria-label="Browse the package directory">Browse Directory</a>
+    <a class="btn" href="/upload" aria-label="Upload a new package">Upload Package</a>
   </div>
-  <ul>
-    <li>Upload and manage package files</li>
-    <li>Check package ratings and quality metrics</li>
-    <li>Search and download packages</li>
-    <li>ADA-compliant and accessible interface</li>
-  </ul>
+  <section aria-labelledby="features-heading">
+    <h2 id="features-heading">Features</h2>
+    <ul>
+      <li>Upload and manage machine learning model packages</li>
+      <li>Check package ratings and quality metrics</li>
+      <li>Search and download packages</li>
+      <li>View model lineage and dependencies</li>
+      <li>Check license compatibility</li>
+      <li>WCAG 2.1 Level AA compliant and accessible interface</li>
+    </ul>
+  </section>
 </section>
 {% endblock %}
 

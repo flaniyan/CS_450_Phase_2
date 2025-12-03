@@ -1,23 +1,67 @@
 {% extends 'base.html' %}
+{% block title %}Size Cost Calculator - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Size Cost Calculator</h1>
+  <p>Calculate the storage size and download cost for model weights and datasets.</p>
   
   <form method="get" aria-label="Get model size cost">
-    <input type="text" name="name" value="{{ name }}" placeholder="Enter model name" aria-label="Model name" required />
-    <button class="btn" type="submit">Get Size Cost</button>
+    <div class="form-group">
+      <label for="size-name-input" class="required">Model Name or ID:</label>
+      <input 
+        type="text" 
+        name="name" 
+        id="size-name-input" 
+        value="{{ name }}" 
+        placeholder="Enter model name or ID" 
+        aria-label="Model name or ID"
+        aria-describedby="size-name-help"
+        required 
+      />
+      <span id="size-name-help" class="sr-only">Enter the model name or artifact ID to calculate size</span>
+    </div>
+    <div class="form-group">
+      <label for="size-id-input">Model ID (optional):</label>
+      <input 
+        type="text" 
+        name="id" 
+        id="size-id-input" 
+        value="{{ id }}" 
+        placeholder="Enter model ID" 
+        aria-label="Model ID (optional)"
+      />
+    </div>
+    <div class="form-group">
+      <label for="size-version-input">Version (optional):</label>
+      <input 
+        type="text" 
+        name="version" 
+        id="size-version-input" 
+        value="{{ version }}" 
+        placeholder="e.g., 1.0.0 or main"
+        aria-label="Model version (optional)"
+      />
+    </div>
+    <button class="btn" type="submit" aria-label="Get model size cost">Get Size Cost</button>
   </form>
 
   {% if size_data %}
     {% if size_data.error %}
-      <div class="card error">
+      <div class="card error" role="alert" aria-live="assertive">
         <h2>Error</h2>
         <p>{{ size_data.error }}</p>
       </div>
     {% else %}
-      <div class="card" style="text-align: center;">
-        <h2>Model Size Breakdown</h2>
-        <p><strong>Model ID:</strong> {{ size_data.model_id }}</p>
+      <div class="card" role="region" aria-labelledby="size-heading">
+        <h2 id="size-heading">Model Size Breakdown</h2>
+        <dl>
+          <dt>Model ID:</dt>
+          <dd>{{ size_data.model_id }}</dd>
+          {% if size_data.model_name %}
+          <dt>Model Name:</dt>
+          <dd>{{ size_data.model_name }}</dd>
+          {% endif %}
+        </dl>
         
         {% macro format_size(bytes) %}
           {% if bytes >= 1073741824 %}
@@ -31,28 +75,28 @@
           {% endif %}
         {% endmacro %}
         
-        <div class="size-grid">
-          <div class="size-card">
+        <div class="size-grid" role="list" aria-label="Model size breakdown">
+          <div class="size-card" role="listitem">
             <h3>Full Model</h3>
-            <p class="size-value">{{ format_size(size_data.full_size) }}</p>
+            <p class="size-value" aria-label="Full model size">{{ format_size(size_data.full_size) }}</p>
             <p class="size-note">Compressed ZIP</p>
-            <a href="/download/{{ size_data.model_id }}/1.0.0?component=full" class="btn">Download Full</a>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=full" class="btn" aria-label="Download full model">Download Full</a>
           </div>
           
-          <div class="size-card">
+          <div class="size-card" role="listitem">
             <h3>Weights Only</h3>
-            <p class="size-value">{{ format_size(size_data.weights_size) }}</p>
+            <p class="size-value" aria-label="Weights size">{{ format_size(size_data.weights_size) }}</p>
             <p class="size-note">Compressed: {{ format_size(size_data.weights_size) }}</p>
             <p class="size-note">Uncompressed: {{ format_size(size_data.weights_uncompressed) }}</p>
-            <a href="/download/{{ size_data.model_id }}/1.0.0?component=weights" class="btn">Download Weights</a>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=weights" class="btn" aria-label="Download model weights">Download Weights</a>
           </div>
           
-          <div class="size-card">
+          <div class="size-card" role="listitem">
             <h3>Datasets Only</h3>
-            <p class="size-value">{{ format_size(size_data.datasets_size) }}</p>
+            <p class="size-value" aria-label="Datasets size">{{ format_size(size_data.datasets_size) }}</p>
             <p class="size-note">Compressed: {{ format_size(size_data.datasets_size) }}</p>
             <p class="size-note">Uncompressed: {{ format_size(size_data.datasets_uncompressed) }}</p>
-            <a href="/download/{{ size_data.model_id }}/1.0.0?component=datasets" class="btn">Download Datasets</a>
+            <a href="/download/{{ size_data.model_id }}/1.0.0?component=datasets" class="btn" aria-label="Download datasets">Download Datasets</a>
           </div>
         </div>
       </div>
@@ -125,6 +169,28 @@
 
 .size-breakdown li:last-child {
   border-bottom: none;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.required::after {
+  content: " *";
+  color: #dc2626;
+  font-weight: bold;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 </style>
 {% endblock %}

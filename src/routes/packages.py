@@ -1,10 +1,36 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import Optional
 import io
 import re
+import asyncio
+import os
+import json
+import base64
+from concurrent.futures import ThreadPoolExecutor
 from botocore.exceptions import ClientError
+import boto3
+
+# Custom thread pool executor for S3 operations to handle high concurrency
+# Use max_workers=100 to match our load test requirements
+_s3_executor = ThreadPoolExecutor(max_workers=100, thread_name_prefix="s3_download")
+
+# Compute backend configuration
+COMPUTE_BACKEND = os.getenv("COMPUTE_BACKEND", "ecs").lower()  # Default to ECS
+LAMBDA_FUNCTION_NAME = os.getenv("LAMBDA_FUNCTION_NAME", "model-download-handler")
+
+# Initialize Lambda client if using Lambda backend
+_lambda_client = None
+if COMPUTE_BACKEND == "lambda":
+    try:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        _lambda_client = boto3.client("lambda", region_name=region)
+        print(f"[PERF] Lambda backend enabled: {LAMBDA_FUNCTION_NAME}")
+    except Exception as e:
+        print(f"[PERF] Warning: Failed to initialize Lambda client: {e}, falling back to ECS")
+        COMPUTE_BACKEND = "ecs"
+
 from ..services.s3_service import (
     upload_model,
     download_model,
@@ -21,14 +47,37 @@ router = APIRouter()
 
 @router.get("/rate/{name}")
 def rate_package(name: str):
+    """
+    Rate a package/model by name.
+    
+    This endpoint is called concurrently by the autograder's "Rate Models Concurrently" test.
+    If using Lambda backend, ensure Lambda has sufficient reserved concurrent executions
+    (recommended: 100+) to handle concurrent requests without throttling.
+    """
+    import logging
+    import time
+    import threading
+    
+    logger = logging.getLogger(__name__)
+    request_id = f"{threading.current_thread().ident}-{int(time.time() * 1000)}"
+    start_time = time.time()
+    
+    logger.info(f"[RATE] Starting rating request for '{name}' (request_id={request_id})")
+    
     try:
         from ..services.rating import run_scorer
 
         result = run_scorer(name)
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RATE] Successfully rated '{name}' in {elapsed_time:.2f}s (request_id={request_id})")
         return result
-    except HTTPException:
+    except HTTPException as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[RATE] HTTPException rating '{name}' after {elapsed_time:.2f}s: {e.detail} (request_id={request_id})")
         raise
     except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[RATE] Exception rating '{name}' after {elapsed_time:.2f}s: {str(e)} (request_id={request_id})", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to rate package: {str(e)}")
 
 
@@ -156,7 +205,7 @@ def download_model_file(
     ),
 ):
     try:
-        file_content = download_model(model_id, version, component)
+        file_content = download_model(model_id, version, component, use_performance_path=False)
         return StreamingResponse(
             io.BytesIO(file_content),
             media_type="application/zip",
@@ -171,6 +220,159 @@ def download_model_file(
         if error_code == "NoSuchKey":
             raise HTTPException(
                 status_code=404, detail=f"Model {model_id} version {version} not found"
+            )
+        elif error_code == "NoSuchBucket":
+            raise HTTPException(status_code=500, detail="S3 bucket not found")
+        elif error_code == "AccessDenied":
+            raise HTTPException(status_code=500, detail="Access denied to S3 bucket")
+        else:
+            raise HTTPException(status_code=500, detail=f"S3 error: {error_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+def _invoke_lambda_download(model_id: str, version: str, component: str) -> bytes:
+    """
+    Invoke Lambda function to download model from S3.
+    
+    Args:
+        model_id: Model ID
+        version: Model version
+        component: Component to download
+        
+    Returns:
+        File content as bytes
+    """
+    if not _lambda_client:
+        raise HTTPException(status_code=500, detail="Lambda client not initialized")
+    
+    # Prepare Lambda event (API Gateway format)
+    event = {
+        "pathParameters": {
+            "model_id": model_id,
+            "version": version
+        },
+        "queryStringParameters": {
+            "component": component,
+            "path_prefix": "performance"
+        }
+    }
+    
+    try:
+        # Invoke Lambda function
+        response = _lambda_client.invoke(
+            FunctionName=LAMBDA_FUNCTION_NAME,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(event)
+        )
+        
+        # Check for Lambda throttling (429 errors)
+        if "FunctionError" in response:
+            error_type = response.get("FunctionError", "Unknown")
+            if error_type == "Unhandled" or "TooManyRequestsException" in str(response):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Lambda concurrency limit exceeded. Check reserved concurrent executions setting."
+                )
+        
+        # Parse Lambda response
+        lambda_response = json.loads(response["Payload"].read())
+        
+        # Check for errors
+        if lambda_response.get("statusCode") != 200:
+            error_detail = json.loads(lambda_response.get("body", "{}")).get("detail", "Lambda invocation failed")
+            # Check for throttling errors
+            if "Rate exceeded" in error_detail or "concurrent executions" in error_detail.lower():
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Lambda throttling: {error_detail}. Increase reserved concurrent executions."
+                )
+            raise HTTPException(
+                status_code=lambda_response.get("statusCode", 500),
+                detail=error_detail
+            )
+        
+        # Decode base64-encoded file content
+        file_content_b64 = lambda_response.get("body", "")
+        file_content = base64.b64decode(file_content_b64)
+        
+        return file_content
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "TooManyRequestsException" or "Rate exceeded" in str(e):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Lambda throttling: {str(e)}. Check Lambda reserved concurrent executions (should be >= 14 for concurrent rating tests)."
+            )
+        print(f"[PERF] Lambda invocation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lambda invocation failed: {str(e)}")
+    except Exception as e:
+        print(f"[PERF] Lambda invocation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lambda invocation failed: {str(e)}")
+
+
+@router.get("/performance/{model_id}/{version}/model.zip")
+async def download_performance_model_file(
+    model_id: str,
+    version: str,
+    component: str = Query(
+        "full", description="Component to download: 'full', 'weights', or 'datasets'"
+    ),
+):
+    """
+    Download model from performance/ S3 path for performance testing.
+    Supports both ECS (FastAPI) and Lambda compute backends based on COMPUTE_BACKEND env var.
+    """
+    try:
+        print(f"[PERF] Received download request: model_id={model_id}, version={version}, backend={COMPUTE_BACKEND}")
+        
+        # Route to appropriate backend based on configuration
+        if COMPUTE_BACKEND == "lambda":
+            # Use Lambda backend
+            print(f"[PERF] Using Lambda backend: {LAMBDA_FUNCTION_NAME}")
+            loop = asyncio.get_event_loop()
+            file_content = await loop.run_in_executor(
+                _s3_executor,
+                _invoke_lambda_download,
+                model_id,
+                version,
+                component
+            )
+        else:
+            # Use ECS backend (default - existing FastAPI implementation)
+            print(f"[PERF] Using ECS backend")
+            loop = asyncio.get_event_loop()
+            file_content = await loop.run_in_executor(
+                _s3_executor,
+                download_model,
+                model_id,
+                version,
+                component,
+                True  # use_performance_path=True
+            )
+        
+        print(f"[PERF] Download successful: model_id={model_id}, size={len(file_content)} bytes, backend={COMPUTE_BACKEND}")
+        
+        # Return Response directly since we already have the full content in memory
+        from fastapi.responses import Response
+        return Response(
+            content=file_content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename={model_id}_{version}_{component}.zip",
+                "Content-Length": str(len(file_content))
+            },
+        )
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code == "NoSuchKey":
+            raise HTTPException(
+                status_code=404, detail=f"Model {model_id} version {version} not found in performance/ path"
             )
         elif error_code == "NoSuchBucket":
             raise HTTPException(status_code=500, detail="S3 bucket not found")

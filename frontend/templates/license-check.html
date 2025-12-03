@@ -1,64 +1,97 @@
 {% extends 'base.html' %}
+{% block title %}License Compatibility Check - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>License Compatibility Check</h1>
   <p>Check if a model's license is compatible with a GitHub repository's license for fine-tuning and inference use.</p>
   
-  <form id="licenseCheckForm" method="post" aria-label="License compatibility check">
-    <label for="model_id">Model ID <span style="color: red;">*</span></label>
-    <input 
-      id="model_id" 
-      type="text" 
-      name="model_id" 
-      placeholder="e.g., gpt2, bert-base-uncased" 
-      value="{{ model_id or '' }}"
-      required 
-      aria-label="Model ID"
-    />
+  <form id="licenseCheckForm" method="post" aria-label="License compatibility check" novalidate>
+    <div class="form-group">
+      <label for="model_id" class="required">Model ID:</label>
+      <input 
+        id="model_id" 
+        type="text" 
+        name="id" 
+        placeholder="e.g., gpt2, bert-base-uncased, or artifact ID" 
+        value="{{ id or '' }}"
+        required 
+        aria-label="Model ID"
+        aria-describedby="model-id-help"
+        aria-invalid="{% if result and result.error %}true{% else %}false{% endif %}"
+      />
+      <span id="model-id-help" class="help-text">Enter the model name or artifact ID</span>
+      {% if result and result.error and 'model' in result.error.lower() %}
+        <span class="error-message" id="model-id-error" role="alert">{{ result.error }}</span>
+      {% endif %}
+    </div>
     
-    <label for="github_url">GitHub Repository URL <span style="color: red;">*</span></label>
-    <input 
-      id="github_url" 
-      type="url" 
-      name="github_url" 
-      placeholder="https://github.com/owner/repo" 
-      value="{{ github_url or '' }}"
-      required 
-      aria-label="GitHub repository URL"
-    />
+    <div class="form-group">
+      <label for="github_url" class="required">GitHub Repository URL:</label>
+      <input 
+        id="github_url" 
+        type="url" 
+        name="github_url" 
+        placeholder="https://github.com/owner/repo" 
+        value="{{ github_url or '' }}"
+        required 
+        aria-label="GitHub repository URL"
+        aria-describedby="github-url-help"
+        aria-invalid="{% if result and result.error and 'github' in result.error.lower() %}true{% else %}false{% endif %}"
+      />
+      <span id="github-url-help" class="help-text">Enter the full GitHub repository URL</span>
+      {% if result and result.error and 'github' in result.error.lower() %}
+        <span class="error-message" id="github-url-error" role="alert">{{ result.error }}</span>
+      {% endif %}
+    </div>
     
-    <label for="use_case">Use Case (optional)</label>
-    <select id="use_case" name="use_case" aria-label="Use case">
-      <option value="fine-tune+inference" {% if use_case == 'fine-tune+inference' or not use_case %}selected{% endif %}>Fine-tune + Inference</option>
-      <option value="inference" {% if use_case == 'inference' %}selected{% endif %}>Inference Only</option>
-      <option value="fine-tune" {% if use_case == 'fine-tune' %}selected{% endif %}>Fine-tune Only</option>
-    </select>
+    <div class="form-group">
+      <label for="use_case">Use Case:</label>
+      <select 
+        id="use_case" 
+        name="use_case" 
+        aria-label="Use case"
+        aria-describedby="use-case-help"
+      >
+        <option value="fine-tune+inference" {% if result and result.use_case == 'fine-tune+inference' or not result %}selected{% endif %}>Fine-tune + Inference</option>
+        <option value="inference" {% if result and result.use_case == 'inference' %}selected{% endif %}>Inference Only</option>
+        <option value="fine-tune" {% if result and result.use_case == 'fine-tune' %}selected{% endif %}>Fine-tune Only</option>
+      </select>
+      <span id="use-case-help" class="help-text">Select the intended use case for license compatibility checking</span>
+    </div>
     
-    <button class="btn" type="submit">Check Compatibility</button>
+    <button class="btn" type="submit" aria-label="Check license compatibility">Check Compatibility</button>
   </form>
 
   {% if result %}
-    <div class="card" style="margin-top: 24px;">
-      <h2>Compatibility Result</h2>
+    <div class="card" role="region" aria-labelledby="result-heading" style="margin-top: 24px;">
+      <h2 id="result-heading">Compatibility Result</h2>
       
-      {% if result.compatible %}
-        <div class="flash success" style="margin-bottom: 16px;">
-          <strong>✓ Compatible</strong> - The licenses are compatible for your use case.
+      {% if result.error %}
+        <div class="flash error" role="alert" aria-live="assertive" style="margin-bottom: 16px;">
+          <strong>Error:</strong> {{ result.error }}
+        </div>
+      {% elif result.compatible %}
+        <div class="flash success" role="status" aria-live="polite" style="margin-bottom: 16px;">
+          <strong aria-label="Compatible">✓ Compatible</strong> - The licenses are compatible for your use case.
         </div>
       {% else %}
-        <div class="flash error" style="margin-bottom: 16px;">
-          <strong>✗ Not Compatible</strong> - License compatibility issues detected.
+        <div class="flash error" role="alert" aria-live="assertive" style="margin-bottom: 16px;">
+          <strong aria-label="Not Compatible">✗ Not Compatible</strong> - License compatibility issues detected.
         </div>
       {% endif %}
       
+      {% if not result.error %}
       <div style="display: grid; gap: 16px; margin-top: 16px;">
         <div>
           <h3>Licenses</h3>
-          <ul style="margin: 8px 0;">
-            <li><strong>Model License:</strong> {{ result.model_license or 'unknown' }}</li>
-            <li><strong>GitHub License:</strong> {{ result.github_license or 'unknown' }}</li>
-            <li><strong>Use Case:</strong> {{ result.use_case or 'fine-tune+inference' }}</li>
-          </ul>
+          <dl>
+            <dt>Model License:</dt>
+            <dd>{{ result.model_license or 'unknown' }}</dd>
+            <dt>GitHub License:</dt>
+            <dd>{{ result.github_license or 'unknown' }}</dd>
+            <dt>Use Case:</dt>
+            <dd>{{ result.use_case or 'fine-tune+inference' }}</dd>
+          </dl>
         </div>
         
         <div>
@@ -77,13 +110,40 @@
           </div>
         {% endif %}
       </div>
+      {% endif %}
     </div>
   {% elif error %}
-    <div class="flash error" style="margin-top: 24px;">
+    <div class="flash error" role="alert" aria-live="assertive" style="margin-top: 24px;">
       <strong>Error:</strong> {{ error }}
     </div>
   {% endif %}
 </section>
+
+<style>
+.form-group {
+  margin-bottom: 20px;
+}
+
+.required::after {
+  content: " *";
+  color: #dc2626;
+  font-weight: bold;
+}
+
+.help-text {
+  display: block;
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.error-message {
+  color: #dc2626;
+  font-size: 0.875rem;
+  margin-top: 4px;
+  display: block;
+}
+</style>
 
 <script>
 document.getElementById('licenseCheckForm').addEventListener('submit', async function(e) {
@@ -92,46 +152,85 @@ document.getElementById('licenseCheckForm').addEventListener('submit', async fun
   const modelId = document.getElementById('model_id').value.trim();
   const githubUrl = document.getElementById('github_url').value.trim();
   const useCase = document.getElementById('use_case').value;
+  const modelIdInput = document.getElementById('model_id');
+  const githubUrlInput = document.getElementById('github_url');
   
-  if (!modelId || !githubUrl) {
-    alert('Please fill in both Model ID and GitHub URL');
+  // Clear previous errors
+  modelIdInput.setAttribute('aria-invalid', 'false');
+  githubUrlInput.setAttribute('aria-invalid', 'false');
+  const existingErrors = document.querySelectorAll('.error-message');
+  existingErrors.forEach(err => err.remove());
+  
+  // Validate inputs
+  let hasError = false;
+  if (!modelId) {
+    modelIdInput.setAttribute('aria-invalid', 'true');
+    const error = document.createElement('span');
+    error.className = 'error-message';
+    error.id = 'model-id-error';
+    error.setAttribute('role', 'alert');
+    error.textContent = 'Model ID is required';
+    modelIdInput.parentNode.appendChild(error);
+    hasError = true;
+  }
+  
+  if (!githubUrl) {
+    githubUrlInput.setAttribute('aria-invalid', 'true');
+    const error = document.createElement('span');
+    error.className = 'error-message';
+    error.id = 'github-url-error';
+    error.setAttribute('role', 'alert');
+    error.textContent = 'GitHub URL is required';
+    githubUrlInput.parentNode.appendChild(error);
+    hasError = true;
+  }
+  
+  if (hasError) {
+    // Focus on first error
+    if (!modelId) {
+      modelIdInput.focus();
+    } else {
+      githubUrlInput.focus();
+    }
     return false;
   }
   
   const submitButton = this.querySelector('button[type="submit"]');
   const originalText = submitButton.textContent;
   submitButton.disabled = true;
+  submitButton.setAttribute('aria-busy', 'true');
   submitButton.textContent = 'Checking...';
   
   try {
-    const response = await fetch(`/artifact/model/${encodeURIComponent(modelId)}/license-check`, {
+    const response = await fetch(`/license-check`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
+      body: new URLSearchParams({
+        id: modelId,
         github_url: githubUrl,
         use_case: useCase
       })
     });
     
-    const data = await response.json();
-    
     if (!response.ok) {
-      throw new Error(data.error || data.detail || 'Failed to check license compatibility');
+      const errorData = await response.json().catch(() => ({ error: 'Failed to check license compatibility' }));
+      throw new Error(errorData.error || errorData.detail || 'Failed to check license compatibility');
     }
     
-    // Reload page with result
-    const params = new URLSearchParams({
-      model_id: modelId,
-      github_url: githubUrl,
-      use_case: useCase,
-      result: JSON.stringify(data)
-    });
-    window.location.href = `/license-check?${params.toString()}`;
+    // Reload page to show result
+    window.location.href = `/license-check?id=${encodeURIComponent(modelId)}&github_url=${encodeURIComponent(githubUrl)}`;
   } catch (error) {
-    alert(`Error: ${error.message}`);
+    // Show error in accessible way
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'flash error';
+    errorDiv.setAttribute('role', 'alert');
+    errorDiv.setAttribute('aria-live', 'assertive');
+    errorDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+    this.parentNode.insertBefore(errorDiv, this.nextSibling);
     submitButton.disabled = false;
+    submitButton.removeAttribute('aria-busy');
     submitButton.textContent = originalText;
   }
 });

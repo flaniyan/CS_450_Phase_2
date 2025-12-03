@@ -1,10 +1,35 @@
 {% extends 'base.html' %}
+{% block title %}Admin Panel - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Admin Panel</h1>
-  <p>This action will reset the entire registry system state.</p>
-  <form method="post" action="/admin/reset" onsubmit="return confirm('Are you sure you want to reset the registry? This action cannot be undone.')">
-    <button class="btn btn-danger" type="submit">Reset Registry</button>
+  <div class="card" role="alert">
+    <h2>Warning</h2>
+    <p><strong>This action will reset the entire registry system state.</strong> All packages, metadata, and ratings will be permanently deleted. This action cannot be undone.</p>
+  </div>
+  <form method="post" action="/admin/reset" aria-label="Reset registry">
+    <div class="form-group">
+      <label for="confirm-reset" class="required">
+        <input 
+          type="checkbox" 
+          id="confirm-reset" 
+          name="confirm" 
+          required
+          aria-required="true"
+          aria-describedby="confirm-help"
+        />
+        I understand this action cannot be undone
+      </label>
+      <span id="confirm-help" class="help-text">You must check this box to confirm you understand the consequences</span>
+    </div>
+    <button 
+      class="btn btn-danger" 
+      type="submit"
+      aria-label="Reset the entire registry"
+      onclick="return confirm('Are you absolutely sure you want to reset the registry? This will delete all packages, metadata, and ratings. This action cannot be undone.');"
+    >
+      Reset Registry
+    </button>
   </form>
 </section>
 {% endblock %}

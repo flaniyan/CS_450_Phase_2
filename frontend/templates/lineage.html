@@ -1,22 +1,66 @@
 {% extends 'base.html' %}
+{% block title %}Model Lineage - ACME Registry{% endblock %}
 {% block content %}
 <section class="container">
   <h1>Model Lineage</h1>
+  <p>View the dependency relationships and lineage graph for a machine learning model.</p>
+  
   <form method="get" aria-label="Get model lineage">
-    <input type="text" name="name" value="{{ name }}" placeholder="Enter model name" aria-label="Model name" />
-    <button class="btn" type="submit">Get Lineage</button>
+    <div class="form-group">
+      <label for="lineage-name-input">Model Name or ID:</label>
+      <input 
+        type="text" 
+        name="name" 
+        id="lineage-name-input" 
+        value="{{ name }}" 
+        placeholder="Enter model name or ID" 
+        aria-label="Model name or ID"
+        aria-describedby="lineage-name-help"
+      />
+      <span id="lineage-name-help" class="sr-only">Enter the model name or artifact ID to view lineage</span>
+    </div>
+    <div class="form-group">
+      <label for="lineage-id-input">Model ID (optional):</label>
+      <input 
+        type="text" 
+        name="id" 
+        id="lineage-id-input" 
+        value="{{ id }}" 
+        placeholder="Enter model ID" 
+        aria-label="Model ID (optional)"
+      />
+    </div>
+    <div class="form-group">
+      <label for="lineage-version-input">Version (optional):</label>
+      <input 
+        type="text" 
+        name="version" 
+        id="lineage-version-input" 
+        value="{{ version }}" 
+        placeholder="e.g., 1.0.0 or main"
+        aria-label="Model version (optional)"
+      />
+    </div>
+    <button class="btn" type="submit" aria-label="Get model lineage">Get Lineage</button>
   </form>
 
   {% if lineage %}
     {% if lineage.error %}
-      <div class="card error">
+      <div class="card error" role="alert" aria-live="assertive">
         <h2>Error</h2>
         <p>{{ lineage.error }}</p>
       </div>
     {% else %}
-      <div class="card">
-        <h2>Lineage Information</h2>
-        <p><strong>Model ID:</strong> {{ lineage.model_id }}</p>
+      <div class="card" role="region" aria-labelledby="lineage-heading">
+        <h2 id="lineage-heading">Lineage Information</h2>
+        <dl>
+          <dt>Model ID:</dt>
+          <dd>{{ lineage.model_id }}</dd>
+          {% if lineage.model_name %}
+          <dt>Model Name:</dt>
+          <dd>{{ lineage.model_name }}</dd>
+          {% endif %}
+        </dl>
         
         {% if lineage.lineage_metadata %}
           <h3>Base Model Information</h3>
@@ -114,16 +158,33 @@ input[type="text"] {
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
+  padding: 10px 16px;
   background: #007bff;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  display: inline-block;
+  text-decoration: none;
+  font-weight: 600;
+  transition: background-color 0.2s, transform 0.1s;
+  min-height: 44px; /* WCAG 2.5.5 - Target size */
+  min-width: fit-content;
+  white-space: nowrap;
+  font-size: 0.9rem;
 }
 
 .btn:hover {
   background: #0056b3;
+}
+
+.btn:focus {
+  outline: 3px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 2px;
+}
+
+.btn:active {
+  transform: scale(0.98);
 }
 
 p {
