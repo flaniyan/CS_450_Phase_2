@@ -333,15 +333,35 @@ def register_routes(app: FastAPI):
                     model_id = artifact.get("id")
                     break
         
+        # Use model_id as cache key if available, otherwise use model_name
+        cache_key = model_id if model_id else model_name
+        
         if model_name:
             try:
-                # Use analyze_model_content directly (same as index.py fallback)
-                rating_raw = analyze_model_content(model_name)
+                # Check cache first (same as index.py)
+                rating_raw = None
+                if cache_key and cache_key in _rating_status:
+                    status = _rating_status[cache_key]
+                    if status == "completed":
+                        rating_raw = _rating_results.get(cache_key)
+                        if rating_raw:
+                            logger.info(f"[RATE] Using cached rating for {cache_key}")
+                
+                # If not cached, compute rating
                 if not rating_raw:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="The artifact rating system encountered an error while computing at least one metric.",
-                    )
+                    logger.info(f"[RATE] Computing rating for {model_name} (cache_key={cache_key})")
+                    rating_raw = analyze_model_content(model_name)
+                    if not rating_raw:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="The artifact rating system encountered an error while computing at least one metric.",
+                        )
+                    # Cache the result if we have a cache key
+                    if cache_key:
+                        with _rating_lock:
+                            _rating_results[cache_key] = rating_raw
+                            _rating_status[cache_key] = "completed"
+                
                 rating = _build_rating_response(model_name, rating_raw)
                 # Add model ID to rating if available
                 if model_id:
