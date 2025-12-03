@@ -105,9 +105,9 @@
           {% endif %}
         </dl>
         <div class="card-actions" role="group" aria-label="Actions for {{ p.name }}">
-          <a href="/download/{{ p.name|pathencode }}/{{ p.version|pathencode }}" class="btn" aria-label="Download {{ p.name }} version {{ p.version }}">Download</a>
+          <a href="/download/{{ p.name|pathencode }}/{{ p.version|pathencode }}" class="btn" aria-label="Download {{ p.name }} version {{ p.version }}">Down<br>load</a>
           <a href="/rate?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="Rate {{ p.name }}">Rate</a>
-          <a href="/size-cost?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="View size and cost for {{ p.name }}">Size Cost</a>
+          <a href="/size-cost?name={{ p.name|urlencode }}{% if p.id %}&id={{ p.id|urlencode }}{% endif %}" class="btn" aria-label="View size and cost for {{ p.name }}">Size<br>Cost</a>
         </div>
       </article>
     {% else %}
@@ -282,9 +282,10 @@
 .card-actions .btn {
   flex: 0 1 auto;
   min-width: fit-content;
-  white-space: nowrap;
   padding: 10px 16px;
   font-size: 0.9rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 @media (max-width: 768px) {
